@@ -13,3 +13,9 @@ tab_width = 4
 # This test note must end on its table's last row, with no newline after it.
 [test-vault/Selectable Tables Test/Table last.md]
 insert_final_newline = false
+
+# Obsidian rewrites its own config this way whenever the test vault is open.
+[test-vault/*/.obsidian/*.json]
+indent_style = space
+indent_size = 2
+insert_final_newline = false

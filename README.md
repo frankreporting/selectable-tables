@@ -6,6 +6,35 @@ Without it, every arrow press that lands in a table opens an editor for that cel
 
 The plugin is in development and not yet in the community plugin list.
 
+## Keys
+
+It works on every table Obsidian draws as a table in Live Preview. Source mode, Reading view, and tables inside callouts or list items (which Obsidian doesn't draw as tables in the editor) are left as they are.
+
+**Next to a table** (the caret on the line just above or just below it):
+
+| Key | What happens |
+| -- | -- |
+| ↓ from the line above, ↑ from the line below | The caret passes the table and lands on the line beyond it, at the same horizontal position. No cell opens. |
+| → at the end of the line above, ← at the start of the line below | Selects the whole table, the way ← and → select an image. |
+| Shift with an arrow | The selection takes the whole table at once. |
+| ↓ or ↑ with no line beyond the table (it starts or ends the note, or sits right below the properties) | Left to Obsidian, as without the plugin. Obsidian keeps a blank line around the tables it makes, so this only happens in notes written elsewhere. |
+
+**With a table selected:**
+
+| Key | What happens |
+| -- | -- |
+| ↓ or → | The caret goes to the start of the line below. |
+| ↑ or ← | The caret goes to the end of the line above. |
+| Enter | Opens the first cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. |
+| Escape | The caret goes back to the side you selected the table from. |
+| Backspace, Delete, Cut | Remove the table, undoable. |
+| Copy | Copies the table's Markdown. |
+| Typing, Tab, Shift+Enter | Nothing happens, so a stray key can't change the table. Paste replaces it, undoable. |
+
+**In a cell**, Escape closes the cell and selects the whole table. Every other key works as Obsidian has it, and clicking a cell still edits it directly.
+
+With Vim mode on, Vim's own keys come first: in normal mode, j, k and the arrows still step into tables.
+
 ## Development
 
 Requires Node.js 22 or later.

@@ -1,0 +1,8 @@
+/* A selected table shows no caret, as Obsidian does for a selected image. */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-cursorLayer {
+	display: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-content {
+	caret-color: transparent;
+}

@@ -28,3 +28,6 @@ data.json
 test-vault/*/.obsidian/*
 !test-vault/*/.obsidian/app.json
 !test-vault/*/.obsidian/community-plugins.json
+
+# In-Obsidian check results (scripts/obsidian-check.js)
+test-vault/check-results.json

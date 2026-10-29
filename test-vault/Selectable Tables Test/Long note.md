@@ -53,14 +53,14 @@ Line 48: the orchard canvas meadow thistle and the willow lantern harbor pebble.
 Line 49: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 50: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| meadow | 11 | lantern | row 1 |
-| copper | 12 | meadow | row 2 |
-| harbor | 13 | copper | row 3 |
-| thistle | 14 | harbor | row 4 |
-| orchard | 15 | thistle | row 5 |
-| pebble | 16 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| meadow  | 11    | lantern | row 1 |
+| copper  | 12    | meadow  | row 2 |
+| harbor  | 13    | copper  | row 3 |
+| thistle | 14    | harbor  | row 4 |
+| orchard | 15    | thistle | row 5 |
+| pebble  | 16    | orchard | row 6 |
 
 Line 51: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 52: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -131,14 +131,14 @@ Line 113: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 114: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 115: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| copper | 21 | lantern | row 1 |
-| harbor | 22 | meadow | row 2 |
-| thistle | 23 | copper | row 3 |
-| orchard | 24 | harbor | row 4 |
-| pebble | 25 | thistle | row 5 |
-| willow | 26 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| copper  | 21    | lantern | row 1 |
+| harbor  | 22    | meadow  | row 2 |
+| thistle | 23    | copper  | row 3 |
+| orchard | 24    | harbor  | row 4 |
+| pebble  | 25    | thistle | row 5 |
+| willow  | 26    | orchard | row 6 |
 
 Line 116: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 117: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -209,14 +209,14 @@ Line 178: the orchard canvas meadow thistle and the willow lantern harbor pebble
 Line 179: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 180: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| harbor | 31 | lantern | row 1 |
-| thistle | 32 | meadow | row 2 |
-| orchard | 33 | copper | row 3 |
-| pebble | 34 | harbor | row 4 |
-| willow | 35 | thistle | row 5 |
-| canvas | 36 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| harbor  | 31    | lantern | row 1 |
+| thistle | 32    | meadow  | row 2 |
+| orchard | 33    | copper  | row 3 |
+| pebble  | 34    | harbor  | row 4 |
+| willow  | 35    | thistle | row 5 |
+| canvas  | 36    | orchard | row 6 |
 
 Line 181: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 182: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -287,14 +287,14 @@ Line 243: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 244: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 245: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| thistle | 41 | lantern | row 1 |
-| orchard | 42 | meadow | row 2 |
-| pebble | 43 | copper | row 3 |
-| willow | 44 | harbor | row 4 |
-| canvas | 45 | thistle | row 5 |
-| river | 46 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| thistle | 41    | lantern | row 1 |
+| orchard | 42    | meadow  | row 2 |
+| pebble  | 43    | copper  | row 3 |
+| willow  | 44    | harbor  | row 4 |
+| canvas  | 45    | thistle | row 5 |
+| river   | 46    | orchard | row 6 |
 
 Line 246: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 247: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -365,14 +365,14 @@ Line 308: the orchard canvas meadow thistle and the willow lantern harbor pebble
 Line 309: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 310: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| orchard | 51 | lantern | row 1 |
-| pebble | 52 | meadow | row 2 |
-| willow | 53 | copper | row 3 |
-| canvas | 54 | harbor | row 4 |
-| river | 55 | thistle | row 5 |
-| lantern | 56 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| orchard | 51    | lantern | row 1 |
+| pebble  | 52    | meadow  | row 2 |
+| willow  | 53    | copper  | row 3 |
+| canvas  | 54    | harbor  | row 4 |
+| river   | 55    | thistle | row 5 |
+| lantern | 56    | orchard | row 6 |
 
 Line 311: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 312: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -443,14 +443,14 @@ Line 373: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 374: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 375: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| pebble | 61 | lantern | row 1 |
-| willow | 62 | meadow | row 2 |
-| canvas | 63 | copper | row 3 |
-| river | 64 | harbor | row 4 |
-| lantern | 65 | thistle | row 5 |
-| meadow | 66 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| pebble  | 61    | lantern | row 1 |
+| willow  | 62    | meadow  | row 2 |
+| canvas  | 63    | copper  | row 3 |
+| river   | 64    | harbor  | row 4 |
+| lantern | 65    | thistle | row 5 |
+| meadow  | 66    | orchard | row 6 |
 
 Line 376: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 377: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -521,14 +521,14 @@ Line 438: the orchard canvas meadow thistle and the willow lantern harbor pebble
 Line 439: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 440: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| willow | 71 | lantern | row 1 |
-| canvas | 72 | meadow | row 2 |
-| river | 73 | copper | row 3 |
-| lantern | 74 | harbor | row 4 |
-| meadow | 75 | thistle | row 5 |
-| copper | 76 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| willow  | 71    | lantern | row 1 |
+| canvas  | 72    | meadow  | row 2 |
+| river   | 73    | copper  | row 3 |
+| lantern | 74    | harbor  | row 4 |
+| meadow  | 75    | thistle | row 5 |
+| copper  | 76    | orchard | row 6 |
 
 Line 441: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 442: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -599,14 +599,14 @@ Line 503: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 504: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 505: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| canvas | 81 | lantern | row 1 |
-| river | 82 | meadow | row 2 |
-| lantern | 83 | copper | row 3 |
-| meadow | 84 | harbor | row 4 |
-| copper | 85 | thistle | row 5 |
-| harbor | 86 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| canvas  | 81    | lantern | row 1 |
+| river   | 82    | meadow  | row 2 |
+| lantern | 83    | copper  | row 3 |
+| meadow  | 84    | harbor  | row 4 |
+| copper  | 85    | thistle | row 5 |
+| harbor  | 86    | orchard | row 6 |
 
 Line 506: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 507: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -677,14 +677,14 @@ Line 568: the orchard canvas meadow thistle and the willow lantern harbor pebble
 Line 569: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 570: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| river | 91 | lantern | row 1 |
-| lantern | 92 | meadow | row 2 |
-| meadow | 93 | copper | row 3 |
-| copper | 94 | harbor | row 4 |
-| harbor | 95 | thistle | row 5 |
-| thistle | 96 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| river   | 91    | lantern | row 1 |
+| lantern | 92    | meadow  | row 2 |
+| meadow  | 93    | copper  | row 3 |
+| copper  | 94    | harbor  | row 4 |
+| harbor  | 95    | thistle | row 5 |
+| thistle | 96    | orchard | row 6 |
 
 Line 571: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 572: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -755,14 +755,14 @@ Line 633: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 634: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 635: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| lantern | 101 | lantern | row 1 |
-| meadow | 102 | meadow | row 2 |
-| copper | 103 | copper | row 3 |
-| harbor | 104 | harbor | row 4 |
-| thistle | 105 | thistle | row 5 |
-| orchard | 106 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| lantern | 101   | lantern | row 1 |
+| meadow  | 102   | meadow  | row 2 |
+| copper  | 103   | copper  | row 3 |
+| harbor  | 104   | harbor  | row 4 |
+| thistle | 105   | thistle | row 5 |
+| orchard | 106   | orchard | row 6 |
 
 Line 636: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 637: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -833,14 +833,14 @@ Line 698: the orchard canvas meadow thistle and the willow lantern harbor pebble
 Line 699: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 700: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| meadow | 111 | lantern | row 1 |
-| copper | 112 | meadow | row 2 |
-| harbor | 113 | copper | row 3 |
-| thistle | 114 | harbor | row 4 |
-| orchard | 115 | thistle | row 5 |
-| pebble | 116 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| meadow  | 111   | lantern | row 1 |
+| copper  | 112   | meadow  | row 2 |
+| harbor  | 113   | copper  | row 3 |
+| thistle | 114   | harbor  | row 4 |
+| orchard | 115   | thistle | row 5 |
+| pebble  | 116   | orchard | row 6 |
 
 Line 701: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 702: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -911,14 +911,14 @@ Line 763: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 764: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 765: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| copper | 121 | lantern | row 1 |
-| harbor | 122 | meadow | row 2 |
-| thistle | 123 | copper | row 3 |
-| orchard | 124 | harbor | row 4 |
-| pebble | 125 | thistle | row 5 |
-| willow | 126 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| copper  | 121   | lantern | row 1 |
+| harbor  | 122   | meadow  | row 2 |
+| thistle | 123   | copper  | row 3 |
+| orchard | 124   | harbor  | row 4 |
+| pebble  | 125   | thistle | row 5 |
+| willow  | 126   | orchard | row 6 |
 
 Line 766: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 767: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -989,14 +989,14 @@ Line 828: the orchard canvas meadow thistle and the willow lantern harbor pebble
 Line 829: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 830: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| harbor | 131 | lantern | row 1 |
-| thistle | 132 | meadow | row 2 |
-| orchard | 133 | copper | row 3 |
-| pebble | 134 | harbor | row 4 |
-| willow | 135 | thistle | row 5 |
-| canvas | 136 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| harbor  | 131   | lantern | row 1 |
+| thistle | 132   | meadow  | row 2 |
+| orchard | 133   | copper  | row 3 |
+| pebble  | 134   | harbor  | row 4 |
+| willow  | 135   | thistle | row 5 |
+| canvas  | 136   | orchard | row 6 |
 
 Line 831: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 832: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -1067,14 +1067,14 @@ Line 893: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 894: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 895: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| thistle | 141 | lantern | row 1 |
-| orchard | 142 | meadow | row 2 |
-| pebble | 143 | copper | row 3 |
-| willow | 144 | harbor | row 4 |
-| canvas | 145 | thistle | row 5 |
-| river | 146 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| thistle | 141   | lantern | row 1 |
+| orchard | 142   | meadow  | row 2 |
+| pebble  | 143   | copper  | row 3 |
+| willow  | 144   | harbor  | row 4 |
+| canvas  | 145   | thistle | row 5 |
+| river   | 146   | orchard | row 6 |
 
 Line 896: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 897: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -1145,14 +1145,14 @@ Line 958: the orchard canvas meadow thistle and the willow lantern harbor pebble
 Line 959: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 960: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| orchard | 151 | lantern | row 1 |
-| pebble | 152 | meadow | row 2 |
-| willow | 153 | copper | row 3 |
-| canvas | 154 | harbor | row 4 |
-| river | 155 | thistle | row 5 |
-| lantern | 156 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| orchard | 151   | lantern | row 1 |
+| pebble  | 152   | meadow  | row 2 |
+| willow  | 153   | copper  | row 3 |
+| canvas  | 154   | harbor  | row 4 |
+| river   | 155   | thistle | row 5 |
+| lantern | 156   | orchard | row 6 |
 
 Line 961: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 962: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -1223,14 +1223,14 @@ Line 1023: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 1024: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 1025: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| pebble | 161 | lantern | row 1 |
-| willow | 162 | meadow | row 2 |
-| canvas | 163 | copper | row 3 |
-| river | 164 | harbor | row 4 |
-| lantern | 165 | thistle | row 5 |
-| meadow | 166 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| pebble  | 161   | lantern | row 1 |
+| willow  | 162   | meadow  | row 2 |
+| canvas  | 163   | copper  | row 3 |
+| river   | 164   | harbor  | row 4 |
+| lantern | 165   | thistle | row 5 |
+| meadow  | 166   | orchard | row 6 |
 
 Line 1026: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 1027: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -1301,14 +1301,14 @@ Line 1088: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 1089: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 1090: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| willow | 171 | lantern | row 1 |
-| canvas | 172 | meadow | row 2 |
-| river | 173 | copper | row 3 |
-| lantern | 174 | harbor | row 4 |
-| meadow | 175 | thistle | row 5 |
-| copper | 176 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| willow  | 171   | lantern | row 1 |
+| canvas  | 172   | meadow  | row 2 |
+| river   | 173   | copper  | row 3 |
+| lantern | 174   | harbor  | row 4 |
+| meadow  | 175   | thistle | row 5 |
+| copper  | 176   | orchard | row 6 |
 
 Line 1091: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 1092: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -1379,14 +1379,14 @@ Line 1153: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 1154: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 1155: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| canvas | 181 | lantern | row 1 |
-| river | 182 | meadow | row 2 |
-| lantern | 183 | copper | row 3 |
-| meadow | 184 | harbor | row 4 |
-| copper | 185 | thistle | row 5 |
-| harbor | 186 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| canvas  | 181   | lantern | row 1 |
+| river   | 182   | meadow  | row 2 |
+| lantern | 183   | copper  | row 3 |
+| meadow  | 184   | harbor  | row 4 |
+| copper  | 185   | thistle | row 5 |
+| harbor  | 186   | orchard | row 6 |
 
 Line 1156: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 1157: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -1457,14 +1457,14 @@ Line 1218: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 1219: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 1220: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| river | 191 | lantern | row 1 |
-| lantern | 192 | meadow | row 2 |
-| meadow | 193 | copper | row 3 |
-| copper | 194 | harbor | row 4 |
-| harbor | 195 | thistle | row 5 |
-| thistle | 196 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| river   | 191   | lantern | row 1 |
+| lantern | 192   | meadow  | row 2 |
+| meadow  | 193   | copper  | row 3 |
+| copper  | 194   | harbor  | row 4 |
+| harbor  | 195   | thistle | row 5 |
+| thistle | 196   | orchard | row 6 |
 
 Line 1221: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 1222: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -1535,14 +1535,14 @@ Line 1283: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 1284: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 1285: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| lantern | 201 | lantern | row 1 |
-| meadow | 202 | meadow | row 2 |
-| copper | 203 | copper | row 3 |
-| harbor | 204 | harbor | row 4 |
-| thistle | 205 | thistle | row 5 |
-| orchard | 206 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| lantern | 201   | lantern | row 1 |
+| meadow  | 202   | meadow  | row 2 |
+| copper  | 203   | copper  | row 3 |
+| harbor  | 204   | harbor  | row 4 |
+| thistle | 205   | thistle | row 5 |
+| orchard | 206   | orchard | row 6 |
 
 Line 1286: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 1287: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -1613,14 +1613,14 @@ Line 1348: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 1349: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 1350: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| meadow | 211 | lantern | row 1 |
-| copper | 212 | meadow | row 2 |
-| harbor | 213 | copper | row 3 |
-| thistle | 214 | harbor | row 4 |
-| orchard | 215 | thistle | row 5 |
-| pebble | 216 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| meadow  | 211   | lantern | row 1 |
+| copper  | 212   | meadow  | row 2 |
+| harbor  | 213   | copper  | row 3 |
+| thistle | 214   | harbor  | row 4 |
+| orchard | 215   | thistle | row 5 |
+| pebble  | 216   | orchard | row 6 |
 
 Line 1351: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 1352: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -1691,14 +1691,14 @@ Line 1413: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 1414: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 1415: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| copper | 221 | lantern | row 1 |
-| harbor | 222 | meadow | row 2 |
-| thistle | 223 | copper | row 3 |
-| orchard | 224 | harbor | row 4 |
-| pebble | 225 | thistle | row 5 |
-| willow | 226 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| copper  | 221   | lantern | row 1 |
+| harbor  | 222   | meadow  | row 2 |
+| thistle | 223   | copper  | row 3 |
+| orchard | 224   | harbor  | row 4 |
+| pebble  | 225   | thistle | row 5 |
+| willow  | 226   | orchard | row 6 |
 
 Line 1416: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 1417: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -1769,14 +1769,14 @@ Line 1478: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 1479: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 1480: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| harbor | 231 | lantern | row 1 |
-| thistle | 232 | meadow | row 2 |
-| orchard | 233 | copper | row 3 |
-| pebble | 234 | harbor | row 4 |
-| willow | 235 | thistle | row 5 |
-| canvas | 236 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| harbor  | 231   | lantern | row 1 |
+| thistle | 232   | meadow  | row 2 |
+| orchard | 233   | copper  | row 3 |
+| pebble  | 234   | harbor  | row 4 |
+| willow  | 235   | thistle | row 5 |
+| canvas  | 236   | orchard | row 6 |
 
 Line 1481: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 1482: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -1847,14 +1847,14 @@ Line 1543: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 1544: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 1545: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| thistle | 241 | lantern | row 1 |
-| orchard | 242 | meadow | row 2 |
-| pebble | 243 | copper | row 3 |
-| willow | 244 | harbor | row 4 |
-| canvas | 245 | thistle | row 5 |
-| river | 246 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| thistle | 241   | lantern | row 1 |
+| orchard | 242   | meadow  | row 2 |
+| pebble  | 243   | copper  | row 3 |
+| willow  | 244   | harbor  | row 4 |
+| canvas  | 245   | thistle | row 5 |
+| river   | 246   | orchard | row 6 |
 
 Line 1546: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 1547: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -1925,14 +1925,14 @@ Line 1608: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 1609: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 1610: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| orchard | 251 | lantern | row 1 |
-| pebble | 252 | meadow | row 2 |
-| willow | 253 | copper | row 3 |
-| canvas | 254 | harbor | row 4 |
-| river | 255 | thistle | row 5 |
-| lantern | 256 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| orchard | 251   | lantern | row 1 |
+| pebble  | 252   | meadow  | row 2 |
+| willow  | 253   | copper  | row 3 |
+| canvas  | 254   | harbor  | row 4 |
+| river   | 255   | thistle | row 5 |
+| lantern | 256   | orchard | row 6 |
 
 Line 1611: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 1612: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -2003,14 +2003,14 @@ Line 1673: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 1674: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 1675: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| pebble | 261 | lantern | row 1 |
-| willow | 262 | meadow | row 2 |
-| canvas | 263 | copper | row 3 |
-| river | 264 | harbor | row 4 |
-| lantern | 265 | thistle | row 5 |
-| meadow | 266 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| pebble  | 261   | lantern | row 1 |
+| willow  | 262   | meadow  | row 2 |
+| canvas  | 263   | copper  | row 3 |
+| river   | 264   | harbor  | row 4 |
+| lantern | 265   | thistle | row 5 |
+| meadow  | 266   | orchard | row 6 |
 
 Line 1676: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 1677: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -2081,14 +2081,14 @@ Line 1738: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 1739: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 1740: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| willow | 271 | lantern | row 1 |
-| canvas | 272 | meadow | row 2 |
-| river | 273 | copper | row 3 |
-| lantern | 274 | harbor | row 4 |
-| meadow | 275 | thistle | row 5 |
-| copper | 276 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| willow  | 271   | lantern | row 1 |
+| canvas  | 272   | meadow  | row 2 |
+| river   | 273   | copper  | row 3 |
+| lantern | 274   | harbor  | row 4 |
+| meadow  | 275   | thistle | row 5 |
+| copper  | 276   | orchard | row 6 |
 
 Line 1741: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 1742: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -2159,14 +2159,14 @@ Line 1803: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 1804: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 1805: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| canvas | 281 | lantern | row 1 |
-| river | 282 | meadow | row 2 |
-| lantern | 283 | copper | row 3 |
-| meadow | 284 | harbor | row 4 |
-| copper | 285 | thistle | row 5 |
-| harbor | 286 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| canvas  | 281   | lantern | row 1 |
+| river   | 282   | meadow  | row 2 |
+| lantern | 283   | copper  | row 3 |
+| meadow  | 284   | harbor  | row 4 |
+| copper  | 285   | thistle | row 5 |
+| harbor  | 286   | orchard | row 6 |
 
 Line 1806: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 1807: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -2237,14 +2237,14 @@ Line 1868: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 1869: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 1870: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| river | 291 | lantern | row 1 |
-| lantern | 292 | meadow | row 2 |
-| meadow | 293 | copper | row 3 |
-| copper | 294 | harbor | row 4 |
-| harbor | 295 | thistle | row 5 |
-| thistle | 296 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| river   | 291   | lantern | row 1 |
+| lantern | 292   | meadow  | row 2 |
+| meadow  | 293   | copper  | row 3 |
+| copper  | 294   | harbor  | row 4 |
+| harbor  | 295   | thistle | row 5 |
+| thistle | 296   | orchard | row 6 |
 
 Line 1871: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 1872: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -2315,14 +2315,14 @@ Line 1933: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 1934: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 1935: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| lantern | 301 | lantern | row 1 |
-| meadow | 302 | meadow | row 2 |
-| copper | 303 | copper | row 3 |
-| harbor | 304 | harbor | row 4 |
-| thistle | 305 | thistle | row 5 |
-| orchard | 306 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| lantern | 301   | lantern | row 1 |
+| meadow  | 302   | meadow  | row 2 |
+| copper  | 303   | copper  | row 3 |
+| harbor  | 304   | harbor  | row 4 |
+| thistle | 305   | thistle | row 5 |
+| orchard | 306   | orchard | row 6 |
 
 Line 1936: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 1937: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -2393,14 +2393,14 @@ Line 1998: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 1999: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 2000: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| meadow | 311 | lantern | row 1 |
-| copper | 312 | meadow | row 2 |
-| harbor | 313 | copper | row 3 |
-| thistle | 314 | harbor | row 4 |
-| orchard | 315 | thistle | row 5 |
-| pebble | 316 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| meadow  | 311   | lantern | row 1 |
+| copper  | 312   | meadow  | row 2 |
+| harbor  | 313   | copper  | row 3 |
+| thistle | 314   | harbor  | row 4 |
+| orchard | 315   | thistle | row 5 |
+| pebble  | 316   | orchard | row 6 |
 
 Line 2001: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 2002: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -2471,14 +2471,14 @@ Line 2063: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 2064: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 2065: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| copper | 321 | lantern | row 1 |
-| harbor | 322 | meadow | row 2 |
-| thistle | 323 | copper | row 3 |
-| orchard | 324 | harbor | row 4 |
-| pebble | 325 | thistle | row 5 |
-| willow | 326 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| copper  | 321   | lantern | row 1 |
+| harbor  | 322   | meadow  | row 2 |
+| thistle | 323   | copper  | row 3 |
+| orchard | 324   | harbor  | row 4 |
+| pebble  | 325   | thistle | row 5 |
+| willow  | 326   | orchard | row 6 |
 
 Line 2066: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 2067: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -2549,14 +2549,14 @@ Line 2128: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 2129: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 2130: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| harbor | 331 | lantern | row 1 |
-| thistle | 332 | meadow | row 2 |
-| orchard | 333 | copper | row 3 |
-| pebble | 334 | harbor | row 4 |
-| willow | 335 | thistle | row 5 |
-| canvas | 336 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| harbor  | 331   | lantern | row 1 |
+| thistle | 332   | meadow  | row 2 |
+| orchard | 333   | copper  | row 3 |
+| pebble  | 334   | harbor  | row 4 |
+| willow  | 335   | thistle | row 5 |
+| canvas  | 336   | orchard | row 6 |
 
 Line 2131: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 2132: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -2627,14 +2627,14 @@ Line 2193: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 2194: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 2195: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| thistle | 341 | lantern | row 1 |
-| orchard | 342 | meadow | row 2 |
-| pebble | 343 | copper | row 3 |
-| willow | 344 | harbor | row 4 |
-| canvas | 345 | thistle | row 5 |
-| river | 346 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| thistle | 341   | lantern | row 1 |
+| orchard | 342   | meadow  | row 2 |
+| pebble  | 343   | copper  | row 3 |
+| willow  | 344   | harbor  | row 4 |
+| canvas  | 345   | thistle | row 5 |
+| river   | 346   | orchard | row 6 |
 
 Line 2196: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 2197: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -2705,14 +2705,14 @@ Line 2258: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 2259: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 2260: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| orchard | 351 | lantern | row 1 |
-| pebble | 352 | meadow | row 2 |
-| willow | 353 | copper | row 3 |
-| canvas | 354 | harbor | row 4 |
-| river | 355 | thistle | row 5 |
-| lantern | 356 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| orchard | 351   | lantern | row 1 |
+| pebble  | 352   | meadow  | row 2 |
+| willow  | 353   | copper  | row 3 |
+| canvas  | 354   | harbor  | row 4 |
+| river   | 355   | thistle | row 5 |
+| lantern | 356   | orchard | row 6 |
 
 Line 2261: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 2262: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -2783,14 +2783,14 @@ Line 2323: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 2324: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 2325: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| pebble | 361 | lantern | row 1 |
-| willow | 362 | meadow | row 2 |
-| canvas | 363 | copper | row 3 |
-| river | 364 | harbor | row 4 |
-| lantern | 365 | thistle | row 5 |
-| meadow | 366 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| pebble  | 361   | lantern | row 1 |
+| willow  | 362   | meadow  | row 2 |
+| canvas  | 363   | copper  | row 3 |
+| river   | 364   | harbor  | row 4 |
+| lantern | 365   | thistle | row 5 |
+| meadow  | 366   | orchard | row 6 |
 
 Line 2326: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 2327: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -2861,14 +2861,14 @@ Line 2388: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 2389: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 2390: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| willow | 371 | lantern | row 1 |
-| canvas | 372 | meadow | row 2 |
-| river | 373 | copper | row 3 |
-| lantern | 374 | harbor | row 4 |
-| meadow | 375 | thistle | row 5 |
-| copper | 376 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| willow  | 371   | lantern | row 1 |
+| canvas  | 372   | meadow  | row 2 |
+| river   | 373   | copper  | row 3 |
+| lantern | 374   | harbor  | row 4 |
+| meadow  | 375   | thistle | row 5 |
+| copper  | 376   | orchard | row 6 |
 
 Line 2391: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 2392: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -2939,14 +2939,14 @@ Line 2453: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 2454: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 2455: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| canvas | 381 | lantern | row 1 |
-| river | 382 | meadow | row 2 |
-| lantern | 383 | copper | row 3 |
-| meadow | 384 | harbor | row 4 |
-| copper | 385 | thistle | row 5 |
-| harbor | 386 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| canvas  | 381   | lantern | row 1 |
+| river   | 382   | meadow  | row 2 |
+| lantern | 383   | copper  | row 3 |
+| meadow  | 384   | harbor  | row 4 |
+| copper  | 385   | thistle | row 5 |
+| harbor  | 386   | orchard | row 6 |
 
 Line 2456: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 2457: the canvas meadow thistle willow and the lantern harbor pebble river.
@@ -3017,14 +3017,14 @@ Line 2518: the orchard canvas meadow thistle and the willow lantern harbor pebbl
 Line 2519: the copper orchard canvas meadow and the thistle willow lantern harbor.
 Line 2520: the river copper orchard canvas and the meadow thistle willow lantern.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| river | 391 | lantern | row 1 |
-| lantern | 392 | meadow | row 2 |
-| meadow | 393 | copper | row 3 |
-| copper | 394 | harbor | row 4 |
-| harbor | 395 | thistle | row 5 |
-| thistle | 396 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| river   | 391   | lantern | row 1 |
+| lantern | 392   | meadow  | row 2 |
+| meadow  | 393   | copper  | row 3 |
+| copper  | 394   | harbor  | row 4 |
+| harbor  | 395   | thistle | row 5 |
+| thistle | 396   | orchard | row 6 |
 
 Line 2521: the pebble river copper orchard and the canvas meadow thistle willow.
 Line 2522: the harbor pebble river copper and the orchard canvas meadow thistle.
@@ -3095,14 +3095,14 @@ Line 2583: the lantern harbor pebble river and the copper orchard canvas meadow.
 Line 2584: the willow lantern harbor pebble and the river copper orchard canvas.
 Line 2585: the thistle willow lantern harbor and the pebble river copper orchard.
 
-| Item | Count | Place | Note |
-| ---- | ----- | ----- | ---- |
-| lantern | 401 | lantern | row 1 |
-| meadow | 402 | meadow | row 2 |
-| copper | 403 | copper | row 3 |
-| harbor | 404 | harbor | row 4 |
-| thistle | 405 | thistle | row 5 |
-| orchard | 406 | orchard | row 6 |
+| Item    | Count | Place   | Note  |
+| ------- | ----- | ------- | ----- |
+| lantern | 401   | lantern | row 1 |
+| meadow  | 402   | meadow  | row 2 |
+| copper  | 403   | copper  | row 3 |
+| harbor  | 404   | harbor  | row 4 |
+| thistle | 405   | thistle | row 5 |
+| orchard | 406   | orchard | row 6 |
 
 Line 2586: the meadow thistle willow lantern and the harbor pebble river copper.
 Line 2587: the canvas meadow thistle willow and the lantern harbor pebble river.

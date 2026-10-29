@@ -8,6 +8,8 @@ export default defineConfig(
 		'dist',
 		'.test-build',
 		'test-vault',
+		// Runs inside Obsidian through its CLI's eval, outside the plugin bundle.
+		'scripts/obsidian-check.js',
 		'esbuild.config.mjs',
 		'version-bump.mjs',
 		'versions.json',

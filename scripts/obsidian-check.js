@@ -108,7 +108,8 @@
 		await caretOnLine(cm, t1.first - 1);
 		await press(cm, 'ArrowRight');
 		let s = sel(cm);
-		check('B5 → selects the whole table, tinted, with no caret showing', s.anchor === t1.from && s.head === t1.to && t1.el.classList.contains('is-selected') && cm.dom.classList.contains('selectable-tables-selected') && getComputedStyle(cm.dom.querySelector('.cm-cursorLayer')).display === 'none', s);
+		const frame = getComputedStyle(t1.el.querySelector('table'), '::after');
+		check('B5 → selects the whole table, tinted and framed, with no caret showing', s.anchor === t1.from && s.head === t1.to && t1.el.classList.contains('is-selected') && cm.dom.classList.contains('selectable-tables-selected') && getComputedStyle(cm.dom.querySelector('.cm-cursorLayer')).display === 'none' && parseFloat(frame.borderTopWidth) > 0, { ...s, border: frame.borderTopWidth });
 		await press(cm, 'ArrowRight');
 		s = sel(cm);
 		check('B6 → again: the caret at the start of the line below', s.head === t1.to + 1 && s.anchor === s.head, s);

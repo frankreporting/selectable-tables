@@ -9,3 +9,7 @@ indent_style = tab
 indent_size = 4
 quote_type = single
 tab_width = 4
+
+# This test note must end on its table's last row, with no newline after it.
+[test-vault/Selectable Tables Test/Table last.md]
+insert_final_newline = false

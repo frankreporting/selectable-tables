@@ -3,7 +3,7 @@
 	"name": "Selectable Tables",
 	"version": "0.1.0",
 	"minAppVersion": "1.14.4",
-	"description": "Arrow past tables in Live Preview in one press, and select a whole table as one block, like an image.",
+	"description": "Make Live Preview tables selectable as whole blocks, like images. Arrow keys to bypass or select, enter to edit.",
 	"author": "Brian Frank",
 	"isDesktopOnly": false
 }

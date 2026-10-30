@@ -4,6 +4,7 @@ An Obsidian plugin (`selectable-tables`) that makes a Live Preview table one blo
 
 ## Where things live
 
+- **Repos:** `frankreporting/selectable-tables` is public. The private `frankreporting/selectable-tables-dev` (the `dev` remote) holds the pull requests and history from before it went public on 10/29. Commits use Brian's GitHub no-reply address; never his own address.
 - **Backlog:** the Linear team **Selectable Tables** (key `STA`). Plans and test plans are Linear documents on their issue. There are no area labels yet: every issue runs alone.
 - **Code:** `src/`. `main.ts` only registers the editor extension; `src/editor/decide.ts` holds every key decision, `layout.ts` reads the editor's layout, and `extension.ts` wires them to keys.
 - **Tests:** `test/*.test.ts`, bundled by `scripts/test.mjs` with esbuild and run by Node's test runner. Tested code must not import `obsidian` as a value (the package is types only), so keep decisions in modules that take plain CodeMirror state.

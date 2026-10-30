@@ -75,7 +75,7 @@ npm run build
     - Optional: `author`, `authorUrl`, `fundingUrl` (string or map)
 - Never change `id` after release. Treat it as stable API.
 - Keep `minAppVersion` accurate when using newer APIs.
-- Canonical requirements are coded here: https://github.com/obsidianmd/obsidian-releases/blob/master/.github/workflows/validate-plugin-entry.yml
+- Requirements: https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin. The `id` must be unique and can't contain "obsidian".
 
 ## Testing
 
@@ -97,7 +97,9 @@ npm run build
 - Bump `version` in `manifest.json` (SemVer) and update `versions.json` to map plugin version → minimum app version.
 - Create a GitHub release whose tag exactly matches `manifest.json`'s `version`. Do not use a leading `v`.
 - Attach `manifest.json`, `main.js`, and `styles.css` (if present) to the release as individual assets.
-- After the initial release, follow the process to add/update your plugin in the community catalog as required.
+- Plugins are submitted through the Obsidian Community directory (https://community.obsidian.md), not by a pull request to `obsidianmd/obsidian-releases` (since May 2026). Sign in with an Obsidian account, link GitHub, and add the repo. The directory reads `manifest.json` at the default branch's HEAD; installs come from the release whose tag matches its `version`.
+- Every release is reviewed automatically (code quality, security, malware), and the dashboard shows suggestions, warnings and failures. A **preview scan** runs on any branch, tag or commit before a release, without publishing anything.
+- `eslint-plugin-obsidianmd` is the rule set Obsidian points to for checking the guidelines locally; `npm run lint` runs it.
 
 ## Security, privacy, and compliance
 

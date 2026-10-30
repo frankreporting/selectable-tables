@@ -1,6 +1,6 @@
-// In-Obsidian checks for Selectable Tables. They test the three Obsidian behaviors the plugin relies on,
-// then the plugin's keys on the test vault's notes, with simulated key presses. Every check that
-// shouldn't edit a note compares its text before and after, and every note is put back as it was.
+// In-Obsidian checks for Selectable Tables. They test the Obsidian behaviors the plugin relies on, then
+// the plugin's keys on the test vault's notes, with simulated key presses. Every check that shouldn't
+// edit a note compares its text before and after, and every note is put back as it was.
 //
 // Run in the test vault only, with the plugin built and copied in (npm run test-vault):
 //   obsidian vault="Selectable Tables Test" dev:cdp method=Emulation.setFocusEmulationEnabled params='{"enabled":true}'
@@ -36,6 +36,17 @@
 
 	const openCell = (cm) => cm.contentDOM.querySelector('.cm-table-widget.has-focus');
 	const cellEditor = (cm) => openCell(cm)?.querySelector('.cm-content');
+	// The open cell's own editor, its row and column, and those of the selected cell.
+	const cellView = (cm) => cm.constructor.findFromDOM(openCell(cm).querySelector('.cm-editor'));
+	const placeOf = (cell) => cell && `${cell.parentElement.rowIndex},${cell.cellIndex}`;
+	const openAt = (cm) => placeOf(openCell(cm)?.querySelector('.cm-editor').closest('td, th'));
+	const marked = (cm) => cm.contentDOM.querySelectorAll('.selectable-tables-cell');
+	const at = (cm) => (marked(cm).length === 1 ? placeOf(marked(cm)[0]) : `${marked(cm).length} marked`);
+	const box = (el) => {
+		const { width, height } = el.getBoundingClientRect();
+		return `${width}x${height}`;
+	};
+	const tint = (t) => getComputedStyle(t.el.querySelector('table'), '::after').display !== 'none' && getComputedStyle(t.el.querySelector('table'), '::after').content !== 'none';
 	const sel = (cm) => {
 		const { anchor, head } = cm.state.selection.main;
 		return { anchor, head, line: cm.state.doc.lineAt(head).number, ranges: cm.state.selection.ranges.length };
@@ -62,6 +73,38 @@
 		if (cm.state.doc.toString() !== text) cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: text } });
 		await settle();
 	}
+	// CodeMirror draws only what's near the view, so a table is scrolled to before it's looked up.
+	async function tableUnder(cm, heading) {
+		const start = cm.state.doc.toString().indexOf(`## ${heading}`);
+		cm.focus();
+		cm.dispatch({ selection: { anchor: start }, scrollIntoView: true });
+		await sleep(300);
+		return tables(cm).find((t) => t.from > start);
+	}
+	// Selects a table from the line above it, or from the line below.
+	async function selectTable(cm, t, fromAbove = true) {
+		await caretOnLine(cm, fromAbove ? t.first - 1 : t.last + 1);
+		await press(cm, fromAbove ? 'ArrowRight' : 'ArrowLeft');
+	}
+	// Presses keys on a selected cell. Each press has to open nothing, edit nothing and keep the table's size.
+	async function keys(cm, t, ...pressed) {
+		const before = { text: cm.state.doc.toString(), size: box(t.el) };
+		let quiet = true;
+		for (const [key, mods] of pressed.map((p) => (Array.isArray(p) ? p : [p]))) {
+			await press(cm, key, mods);
+			quiet = quiet && !openCell(cm) && box(t.el) === before.size && cm.state.doc.toString() === before.text;
+		}
+		return quiet;
+	}
+	const repeat = (key, times) => Array(times).fill(key);
+	// A clipboard event of the browser's own kind, which leaves the real clipboard alone.
+	function clipboard(cm, type, text) {
+		const data = new DataTransfer();
+		if (text) data.setData('text/plain', text);
+		const event = new ClipboardEvent(type, { clipboardData: data, bubbles: true, cancelable: true });
+		cm.contentDOM.dispatchEvent(event);
+		return { taken: event.defaultPrevented, text: data.getData('text/plain') };
+	}
 
 	try {
 		// --- What the plugin relies on in Obsidian
@@ -80,6 +123,9 @@
 		cm.focus();
 		await sleep(300);
 		check('relies 3: focusing the note\'s editor closes an open cell', !openCell(cm) && cm.hasFocus, sel(cm));
+		cm.dispatch({ selection: { anchor: t1.from, head: t1.to } });
+		await settle();
+		check('relies 6: the selected table\'s tint is drawn on the table element', tint(t1), getComputedStyle(t1.el.querySelector('table'), '::after').content);
 
 		// --- A. Passing
 		await caretOnLine(cm, t1.first - 1);
@@ -121,21 +167,331 @@
 		// --- C. Enter, Escape
 		await press(cm, 'ArrowRight');
 		await press(cm, 'Enter');
+		check('C9 Enter selects the first cell and opens nothing', at(cm) === '0,0' && !openCell(cm), at(cm));
+		await press(cm, 'Enter');
 		await sleep(200);
-		check('C9 Enter opens the first cell', openCell(cm) && openCell(cm).querySelector('.cm-editor') && t1.el.contains(openCell(cm)), sel(cm));
+		check('C10 Enter again opens it', openAt(cm) === '0,0' && t1.el.contains(openCell(cm)), openAt(cm));
 		const cell = cellEditor(cm);
 		if (cell) {
 			await press(cell, 'Escape');
 			await sleep(200);
 			s = sel(cm);
-			check('C11 Escape in the cell closes it and selects the whole table', !openCell(cm) && s.anchor === t1.to && s.head === t1.from && cm.hasFocus, s);
+			check('C11 Escape in the cell closes it and selects that cell', !openCell(cm) && at(cm) === '0,0' && s.anchor === t1.from && s.head === t1.to && cm.hasFocus, { ...s, at: at(cm) });
+			await press(cm, 'Escape');
+			check('C12 Escape again selects the whole table', marked(cm).length === 0 && sel(cm).head === t1.to && tint(t1), sel(cm));
 			await press(cm, 'Escape');
 			s = sel(cm);
-			check('C12 Escape again: the caret on the line below', s.head === t1.to + 1 && s.anchor === s.head, s);
+			check('C13 Escape again: the caret back on the side it was selected from', s.head === t1.from - 1 && s.anchor === s.head, s);
 		}
 		check('C: Enter and Escape left the note unchanged', cm.state.doc.toString() === original);
 
+		// --- What the plugin relies on for selected cells
+		cm = await open('Cell moves');
+		original = cm.state.doc.toString();
+		let seed = await tableUnder(cm, 'Seed trays');
+		const seedRows = seed.el.querySelector('table').rows;
+		const seedText = (row, column) => seedRows[row].cells[column].querySelector('.table-cell-wrapper').textContent.trim();
+		check('relies 4: the rows on screen line up with the text: the header is row 0, the delimiter has no row', seedRows.length === seed.last - seed.first && seedText(0, 0) === 'Tray' && seedText(1, 0) === 'A1' && seedText(4, 2) === 'Water twice', seedRows.length);
+		const fern = cm.state.doc.line(seed.first + 2);
+		cm.dispatch({ selection: { anchor: fern.from + fern.text.indexOf('Fern') } });
+		await sleep(300);
+		check('relies 5: a caret in a cell\'s text opens exactly that cell', openAt(cm) === '1,1', openAt(cm));
+		await closeCell(cm, seed.from - 1);
+		await restore(cm, original);
+
+		// --- Cells A. Moving
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		const size = box(seed.el);
+		await press(cm, 'Enter');
+		const cellFrame = getComputedStyle(marked(cm)[0] ?? cm.contentDOM, '::after');
+		check('1 Enter selects the first cell: its frame, no table tint, no caret, nothing opened', at(cm) === '0,0' && parseFloat(cellFrame.borderTopWidth) > 0 && !tint(seed) && getComputedStyle(cm.dom.querySelector('.cm-cursorLayer')).display === 'none' && !openCell(cm), { at: at(cm), border: cellFrame.borderTopWidth, tint: tint(seed) });
+		let quiet = await keys(cm, seed, 'ArrowDown', 'ArrowRight');
+		check('2 ↓ then → reach Fern, still a rendered link, at the same size', quiet && at(cm) === '1,1' && marked(cm)[0].querySelector('a') && box(seed.el) === size, at(cm));
+		quiet = await keys(cm, seed, 'ArrowRight');
+		const notes = at(cm);
+		quiet = (await keys(cm, seed, 'ArrowRight')) && quiet;
+		check('3 → reaches the last column, and the next stops there', quiet && notes === '1,2' && at(cm) === '1,2', at(cm));
+		quiet = await keys(cm, seed, ...repeat('ArrowDown', 3));
+		const water = at(cm);
+		quiet = (await keys(cm, seed, 'ArrowDown')) && quiet;
+		check('4 ↓ reaches the last row, and the next stops there', quiet && water === '4,2' && at(cm) === '4,2', at(cm));
+		quiet = await keys(cm, seed, ...repeat('ArrowLeft', 4), ...repeat('ArrowUp', 6));
+		check('5 holding ← and ↑ runs to the first cell and stops, nothing opening', quiet && at(cm) === '0,0', at(cm));
+		quiet = await keys(cm, seed, ...repeat('Tab', 3));
+		const wrapped = at(cm);
+		quiet = (await keys(cm, seed, ['Tab', { shiftKey: true }])) && quiet;
+		check('6 Tab wraps to the next row, Shift+Tab back', quiet && wrapped === '1,0' && at(cm) === '0,2', { wrapped, at: at(cm) });
+		quiet = await keys(cm, seed, ...repeat('ArrowDown', 4), 'Tab');
+		check('7 Tab on the last cell does nothing, and adds no row', quiet && at(cm) === '4,2' && seedRows.length === 5, at(cm));
+		quiet = await keys(cm, seed, ...repeat('ArrowUp', 4), ...repeat('ArrowLeft', 2), ['Tab', { shiftKey: true }]);
+		check('8 Shift+Tab on the first cell does nothing', quiet && at(cm) === '0,0', at(cm));
+
+		// --- Cells B. Enter and Escape
+		await keys(cm, seed, 'ArrowDown', 'ArrowRight');
+		await press(cm, 'Enter');
+		await sleep(250);
+		let inner = openCell(cm) && cellView(cm);
+		check('9 Enter opens that cell, showing its source, the caret at the end', openAt(cm) === '1,1' && inner && inner.state.doc.toString() === '[[Watering schedule|Fern]]' && inner.state.selection.main.head === inner.state.doc.length, openAt(cm));
+		inner.dispatch(inner.state.replaceSelection('x'));
+		await settle();
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		check('10 Escape closes it, shows the edit, and selects that cell', !openCell(cm) && at(cm) === '1,1' && marked(cm)[0].textContent.includes('Fernx') && cm.state.doc.toString() !== original, at(cm));
+		await press(cm, 'Enter');
+		await sleep(250);
+		inner = cellView(cm);
+		inner.dispatch({ changes: { from: inner.state.doc.length - 1, to: inner.state.doc.length } });
+		await settle();
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		check('11 taking the x back out leaves the note as it was, the cell selected', at(cm) === '1,1' && cm.state.doc.toString() === original, at(cm));
+		seed = tables(cm).find((t) => t.first === seed.first);
+		await press(cm, 'Escape');
+		check('12 Escape selects the whole table, tinted', marked(cm).length === 0 && sel(cm).anchor === seed.from && sel(cm).head === seed.to && tint(seed), sel(cm));
+		await press(cm, 'Enter');
+		check('13 Enter goes back to the cell it left', at(cm) === '1,1', at(cm));
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		check('14 Escape twice: the caret on the side the table was selected from', sel(cm).line === seed.first - 1 && sel(cm).anchor === sel(cm).head && marked(cm).length === 0, sel(cm));
+		await press(cm, 'ArrowRight');
+		await press(cm, 'Enter');
+		check('15 arriving from outside starts at the first cell', at(cm) === '0,0', at(cm));
+		const water2 = cm.state.doc.line(seed.first + 5);
+		cm.dispatch({ selection: { anchor: water2.from + water2.text.indexOf('Water') } });
+		await sleep(300);
+		check('16 opening a cell directly takes the selection off the cell', openAt(cm) === '4,2' && marked(cm).length === 0, openAt(cm));
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		check('16 Escape selects that cell', at(cm) === '4,2', at(cm));
+		await press(cm, 'ArrowUp');
+		check('16 ↑ moves on from there', at(cm) === '3,2', at(cm));
+		await press(cm, 'Enter');
+		await sleep(250);
+		check('17 a cell with an escaped pipe opens showing it as a plain pipe', cellView(cm).state.doc.toString() === 'a | b', cellView(cm)?.state.doc.toString());
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		await keys(cm, seed, 'ArrowUp');
+		await press(cm, 'Enter');
+		await sleep(250);
+		check('18 an empty cell opens, empty', openAt(cm) === '2,2' && cellView(cm).state.doc.length === 0, openAt(cm));
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		await keys(cm, seed, ...repeat('ArrowUp', 2), ...repeat('ArrowLeft', 2));
+		await press(cm, 'Enter');
+		await sleep(250);
+		await press(cellEditor(cm), 'Tab');
+		await sleep(250);
+		const tabbed = openAt(cm);
+		await press(cellEditor(cm), 'Enter');
+		await sleep(250);
+		const entered = openAt(cm);
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		check('19 in an open cell, Tab and Enter are Obsidian\'s, and Escape selects the cell they ended on', tabbed === '0,1' && entered === '1,1' && at(cm) === '1,1', { tabbed, entered, at: at(cm) });
+		await press(cm, 'Enter');
+		await sleep(250);
+		await press(cellEditor(cm), 'ArrowRight', { shiftKey: true });
+		await press(cellEditor(cm), 'ArrowRight', { shiftKey: true });
+		await sleep(200);
+		const widget = seed.el;
+		const ranged = widget.classList.contains('has-selection');
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		check('21 Escape from a range of cells clears it and selects the cell it started on', ranged && !widget.classList.contains('has-selection') && !widget.querySelector('td.is-selected, th.is-selected') && at(cm) === '1,1', { ranged, left: widget.classList.contains('has-selection'), at: at(cm) });
+		await restore(cm, original);
+
+		// --- Cells C. Keys that change nothing
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		await keys(cm, seed, 'ArrowDown', 'ArrowRight');
+		const typed = new InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true, cancelable: true });
+		cm.contentDOM.dispatchEvent(typed);
+		await settle();
+		quiet = await keys(cm, seed, ' ', ['Enter', { shiftKey: true }]);
+		check('22 typing, Space and Shift+Enter do nothing', typed.defaultPrevented && quiet && at(cm) === '1,1', at(cm));
+		quiet = await keys(cm, seed, 'Backspace', 'Delete');
+		const cut = clipboard(cm, 'cut');
+		const paste = clipboard(cm, 'paste', 'pasted');
+		await settle();
+		check('23 Backspace, Delete, Cut and Paste do nothing', quiet && cut.taken && !cut.text && paste.taken && cm.state.doc.toString() === original && at(cm) === '1,1', { cut, paste });
+		quiet = await keys(cm, seed, ['ArrowRight', { shiftKey: true }]);
+		app.commands.executeCommandById('editor:swap-line-up');
+		await settle();
+		app.commands.executeCommandById('editor:swap-line-down');
+		await settle();
+		check('24 Shift+→ and moving the line change nothing, and the cell stays selected', quiet && cm.state.doc.toString() === original && at(cm) === '1,1', at(cm));
+		const copy = clipboard(cm, 'copy');
+		check('26 Copy gives the cell\'s Markdown, with a plain pipe', copy.taken && copy.text === '[[Watering schedule|Fern]]', copy);
+		await press(cm, 'Escape');
+		const whole = clipboard(cm, 'copy');
+		check('F Copy on the whole table is still CodeMirror\'s', !whole.text || whole.text.startsWith('| Tray'), whole);
+		await press(cm, 'Escape');
+		const below = cm.state.doc.line(seed.last + 2);
+		cm.dispatch({ changes: { from: below.to, insert: 'y' }, selection: { anchor: below.to + 1 }, userEvent: 'input.type' });
+		// Past CodeMirror's half-second grouping, so undo takes back only the y.
+		await sleep(700);
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		await keys(cm, seed, 'ArrowDown', 'ArrowRight', 'ArrowDown');
+		const undoMac = navigator.platform.startsWith('Mac');
+		await press(cm, 'z', { metaKey: undoMac, ctrlKey: !undoMac, code: 'KeyZ' });
+		check('25 moving between cells adds no undo step: undo takes back the last edit', cm.state.doc.toString() === original, cm.state.doc.line(seed.last + 2).text);
+		await restore(cm, original);
+
+		// --- Cells D. Leaving
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		await caretOnLine(cm, seed.last + 2);
+		check('27 moving the selection elsewhere drops the cell', marked(cm).length === 0 && sel(cm).line === seed.last + 2, at(cm));
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		await press(cm, 'ArrowDown', { metaKey: true });
+		check('28 Cmd+↓ goes to the note\'s end, and no cell stays marked', marked(cm).length === 0 && sel(cm).head === cm.state.doc.length, at(cm));
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		const leaf = app.workspace.getMostRecentLeaf().view;
+		await leaf.setState({ ...leaf.getState(), mode: 'source', source: true }, { history: false });
+		await sleep(400);
+		const inSource = marked(leaf.editor.cm).length;
+		await leaf.setState({ ...leaf.getState(), mode: 'source', source: false }, { history: false });
+		await sleep(400);
+		cm = leaf.editor.cm;
+		check('29 Source mode and back leave no cell marked', inSource === 0 && marked(cm).length === 0, inSource);
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		cm = await open('Two report tables');
+		const elsewhere = marked(cm).length;
+		cm = await open('Cell moves');
+		check('30 another note and back leave no cell marked', elsewhere === 0 && marked(cm).length === 0, elsewhere);
+		const synced = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, synced);
+		await press(cm, 'Enter');
+		await keys(cm, synced, 'ArrowDown', 'ArrowRight');
+		// A reload from disk, which is how Sync arrives, carries the set event.
+		const basil = cm.state.doc.line(synced.first + 3);
+		const letter = basil.from + basil.text.indexOf('Basil');
+		cm.dispatch({ changes: { from: letter, to: letter + 1, insert: 'M' }, userEvent: 'set' });
+		await sleep(300);
+		const edited = cm.state.doc.toString() !== original;
+		const during = at(cm);
+		cm.dispatch({ changes: { from: letter, to: letter + 1, insert: 'B' }, userEvent: 'set' });
+		await sleep(300);
+		check('Sync: a reload from disk passes, and the cell stays marked', edited && during === '1,1' && at(cm) === '1,1' && cm.state.doc.toString() === original, { edited, during, after: at(cm) });
+
+		// A second pane on the same note edits through its own editor.
+		const otherLeaf = app.workspace.getLeaf('split');
+		await otherLeaf.openFile(app.vault.getAbstractFileByPath('Cell moves.md'), { state: { mode: 'source', source: true } });
+		await sleep(500);
+		const other = otherLeaf.view.editor;
+		const inOther = other.posToOffset({ line: synced.first + 2, ch: 0 });
+		const otherLine = other.getLine(synced.first + 2);
+		other.replaceRange('M', other.offsetToPos(inOther + otherLine.indexOf('Basil')), other.offsetToPos(inOther + otherLine.indexOf('Basil') + 1));
+		await sleep(400);
+		const reached = cm.state.doc.toString() === other.getValue() && cm.state.doc.toString() !== original;
+		other.replaceRange('B', other.offsetToPos(inOther + otherLine.indexOf('Basil')), other.offsetToPos(inOther + otherLine.indexOf('Basil') + 1));
+		await sleep(400);
+		otherLeaf.detach();
+		await sleep(300);
+		cm.focus();
+		await settle();
+		check('a second pane\'s edit reaches this note, and the cell stays marked', reached && at(cm) === '1,1' && cm.state.doc.toString() === original, { reached, at: at(cm) });
+
+		// Obsidian's commands edit with no user event. Each of these acts on the whole selection.
+		const commands = ['set-heading-1', 'toggle-blockquote', 'toggle-comments', 'clear-formatting', 'toggle-bullet-list', 'toggle-checklist-status', 'cycle-list-checklist', 'insert-callout', 'insert-codeblock', 'insert-horizontal-rule', 'insert-mathblock', 'insert-table', 'insert-footnote'];
+		const changedBy = [];
+		for (const command of commands) {
+			const start = await tableUnder(cm, 'Seed trays');
+			await selectTable(cm, start);
+			await press(cm, 'Enter');
+			app.commands.executeCommandById(`editor:${command}`);
+			await settle();
+			if (cm.state.doc.toString() !== original) changedBy.push(command);
+			await restore(cm, original);
+		}
+		check('Obsidian\'s editor commands leave the table alone while a cell is selected', changedBy.length === 0, changedBy);
+
+		// The + button below a table, and the mouse in general, go through Obsidian's table editor.
+		const pressed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, pressed);
+		await press(cm, 'Enter');
+		const addRow = pressed.el.querySelector('.table-row-btn');
+		addRow.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true }));
+		const unmarked = marked(cm).length === 0;
+		addRow.click();
+		await sleep(300);
+		const lines = cm.state.doc.lines;
+		const added = lines === original.split('\n').length + 1;
+		const drawn = pressed.el.querySelector('table').rows.length;
+		await restore(cm, original);
+		await sleep(300);
+		check('a press drops the cell, and the + button adds a row to the note and the drawn table alike', unmarked && added && drawn === 6, { unmarked, lines, drawn });
+		const resumed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, resumed);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+
+		// --- Cells E. Odd tables
+		const uneven = await tableUnder(cm, 'Uneven rows');
+		const unevenRows = uneven.el.querySelector('table').rows;
+		check('relies 4: a short row is filled, so every row has the same number of cells', Array.from(unevenRows).every((r) => r.cells.length === 4), Array.from(unevenRows).map((r) => r.cells.length));
+		await selectTable(cm, uneven);
+		await press(cm, 'Enter');
+		await keys(cm, uneven, ...repeat('ArrowDown', 2), ...repeat('ArrowRight', 2));
+		const filler = at(cm);
+		await press(cm, 'Enter');
+		await sleep(250);
+		check('31 a blank cell in a short row can be selected, and Enter opens the last cell the row has', filler === '2,2' && openAt(cm) === '2,1', { filler, open: openAt(cm) });
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		await keys(cm, uneven, 'ArrowDown', ...repeat('ArrowRight', 2));
+		await press(cm, 'Enter');
+		await sleep(250);
+		check('32 the fourth cell of a long row opens', openAt(cm) === '3,3', openAt(cm));
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		check('32 odd rows leave the note as it was', cm.state.doc.toString() === original, sel(cm));
+
+		const wide = await tableUnder(cm, 'Wide table');
+		await selectTable(cm, wide);
+		await press(cm, 'Enter');
+		await keys(cm, wide, ...repeat('ArrowRight', 15));
+		await sleep(200);
+		const shown = (scroller) => {
+			const cell = marked(cm)[0].getBoundingClientRect();
+			const view = scroller.getBoundingClientRect();
+			return cell.left >= view.left - 1 && cell.right <= view.right + 1 && cell.top >= view.top - 1 && cell.bottom <= view.bottom + 1;
+		};
+		check('33 holding → scrolls the wide table sideways to its last column', at(cm) === '0,15' && wide.el.scrollLeft > 0 && shown(wide.el), { at: at(cm), scrollLeft: wide.el.scrollLeft });
+		await keys(cm, wide, ...repeat('ArrowLeft', 15));
+		await sleep(200);
+		check('33 holding ← scrolls it back', at(cm) === '0,0' && shown(wide.el), wide.el.scrollLeft);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+
+		const tall = await tableUnder(cm, 'Tall table');
+		await selectTable(cm, tall);
+		await press(cm, 'Enter');
+		await keys(cm, tall, ...repeat('ArrowDown', 42));
+		await sleep(200);
+		check('34 holding ↓ scrolls the note and stops on the last row, the cell in view', at(cm) === '40,0' && shown(cm.scrollDOM), { at: at(cm), top: cm.scrollDOM.scrollTop });
+		await keys(cm, tall, ...repeat('ArrowUp', 42));
+		await sleep(200);
+		check('34 holding ↑ goes back to the first row, the cell in view', at(cm) === '0,0' && shown(cm.scrollDOM), at(cm));
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		check('Cells: the note is as it was', cm.state.doc.toString() === original);
+
 		// --- D. Typing, Tab, delete
+		cm = await open('Two report tables');
+		original = cm.state.doc.toString();
+		[t1] = tables(cm);
 		await caretOnLine(cm, t1.first - 1);
 		await press(cm, 'ArrowRight');
 		// The guard against typing works on the browser's beforeinput event. (document.execCommand skips
@@ -186,10 +542,15 @@
 		await caretOnLine(cm, t.last + 1);
 		await press(cm, 'ArrowLeft');
 		await press(cm, 'Enter');
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		check('E35 Table first: Enter, then Escape twice, ends on the line below, with no line added', sel(cm).line === t.last + 1 && cm.state.doc.toString() === original, sel(cm));
+		await press(cm, 'ArrowLeft');
+		await press(cm, 'Enter');
+		await press(cm, 'Enter');
 		await sleep(200);
-		check('G22 Enter on the first table of a note opens its first cell', openCell(cm) && cm.state.doc.toString() === original, sel(cm));
-		cm.focus();
-		await settle();
+		check('G22 Enter twice on the first table of a note opens its first cell', openAt(cm) === '0,0' && cm.state.doc.toString() === original, sel(cm));
+		await closeCell(cm, cm.state.doc.line(t.last + 1).from);
 
 		cm = await open('Table last');
 		original = cm.state.doc.toString();
@@ -200,6 +561,17 @@
 		check('G23 Table last: ↓ from above is left to Obsidian, which enters the table', openCell(cm) && cm.state.doc.toString() === original, sel(cm));
 		await closeCell(cm, cm.state.doc.line(t.first - 1).from);
 		await restore(cm, original);
+		[t] = tables(cm);
+		await selectTable(cm, t);
+		await press(cm, 'Enter');
+		const lastRow = t.el.querySelector('table').rows.length - 1;
+		await keys(cm, t, ...repeat('ArrowDown', lastRow + 1), ...repeat('ArrowRight', 3));
+		const bottom = at(cm);
+		await keys(cm, t, 'ArrowDown');
+		const stayed = bottom === at(cm) && bottom.startsWith(`${lastRow},`);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		check('E36 Table last: the selection stays on the last row, and Escape twice ends on the line above, with no line added', stayed && sel(cm).line === t.first - 1 && cm.state.doc.toString() === original, { bottom, ...sel(cm) });
 
 		cm = await open('Properties then table');
 		original = cm.state.doc.toString();
@@ -234,8 +606,16 @@
 		check('G: the edge notes are unchanged', cm.state.doc.toString() === original);
 
 		cm = await open('Images and tables');
+		original = cm.state.doc.toString();
 		[t] = tables(cm);
 		check('H a table between two images is rendered', !!t, tables(cm).length);
+		await caretOnLine(cm, t.last + 1);
+		await press(cm, 'ArrowLeft');
+		await press(cm, 'Enter');
+		check('E37 a table between images: Enter selects its first cell', at(cm) === '0,0' && !openCell(cm), at(cm));
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		check('E37 Escape twice leaves it, unchanged', marked(cm).length === 0 && cm.state.doc.toString() === original, sel(cm));
 
 		// --- I. Source mode: no rendered tables, the plugin steps aside
 		cm = await open('Two report tables');

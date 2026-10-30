@@ -20,3 +20,30 @@
 	border: var(--table-selection-border-width) solid var(--table-selection-border-color);
 	border-radius: var(--table-selection-border-radius);
 }
+
+/*
+ * A selected cell is drawn as Obsidian draws the cells of a range, with the same variables: a layer over
+ * the cell, so it keeps its rendered text and the table keeps its size. The table's own tint goes.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget th.selectable-tables-cell::after,
+.markdown-source-view.mod-cm6 .cm-table-widget td.selectable-tables-cell::after {
+	pointer-events: none;
+	content: "";
+	display: block;
+	position: absolute;
+	inset: calc(-1 * var(--table-selection-border-width));
+	background-color: var(--table-selection);
+	border: var(--table-selection-border-width) solid var(--table-selection-border-color);
+	border-radius: var(--table-selection-border-radius);
+	mix-blend-mode: var(--table-selection-blend-mode);
+	z-index: 1;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget th.selectable-tables-cell,
+.markdown-source-view.mod-cm6 .cm-table-widget td.selectable-tables-cell {
+	scroll-margin: var(--size-4-4);
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.is-selected table.selectable-tables-holds-cell::after {
+	display: none;
+}

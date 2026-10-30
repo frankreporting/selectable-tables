@@ -6,3 +6,17 @@
 .markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-content {
 	caret-color: transparent;
 }
+
+/*
+ * A selected table also gets the thick border Obsidian draws around selected cells, on the tint
+ * Obsidian already lays over a selected table, so it reads as one selected block. Obsidian's own
+ * variables set its color, width and corners, so themes that restyle cell selection restyle this too.
+ */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.is-selected table::after {
+	top: calc(-1 * var(--table-selection-border-width));
+	inset-inline-end: calc(-1 * var(--table-selection-border-width));
+	bottom: calc(-1 * var(--table-selection-border-width));
+	inset-inline-start: calc(-1 * var(--table-selection-border-width));
+	border: var(--table-selection-border-width) solid var(--table-selection-border-color);
+	border-radius: var(--table-selection-border-radius);
+}

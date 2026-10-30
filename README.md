@@ -15,7 +15,7 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | Key | What happens |
 | -- | -- |
 | ↓ from the line above, ↑ from the line below | The caret passes the table and lands on the line beyond it, at the same horizontal position. No cell opens. |
-| → at the end of the line above, ← at the start of the line below | Selects the whole table, the way ← and → select an image. |
+| → at the end of the line above, ← at the start of the line below | Selects the whole table, the way ← and → select an image: tinted and framed with the thick border Obsidian draws around selected cells. |
 | Shift with an arrow | The selection takes the whole table at once. |
 | ↓ or ↑ with no line beyond the table (it starts or ends the note, or sits right below the properties) | Left to Obsidian, as without the plugin. Obsidian keeps a blank line around the tables it makes, so this only happens in notes written elsewhere. |
 

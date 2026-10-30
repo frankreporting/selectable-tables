@@ -1,6 +1,6 @@
 import { EditorState, Line, Transaction } from '@codemirror/state';
 import type { Layout } from './layout';
-import { Cell, cellCaret, cellSource, frontmatterEnd, Span } from './table-text';
+import { Cell, cellCaret, cellSource, frontmatterEnd, needsRepair, Span } from './table-text';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -23,7 +23,9 @@ export type Action =
 	/** Back from a selected cell to the selected table. */
 	| { type: 'table' }
 	/** A caret at `pos`, in a selected cell's text, so that Obsidian opens the cell. */
-	| { type: 'open'; pos: number };
+	| { type: 'open'; pos: number }
+	/** A caret on the delimiter line first, so that Obsidian repairs the table, then into the cell. */
+	| { type: 'repair'; delimiter: number; table: number; cell: Cell };
 
 /** A rendered table's shape. Obsidian fills short rows, but a row's own length is what counts. */
 export interface Grid {
@@ -212,8 +214,15 @@ function extend({ state, layout, leavesLine }: Context, direction: Direction): A
 export function enter({ state, layout, cells }: TableContext): Action | null {
 	const table = selectedTable(state, layout);
 	if (!table) return null;
-	if (cells.selected) return { type: 'open', pos: cellCaret(state.doc, table, cells.selected) };
-	return { type: 'cell', cell: cells.left ?? { row: 0, column: 0 } };
+	if (!cells.selected) return { type: 'cell', cell: cells.left ?? { row: 0, column: 0 } };
+	if (!needsRepair(state.doc, table)) return { type: 'open', pos: cellCaret(state.doc, table, cells.selected) };
+	return { type: 'repair', delimiter: state.doc.line(state.doc.lineAt(table.from).number + 1).from, table: table.from, cell: cells.selected };
+}
+
+/** Where the caret goes once Obsidian has repaired a table, in its text as it is now. */
+export function repairedCaret(state: EditorState, layout: Layout, start: number, cell: Cell): number | null {
+	const table = layout.tableAt(start);
+	return table && cellCaret(state.doc, table, cell);
 }
 
 /**
@@ -262,8 +271,8 @@ export function copied({ state, layout, cells }: TableContext): string | null {
 /**
  * Whether the edit guard drops a change to a selected table. Typing into it, as with Shift+Enter, Ctrl+O
  * or an indent key, does nothing. Deleting, cutting, pasting and dropping stay possible on a selected
- * table: those are meant for the selection, and composed input (IME) passes, since dropping it would
- * leave the screen out of step with the note.
+ * table: those are meant for the selection. Composed input (IME) always passes: dropping it leaves the
+ * composition stuck, and Live Preview stops drawing until it ends.
  *
  * A selected cell looks like one cell over a selection of the whole table, so there every edit to the
  * table is dropped, with or without a user event: Obsidian's formatting commands send none. What passes

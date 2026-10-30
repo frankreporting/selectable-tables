@@ -32,22 +32,54 @@ function rowLine(doc: Text, table: Span, row: number): Line {
 	return doc.line(Math.min(row === 0 ? first : first + row + 1, doc.lineAt(table.to).number));
 }
 
-/** Where each cell of a row sits in its line: from after its pipe to the end of its text. */
-function cellsIn(text: string): Span[] {
+/** What lies between the pipes of a row, cell by cell, padding included. */
+function segmentsIn(text: string): Span[] {
 	const row = text.trimEnd();
-	const cells: Span[] = [];
-	const add = (from: number, to: number) => cells.push({ from, to: from + row.slice(from, to).trimEnd().length });
+	const segments: Span[] = [];
 	let from = row.length - row.trimStart().length;
 	if (row[from] === '|') from++;
 	for (let i = from; i < row.length; i++) {
 		if (row[i] === '\\') i++;
 		else if (row[i] === '|') {
-			add(from, i);
+			segments.push({ from, to: i });
 			from = i + 1;
 		}
 	}
-	if (from < row.length) add(from, row.length);
-	return cells;
+	if (from < row.length) segments.push({ from, to: row.length });
+	return segments;
+}
+
+/** Where each cell of a row sits in its line: from after its pipe to the end of its text. */
+function cellsIn(text: string): Span[] {
+	return segmentsIn(text).map(({ from, to }) => ({ from, to: from + text.slice(from, to).trimEnd().length }));
+}
+
+/** The narrowest column Obsidian's table editor writes. */
+const MIN_COLUMN_WIDTH = 5;
+/** A cell's text sits between one space on each side, and the longest text sets its column's width. */
+const CELL_PADDING = 2;
+
+/**
+ * Whether the table's text isn't what Obsidian's table editor writes: uneven rows, or a column padded to
+ * anything but its longest text. Obsidian repairs such a table when a press opens a cell, but not when a
+ * caret does. A short row's filler cells then have no text to write to, and a cell trimmed on closing
+ * moves its neighbors without the note hearing of it, so typing goes astray or never reaches the note.
+ */
+export function needsRepair(doc: Text, table: Span): boolean {
+	const first = doc.lineAt(table.from).number;
+	const rows: { width: number; text: number }[][] = [];
+	for (let n = first; n <= doc.lineAt(table.to).number; n++) {
+		if (n === first + 1) continue;
+		const { text } = doc.line(n);
+		rows.push(segmentsIn(text).map(({ from, to }) => ({ width: to - from, text: text.slice(from, to).trim().length })));
+	}
+	const columns = Math.max(...rows.map((row) => row.length));
+	if (rows.some((row) => row.length !== columns)) return true;
+	for (let column = 0; column < columns; column++) {
+		const width = Math.max(MIN_COLUMN_WIDTH, ...rows.map((row) => (row[column]?.text ?? 0) + CELL_PADDING));
+		if (rows.some((row) => row[column]?.width !== width)) return true;
+	}
+	return false;
 }
 
 /**

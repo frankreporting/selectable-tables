@@ -21,6 +21,7 @@ These are Obsidian behaviors, not calls, so any Obsidian update can change them.
 4. A table's rows and cells on screen line up with its text: the header is row 0, the delimiter line has no row, and a short row is filled with empty cells.
 5. A caret in a cell's text opens exactly that cell.
 6. The selected table's tint is drawn on the table element, so the plugin can take it off while a cell is selected.
+7. A caret on a table's delimiter line, which is in no cell, opens a cell by the route a press takes, repairing a malformed table.
 
 The plugin makes no private Obsidian calls. It reads only CodeMirror's public layout (`lineBlockAt`, `posAtDOM`, `moveVertically`) and `editorLivePreviewField`, plus three classes Obsidian puts in the DOM: `cm-table-widget`, to tell a cell's editor from a note's, `mod-image-selected`, and `has-selection`, which marks a dragged range of cells.
 
@@ -29,6 +30,10 @@ The plugin makes no private Obsidian calls. It reads only CodeMirror's public la
 - Obsidian's editor commands, such as Toggle comment (Cmd+/), Toggle checkbox (Cmd+L) and Insert horizontal rule, send no user event. The table's own menus and + buttons send none either, and by then Obsidian has already changed the drawn table, so they must never be dropped: a press in the note takes the cell off first.
 - A reload from disk, which is how Sync arrives, carries `userEvent: "set"`.
 - A second pane on the same note arrives as a remote edit with `filter: false`, so it skips transaction filters.
+
+**A caret doesn't repair a table; a press does.** Obsidian keeps its own model of a table's cells, and marks the table malformed when its text isn't what the table editor writes (uneven rows, other padding), or after closing a cell trims it, which changes the model without telling the note. A press opens a cell through `setCellFocus`, which rewrites a malformed table first. A caret landing in a cell skips that, and then typing can eat a pipe, or never reach the note. So Enter on such a table goes by the delimiter line first (`needsRepair` in `table-text.ts`). Stock Obsidian has the same flaw when you arrow into a table.
+
+**Never interfere with a running composition.** Dropping composed input in the guard, or moving the selection in `compositionstart`, leaves `view.composing` true for good. CodeMirror then ignores keys, and Live Preview stops rebuilding, so new notes draw no tables until the editor is replaced. An input method's keydown (key code 229) comes before its composition, and that's the only safe moment to move the selection. Simulated composition (`Input.imeSetComposition`) must be finished with `Input.insertText`, or it freezes the test window the same way. Editor commands like Toggle line numbers are saved to the vault's tracked `app.json`, so a sweep of commands has to skip them.
 
 A table is a block widget over text that reads as a Markdown table. At a note's start or right below the frontmatter, Obsidian draws a table with an exclusive start, and CodeMirror then reports the line as an empty text part plus the widget; `partAt` in `layout.ts` handles that. Unit tests use a fake layout (`test/notes.ts`), which can't show such details, so check layout changes against a real editor too. Since the check is the text, another plugin's block widget drawn over table Markdown would count as a table too.
 

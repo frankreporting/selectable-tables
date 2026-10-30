@@ -2,7 +2,7 @@ import { EditorSelection, EditorState, Extension, Prec, SelectionRange } from '@
 import { EditorView, KeyBinding, keymap } from '@codemirror/view';
 import { editorLivePreviewField } from 'obsidian';
 import { cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, Context, copied, Direction, enter, escape, noCells, selectedTable, stay, stopsEdit, tab } from './decide';
+import { Action, arrow, Context, copied, Direction, enter, escape, noCells, repairedCaret, selectedTable, stay, stopsEdit, tab } from './decide';
 import { viewLayout } from './layout';
 import type { Span } from './table-text';
 
@@ -95,6 +95,17 @@ function run(view: EditorView, action: Action | null): boolean {
 			// Obsidian scrolls the cell into view as it opens. Scrolling to a caret in a tall table wouldn't.
 			view.dispatch({ selection: EditorSelection.cursor(action.pos), userEvent: 'select' });
 			return true;
+		case 'repair': {
+			view.plugin(cellSelection)?.opening();
+			// A caret on the delimiter line is in no cell, so Obsidian takes the way a press takes: it
+			// rewrites a malformed table and opens a first cell, on a timer. This one runs right after it.
+			view.dispatch({ selection: EditorSelection.cursor(action.delimiter), userEvent: 'select' });
+			view.dom.ownerDocument.defaultView?.setTimeout(() => {
+				const pos = repairedCaret(view.state, viewLayout(view), action.table, action.cell);
+				if (pos !== null) view.dispatch({ selection: EditorSelection.cursor(pos), userEvent: 'select' });
+			});
+			return true;
+		}
 	}
 }
 
@@ -146,6 +157,9 @@ function escapeCell(view: EditorView): boolean {
 }
 
 const bindings: KeyBinding[] = [
+	// Held down, Enter stops at the selected table or cell. Its repeats would walk on into a cell, and
+	// from there add rows. This comes first so it runs ahead of the key's own binding.
+	{ any: (view, event) => event.key === 'Enter' && event.repeat && active(view) && selectedTable(view.state, viewLayout(view)) !== null },
 	{ key: 'ArrowDown', run: onArrow('down', false), shift: onArrow('down', true) },
 	{ key: 'ArrowUp', run: onArrow('up', false), shift: onArrow('up', true) },
 	{ key: 'ArrowRight', run: onArrow('right', false), shift: onArrow('right', true) },
@@ -190,9 +204,17 @@ const markSelectedTable = EditorView.editorAttributes.of((view) => {
  */
 const selectedEvents = EditorView.domEventHandlers({
 	beforeinput(event, view) {
-		if (cellSelected(view.state)) return true;
+		if (cellSelected(view.state)) return event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo';
 		if (event.inputType !== 'insertText' && event.inputType !== 'insertReplacementText') return false;
 		return selectedTables.has(view.state);
+	},
+	// An input method composes past beforeinput, and at a note's start or right below the properties it
+	// would replace the selected table. Its keydown comes first, with key code 229, and the caret steps
+	// beside the table then. Moving the selection any later leaves the composition stuck, and Live Preview
+	// stops drawing until it ends, so an input method with no keydown is left alone.
+	keydown(event, view) {
+		if (event.keyCode === 229 && selectedTables.has(view.state)) run(view, escape({ ...context(view), cells: noCells }));
+		return false;
 	},
 	copy(event, view) {
 		const text = copied(context(view));

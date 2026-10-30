@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Text } from '@codemirror/state';
-import { cellCaret, cellSource, frontmatterEnd, looksLikeTable } from '../src/editor/table-text';
+import { cellCaret, cellSource, frontmatterEnd, looksLikeTable, needsRepair } from '../src/editor/table-text';
 
 const doc = (...lines: string[]) => Text.of(lines);
 const whole = (text: Text) => ({ from: 0, to: text.length });
@@ -100,6 +100,47 @@ test('a cell\'s source shows pipes and line breaks as its editor does', () => {
 	assert.equal(source(2), 'one\ntwo\nthree');
 	assert.equal(source(3), '`a<br>b`');
 	assert.equal(source(4), 'a\\\\|b');
+});
+
+test('a table as Obsidian pads it needs no repair', () => {
+	const padded = doc('| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |');
+	assert.equal(needsRepair(padded, whole(padded)), false);
+	const narrow = doc('| a   | b   |', '| --- | --- |', '| c   | d   |');
+	assert.equal(needsRepair(narrow, whole(narrow)), false);
+	const aligned = doc('| Plant | Count |', '| :---- | ----: |', '| Fern  |    10 |');
+	assert.equal(needsRepair(aligned, whole(aligned)), false);
+	const escaped = doc('| a \\| b |', '| ------ |', '| c      |');
+	assert.equal(needsRepair(escaped, whole(escaped)), false);
+});
+
+test('a short row needs repair: its filler cells have no text to edit', () => {
+	const short = doc('| Shelf | Pots | Soil |', '| ----- | ---- | ---- |', '| Mid   | 5    |');
+	assert.ok(needsRepair(short, whole(short)));
+});
+
+test('a long row needs repair', () => {
+	const long = doc('| a   | b   |', '| --- | --- |', '| c   | d   | e   |');
+	assert.ok(needsRepair(long, whole(long)));
+});
+
+test('a column wider than its text needs repair: Obsidian trims a cell on leaving it without writing that', () => {
+	const stale = doc('| Fruit      | Qty |', '| ---------- | --- |', '| Apple red  | 10  |', '| Pear       | 20  |');
+	assert.ok(needsRepair(stale, whole(stale)));
+});
+
+test('padding that differs between rows needs repair', () => {
+	const unpadded = doc('| a | bbbb |', '|---|---|', '| cc | d |');
+	assert.ok(needsRepair(unpadded, whole(unpadded)));
+});
+
+test('a table with no outer pipes needs repair', () => {
+	const bare = doc('Plant | Room', '--- | ---', 'Fern | Hall');
+	assert.ok(needsRepair(bare, whole(bare)));
+});
+
+test('the delimiter line does not count towards a column', () => {
+	const wide = doc('| a   |', '| ------- |', '| b   |');
+	assert.equal(needsRepair(wide, whole(wide)), false);
 });
 
 test('the frontmatter ends at its closing line', () => {

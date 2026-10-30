@@ -47,7 +47,7 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | -- | -- |
 | ↑ ↓ ← → | The selection moves one cell, and stops at the table's edge. |
 | Tab, Shift+Tab | The next or previous cell, wrapping between rows. It stops on the last and first cells, and adds no rows. |
-| Enter | Opens the cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. |
+| Enter | Opens the cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. On a table with uneven rows or padding Obsidian didn't write, it first tidies the table, as a click does. |
 | Escape | Back to the selected table. |
 | Copy | Copies the cell's Markdown, the way the cell's editor shows it. |
 | Typing, Backspace, Delete, Cut, Paste, Shift with an arrow | Nothing happens. Editor commands leave the table alone too. |
@@ -56,7 +56,7 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 
 With Vim mode on, Vim's own keys come first: in normal mode, j, k and the arrows still step into tables.
 
-With an input method (IME), text composed on a selected table or cell lands on the line below the table.
+With an input method (IME), starting to compose on a selected table or cell moves the caret beside the table, and the text lands there.
 
 ## Development
 

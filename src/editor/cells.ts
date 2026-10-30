@@ -27,13 +27,17 @@ export function cellSelected(state: EditorState): boolean {
 class CellSelection implements PluginValue, Cells {
 	selected: Cell | null = null;
 	left: Cell | null = null;
-	/** The side the table was selected from, kept while a cell is open so Escape can come back to it. */
-	private side: { table: number; fromAbove: boolean } | null = null;
+	/** Where the table all this belongs to starts. */
+	private start: number | null = null;
+	/** Whether the table was selected from above, kept while a cell is open so Escape can come back to it. */
+	private side: boolean | null = null;
 	private table: HTMLTableElement | null = null;
 	private cell: HTMLTableCellElement | null = null;
 
 	constructor(private readonly view: EditorView) {
-		view.contentDOM.addEventListener('pointerdown', this.onPress, true);
+		view.contentDOM.addEventListener('pointerdown', this.onLeave, true);
+		view.contentDOM.addEventListener('dragenter', this.onLeave, true);
+		view.contentDOM.addEventListener('focusin', this.onFocus, true);
 	}
 
 	get grid(): Grid {
@@ -42,11 +46,13 @@ class CellSelection implements PluginValue, Cells {
 	}
 
 	select(cell: Cell) {
+		const { view } = this;
+		this.start ??= selectedTable(view.state, viewLayout(view))?.from ?? null;
 		this.selected = cell;
 		this.left = null;
-		statesWithCell.add(this.view.state);
+		statesWithCell.add(view.state);
 		this.mark(this.tableElement());
-		this.view.requestMeasure(this.reveal);
+		view.requestMeasure(this.reveal);
 	}
 
 	/** Escape on the selected cell: back to the selected table, remembering the cell for Enter. */
@@ -55,52 +61,76 @@ class CellSelection implements PluginValue, Cells {
 		this.deselect();
 	}
 
-	/** Enter on the selected cell. Opening it takes the note's selection off the table. */
+	/**
+	 * Enter on the selected cell. Opening it takes the note's selection off the table, and Obsidian
+	 * focuses the cell's editor before this plugin hears of that, so the cell comes off first.
+	 */
 	opening() {
 		const { main } = this.view.state.selection;
-		this.side = { table: main.from, fromAbove: main.anchor < main.head };
+		this.side = main.anchor < main.head;
+		this.deselect();
 	}
 
 	/** Whether the table whose cell is closing was selected from above. */
 	fromAbove(table: Span): boolean {
-		return this.side?.table === table.from && this.side.fromAbove;
+		return this.start === table.from && this.side === true;
 	}
 
 	update(update: ViewUpdate) {
-		if (!this.selected && !this.left && !this.side) return;
+		if (this.start === null) return;
 		const layout = viewLayout(this.view);
-		if (this.side) {
-			const table = update.changes.mapPos(this.side.table);
-			this.side = layout.tableAt(update.state.selection.main.head)?.from === table ? { ...this.side, table } : null;
-		}
-		if (!selectedTable(update.state, layout)) {
+		const start = update.changes.mapPos(this.start, 1);
+		const { head } = update.state.selection.main;
+		if (selectedTable(update.state, layout)?.from === start) {
+			this.start = start;
+			if (this.selected) {
+				statesWithCell.add(update.state);
+				this.view.requestMeasure(this.redraw);
+			}
+		} else if (this.side !== null && layout.tableAt(head)?.from === start) {
+			// A cell is open: the note's caret is in the table's text.
+			this.start = start;
 			this.left = null;
 			this.deselect();
-		} else if (this.selected) {
-			statesWithCell.add(update.state);
-			if (update.docChanged || update.viewportChanged) this.view.requestMeasure(this.redraw);
+		} else {
+			this.forget();
 		}
 	}
 
 	destroy() {
-		this.view.contentDOM.removeEventListener('pointerdown', this.onPress, true);
-		this.deselect();
+		const { contentDOM } = this.view;
+		contentDOM.removeEventListener('pointerdown', this.onLeave, true);
+		contentDOM.removeEventListener('dragenter', this.onLeave, true);
+		contentDOM.removeEventListener('focusin', this.onFocus, true);
+		this.forget();
 	}
 
 	/**
-	 * A press in the note takes the cell off before anything else sees it. Obsidian's table menus and
-	 * buttons edit the table with no user event, and the edit guard must not stop those: Obsidian has
-	 * already changed the drawn table by then. It runs on the capture phase, as widgets keep their events.
+	 * A press or a drag in the note takes the cell off before anything else sees it. Obsidian's table
+	 * menus, buttons and drop targets edit the table with no user event, and the edit guard must not stop
+	 * those: Obsidian has already changed the drawn table by then. This runs in the capture phase, since
+	 * widgets keep their events from the editor.
 	 */
-	private readonly onPress = () => {
-		this.left = null;
-		if (this.selected) this.deselect();
+	private readonly onLeave = () => {
+		if (this.selected) this.forget();
+	};
+
+	/** The same for anything inside the content taking the focus, such as a cell's editor. */
+	private readonly onFocus = (event: FocusEvent) => {
+		if (event.target !== this.view.contentDOM) this.onLeave();
 	};
 
 	private deselect() {
 		this.selected = null;
 		statesWithCell.delete(this.view.state);
 		this.mark(null);
+	}
+
+	private forget() {
+		this.start = null;
+		this.side = null;
+		this.left = null;
+		this.deselect();
 	}
 
 	/** After the editor draws an update: Obsidian may have built the table anew, without the marks. */

@@ -211,7 +211,7 @@ describe('a selected table', () => {
 });
 
 describe('a selected cell', () => {
-	const BIG = '| a | b | c |\n| - | - | - |\n| d | e | f |\n| g | h | i |';
+	const BIG = '| a   | b   | c   |\n| --- | --- | --- |\n| d   | e   | f   |\n| g   | h   | i   |';
 	const grid: Grid = { rows: 3, columns: () => 3 };
 	const state = () => note(`\n⟨${BIG}⟩\n`);
 	const cellAt = (row: number, column: number): Cells => ({ selected: { row, column }, left: null, grid });
@@ -269,7 +269,14 @@ describe('a selected cell', () => {
 
 	test('Enter opens the cell with the caret at the end of its text', () => {
 		const start = note(`\n⟨${BIG}⟩\n`).doc.toString().indexOf('| d');
-		assert.deepEqual(enter(on(state(), cellAt(1, 1))), { type: 'open', pos: start + '| d | e'.length });
+		assert.deepEqual(enter(on(state(), cellAt(1, 1))), { type: 'open', pos: start + '| d   | e'.length });
+	});
+
+	test('Enter repairs a table Obsidian would repair for a click, from its delimiter line', () => {
+		const shortRow = '| a   | b   |\n| --- | --- |\n| c   |';
+		const text = `\n⟨${shortRow}⟩\n`;
+		const start = text.replace(/[⟨⟩]/g, '').indexOf('| a');
+		assert.deepEqual(enter(on(note(text), cellAt(1, 0))), { type: 'repair', delimiter: start + '| a   | b   |\n'.length, table: start, cell: { row: 1, column: 0 } });
 	});
 
 	test('Escape goes back to the selected table', () => {
@@ -332,7 +339,7 @@ describe('the edit guard', () => {
 		assert.ok(!stopsEdit(remote, table, true));
 	});
 
-	test('composed input passes, or the screen would leave the note behind', () => {
+	test('composed input passes: dropping it leaves the composition stuck', () => {
 		assert.ok(!stopsEdit(edit('input.type.compose'), table, true));
 		assert.ok(!stopsEdit(edit('input.type.compose'), table, false));
 	});

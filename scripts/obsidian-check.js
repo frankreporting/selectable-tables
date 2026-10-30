@@ -69,7 +69,10 @@
 		cm.focus();
 		await sleep(250);
 	}
+	// The caret moves off first: on a selected cell, the edit guard stops this edit too.
 	async function restore(cm, text) {
+		cm.dispatch({ selection: { anchor: 0 } });
+		await settle();
 		if (cm.state.doc.toString() !== text) cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: text } });
 		await settle();
 	}
@@ -444,19 +447,90 @@
 		await keys(cm, uneven, ...repeat('ArrowDown', 2), ...repeat('ArrowRight', 2));
 		const filler = at(cm);
 		await press(cm, 'Enter');
-		await sleep(250);
-		check('31 a blank cell in a short row can be selected, and Enter opens the last cell the row has', filler === '2,2' && openAt(cm) === '2,1', { filler, open: openAt(cm) });
+		await sleep(350);
+		check('31 Enter on a blank cell in a short row repairs the table, as a click does, and opens that cell', filler === '2,2' && openAt(cm) === '2,2' && openCell(cm), { filler, open: openAt(cm) });
+		cellView(cm).dispatch(cellView(cm).state.replaceSelection('x'), { userEvent: 'input.type' });
+		await settle();
 		await press(cellEditor(cm), 'Escape');
-		await sleep(250);
-		await keys(cm, uneven, 'ArrowDown', ...repeat('ArrowRight', 2));
+		await sleep(300);
+		check('31 what\'s typed there reaches the note, and that cell is selected', at(cm) === '2,2' && cm.state.doc.toString().includes('| Mid') && /\| Mid +\| 5 +\| x +\|/.test(cm.state.doc.toString()), cm.state.doc.toString().split('\n').find((l) => l.startsWith('| Mid')));
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		await restore(cm, original);
+		const longRow = await tableUnder(cm, 'Uneven rows');
+		await selectTable(cm, longRow);
 		await press(cm, 'Enter');
-		await sleep(250);
+		await keys(cm, longRow, ...repeat('ArrowDown', 3), ...repeat('ArrowRight', 3));
+		await press(cm, 'Enter');
+		await sleep(350);
 		check('32 the fourth cell of a long row opens', openAt(cm) === '3,3', openAt(cm));
 		await press(cellEditor(cm), 'Escape');
 		await sleep(250);
 		await press(cm, 'Escape');
 		await press(cm, 'Escape');
-		check('32 odd rows leave the note as it was', cm.state.doc.toString() === original, sel(cm));
+		await restore(cm, original);
+
+		// A cell that ends in a space and sets its column's width: closing it trims Obsidian's copy only.
+		const trimmed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, trimmed);
+		await press(cm, 'Enter');
+		await keys(cm, trimmed, 'ArrowDown', 'ArrowRight', 'ArrowRight');
+		await press(cm, 'Enter');
+		await sleep(300);
+		cellView(cm).dispatch(cellView(cm).state.replaceSelection(' and shady '), { userEvent: 'input.type' });
+		await settle();
+		await press(cellEditor(cm), 'Escape');
+		await sleep(300);
+		await press(cm, 'Enter');
+		await sleep(350);
+		const reopened = openAt(cm);
+		cellView(cm).dispatch(cellView(cm).state.replaceSelection('x'), { userEvent: 'input.type' });
+		await settle();
+		await press(cellEditor(cm), 'Escape');
+		await sleep(300);
+		const keptRow = cm.state.doc.toString().split('\n').find((l) => l.includes('Keep damp'));
+		check('a cell ending in a space, opened again, takes what\'s typed in the right place', reopened === '1,2' && (keptRow.match(/(?<!\\)\|/g) ?? []).length === 4 && keptRow.includes('shadyx'), { reopened, keptRow });
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		await restore(cm, original);
+
+		// Undo can put the selection back on a table other than the one holding the cell.
+		const firstTable = await tableUnder(cm, 'Seed trays');
+		const secondTable = await tableUnder(cm, 'Uneven rows');
+		cm.focus();
+		cm.dispatch({ selection: { anchor: secondTable.from, head: secondTable.to } });
+		await sleep(700);
+		await press(cm, 'Delete');
+		await sleep(250);
+		const held = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, held);
+		await press(cm, 'Enter');
+		await press(cm, 'z', { metaKey: navigator.platform.startsWith('Mac'), ctrlKey: !navigator.platform.startsWith('Mac'), code: 'KeyZ' });
+		await sleep(300);
+		check('undo that selects another table leaves no cell marked', firstTable && marked(cm).length === 0 && cm.state.doc.toString() === original, at(cm));
+		await restore(cm, original);
+
+		// An input method's keydown has key code 229, and the caret steps beside the table on it.
+		const composed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, composed);
+		await press(cm, 'Enter');
+		await press(cm, 'Process', { keyCode: 229 });
+		check('an input method\'s key on a selected cell moves the caret beside the table', marked(cm).length === 0 && sel(cm).anchor === sel(cm).head && sel(cm).line === composed.first - 1 && cm.state.doc.toString() === original, sel(cm));
+
+		// A held Enter stops at the selected cell, and a drag over the table drops it.
+		const heldTable = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, heldTable);
+		await press(cm, 'Enter', { repeat: true });
+		const repeatedOnTable = marked(cm).length;
+		await press(cm, 'Enter');
+		await press(cm, 'Enter', { repeat: true });
+		await press(cm, 'Enter', { repeat: true });
+		check('a held Enter opens nothing', repeatedOnTable === 0 && at(cm) === '0,0' && !openCell(cm), at(cm));
+		heldTable.el.querySelector('td').dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true }));
+		await sleep(200);
+		check('a drag over the table drops the selected cell', marked(cm).length === 0, at(cm));
+		await caretOnLine(cm, heldTable.first - 1);
+		await restore(cm, original);
 
 		const wide = await tableUnder(cm, 'Wide table');
 		await selectTable(cm, wide);

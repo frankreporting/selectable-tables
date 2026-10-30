@@ -4,7 +4,17 @@ An Obsidian plugin for Live Preview. It lets the arrow keys pass a table in one 
 
 Without it, every arrow press that lands in a table opens an editor for that cell. Holding ↓ through a note stalls at every table, and links in the table flicker as cells switch between rendered and source text.
 
-The plugin is in development and not yet in the community plugin list.
+![A selected table, tinted and framed with a thick border](docs/selected-table.png)
+
+## Install
+
+Until it's in the community plugin list, install it from a release:
+
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/frankreporting/selectable-tables/releases/latest).
+2. Put them in `<vault>/.obsidian/plugins/selectable-tables/`.
+3. Reload Obsidian and enable **Selectable Tables** in **Settings → Community plugins**.
+
+It needs Obsidian 1.14.4 or later.
 
 ## Keys
 

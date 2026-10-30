@@ -38,4 +38,4 @@ A table is a block widget over text that reads as a Markdown table. At a note's 
 
 ## No personal data
 
-The repo is private, but nothing personal goes into commits, PRs, tests or the test vault: invented notes and values only.
+The repo is public, so nothing personal goes into commits, PRs, tests or the test vault: invented notes and values only.

@@ -2,13 +2,25 @@
 
 ## Unreleased
 
-- Enter on a selected table selects a cell. The arrows and Tab move the selection between cells without opening them, so the table keeps its size and each press stays fast, whatever the note's length or your plugins. Enter opens the selected cell, and Escape climbs back up.
-- Escape in a cell selects that cell, not the whole table.
-- Delete at the end of the line above a table selects it, as Backspace does from the line below, instead of pulling the table's first row up.
-- An arrow right after pasting a table selects it, instead of opening a cell.
-- Copy on a selected cell copies its Markdown.
-- Enter only opens a cell in a table Obsidian wrote. Opening any other from the keyboard could corrupt it or lose what was typed, so its frame turns red instead. A click still edits it, and that usually tidies the table, as it always has, so Enter works from then on.
-- With an input method, composing on a selected table moves the caret beside it, instead of replacing a table at the note's start or right below the properties.
+Move around inside a table from the keyboard, without opening cells or changing the table's size.
+
+### New
+
+- Enter on a selected table now selects a cell. Press Enter again to edit it, and Escape to go back.
+- Use the arrow keys or Tab to move between cells. Cells stay rendered as you go, so the table keeps its size.
+- Copy on a selected cell copies just that cell.
+
+### Improved
+
+- Moving between cells stays fast, however long the note is.
+- Escape in a cell now selects that cell, not the whole table.
+- Delete at the end of the line above a table now selects the table, like Backspace from the line below.
+
+### Fixed
+
+- Opening a cell from the keyboard can no longer damage a table Obsidian didn't format, such as a hand-typed one. Its frame turns red instead: click a cell to edit it.
+- The arrow keys no longer open a cell right after you paste a table.
+- Typing with an input method no longer replaces a selected table at the top of a note. The text lands beside the table.
 
 ## 0.1.0 (2026-10-30)
 

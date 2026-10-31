@@ -41,6 +41,21 @@ A table is a block widget over text that reads as a Markdown table. At a note's 
 
 `npm run build` (typecheck included), `npm run lint` and `npm test` must pass. CI runs the same on Node 22 and 24.
 
+## Releases
+
+Every release gets release notes, drafted as part of the release, and Brian reads them before it's published. They read like Obsidian's own, for an average user:
+
+- **One opening sentence** on what the release brings.
+- **Three headings, in this order: New, Improved, Fixed.** Leave out any that's empty.
+- **Short, plain bullets:** one line each, on what the user will notice, in their words. Name keys and buttons, not internals: no issue numbers, function names or Obsidian's internals, and no reasons they don't need.
+
+Each PR with a change a user would notice adds its bullet under `## Unreleased` in `CHANGELOG.md`, in this format. To release:
+
+1. Tighten `## Unreleased` into the notes, and show Brian the draft.
+2. Rename it `## <version> (<date>)`, bump the version, and merge that.
+3. Tag the release. The release workflow builds a draft on GitHub with no notes.
+4. Paste the same notes into that draft, and publish. Obsidian's plugin page links to it, and update checkers show it.
+
 ## Working in Obsidian
 
 - Drive it through the CLI: `obsidian vault="Selectable Tables Test" eval code=...` and `dev:cdp`. The `obsidian` module can't be loaded from that eval; `window.electron.ipcRenderer.sendSync('version')` gives the app's version. `document.execCommand` skips `beforeinput`, so test typing with real key events (`dev:cdp method=Input.dispatchKeyEvent`).

@@ -266,19 +266,19 @@ describe('a selected cell', () => {
 	const cellAt = (row: number, column: number): Cells => ({ selected: { row, column }, left: null, grid });
 	const go = (row: number, column: number, direction: Direction, shift = false) =>
 		arrow({ ...on(state(), cellAt(row, column)), leavesLine: () => true }, direction, shift);
-	const to = (row: number, column: number): Action => ({ type: 'cell', cell: { row, column } });
+	const to = (row: number, column: number, toward?: 'up' | 'left'): Action => ({ type: 'cell', cell: { row, column }, ...(toward && { toward }) });
 
 	test('the arrows move it one cell', () => {
-		assert.deepEqual(go(1, 1, 'up'), to(0, 1));
+		assert.deepEqual(go(1, 1, 'up'), to(0, 1, 'up'));
 		assert.deepEqual(go(1, 1, 'down'), to(2, 1));
-		assert.deepEqual(go(1, 1, 'left'), to(1, 0));
+		assert.deepEqual(go(1, 1, 'left'), to(1, 0, 'left'));
 		assert.deepEqual(go(1, 1, 'right'), to(1, 2));
 	});
 
 	test('the arrows stop at the outer edge', () => {
-		assert.deepEqual(go(0, 1, 'up'), to(0, 1));
+		assert.deepEqual(go(0, 1, 'up'), to(0, 1, 'up'));
 		assert.deepEqual(go(2, 1, 'down'), to(2, 1));
-		assert.deepEqual(go(1, 0, 'left'), to(1, 0));
+		assert.deepEqual(go(1, 0, 'left'), to(1, 0, 'left'));
 		assert.deepEqual(go(1, 2, 'right'), to(1, 2));
 	});
 
@@ -300,7 +300,7 @@ describe('a selected cell', () => {
 
 	test('Tab goes to the next cell, wrapping to the next row', () => {
 		assert.deepEqual(tab(on(state(), cellAt(1, 1)), true), to(1, 2));
-		assert.deepEqual(tab(on(state(), cellAt(1, 2)), true), to(2, 0));
+		assert.deepEqual(tab(on(state(), cellAt(1, 2)), true), to(2, 0, 'left'));
 	});
 
 	test('Tab on the last cell stays there', () => {
@@ -308,12 +308,12 @@ describe('a selected cell', () => {
 	});
 
 	test('Shift+Tab goes to the previous cell, wrapping to the previous row', () => {
-		assert.deepEqual(tab(on(state(), cellAt(1, 1)), false), to(1, 0));
-		assert.deepEqual(tab(on(state(), cellAt(1, 0)), false), to(0, 2));
+		assert.deepEqual(tab(on(state(), cellAt(1, 1)), false), to(1, 0, 'left'));
+		assert.deepEqual(tab(on(state(), cellAt(1, 0)), false), to(0, 2, 'up'));
 	});
 
 	test('Shift+Tab on the first cell stays there', () => {
-		assert.deepEqual(tab(on(state(), cellAt(0, 0)), false), to(0, 0));
+		assert.deepEqual(tab(on(state(), cellAt(0, 0)), false), to(0, 0, 'left'));
 	});
 
 	test('Enter opens the cell with the caret at the end of its text', () => {
@@ -463,10 +463,10 @@ describe('a selected cell and the keys that jump', () => {
 	const BIG = '| a   | b   | c   |\n| --- | --- | --- |\n| d   | e   | f   |\n| g   | h   | i   |';
 	const grid: Grid = { rows: 3, columns: () => 3 };
 	const on3 = (row: number, column: number, cells: Grid = grid) => on(note(`\n⟨${BIG}⟩\n`), { selected: { row, column }, left: null, grid: cells });
-	const to = (row: number, column: number): Action => ({ type: 'cell', cell: { row, column } });
+	const to = (row: number, column: number, toward?: 'up' | 'left'): Action => ({ type: 'cell', cell: { row, column }, ...(toward && { toward }) });
 
 	test('Home and Cmd+← go to the first cell of the row', () => {
-		assert.deepEqual(rowEnd(on3(1, 1), false), to(1, 0));
+		assert.deepEqual(rowEnd(on3(1, 1), false), to(1, 0, 'left'));
 	});
 
 	test('End and Cmd+→ go to the last cell of the row', () => {
@@ -474,7 +474,7 @@ describe('a selected cell and the keys that jump', () => {
 	});
 
 	test('Page Up goes to the top of the column', () => {
-		assert.deepEqual(page(on3(2, 1), false), to(0, 1));
+		assert.deepEqual(page(on3(2, 1), false), to(0, 1, 'up'));
 	});
 
 	test('Page Down goes to the bottom of the column', () => {
@@ -482,7 +482,7 @@ describe('a selected cell and the keys that jump', () => {
 	});
 
 	test('Cmd+↑ and Cmd+Home go to the top of the column', () => {
-		assert.deepEqual(noteEnd(on3(2, 1), false), to(0, 1));
+		assert.deepEqual(noteEnd(on3(2, 1), false), to(0, 1, 'up'));
 	});
 
 	test('Cmd+↓ and Cmd+End go to the bottom of the column', () => {
@@ -490,9 +490,9 @@ describe('a selected cell and the keys that jump', () => {
 	});
 
 	test('already on that cell, a jump stays on it', () => {
-		assert.deepEqual(rowEnd(on3(1, 0), false), to(1, 0));
+		assert.deepEqual(rowEnd(on3(1, 0), false), to(1, 0, 'left'));
 		assert.deepEqual(rowEnd(on3(1, 2), true), to(1, 2));
-		assert.deepEqual(page(on3(0, 1), false), to(0, 1));
+		assert.deepEqual(page(on3(0, 1), false), to(0, 1, 'up'));
 		assert.deepEqual(noteEnd(on3(2, 1), true), to(2, 1));
 	});
 

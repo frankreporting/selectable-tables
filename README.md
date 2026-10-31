@@ -64,13 +64,33 @@ With Vim mode on, Vim's own keys come first: in normal mode, j, k and the arrows
 
 With an input method (IME), starting to compose on a selected table or cell moves the caret beside the table, and the text lands there.
 
+## Freeze rows and columns
+
+A long or wide table can keep its first rows and columns in view as you scroll, like freeze panes in a spreadsheet. Each table scrolls on its own, and any number of tables in a note can freeze. This works in Live Preview.
+
+For now you set it by hand. Add a comment to any cell of the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column:
+
+```markdown
+| %%freeze 2 1%% Name | Bed | Sown |
+| ------------------- | --- | ---- |
+```
+
+The comment doesn't show, and it stays with the table's text, so it copies, syncs and moves with the table. Apps that don't know Obsidian's `%%` comments, such as GitHub, show it as plain text.
+
+- `%%freeze 0 0%%`, or no comment, freezes nothing. Deleting the column that holds the comment ends the freeze.
+- A table can freeze up to 9 columns.
+- Rows taller than half the pane, or columns as wide as the table, stop pinning until there's room, so there's always somewhere to scroll.
+- With a cell selected, moving up into a frozen row or left into a frozen column takes the table back to that end, so the first rows and columns after them show. Moving along a frozen row or column leaves the view where it is.
+
+Two things don't work yet with a frozen table: the selected cell can end up hidden under the frozen rows or columns as you move, and a drag across cells selects the wrong cells.
+
 ## Roadmap
 
 What's planned, broadly. The order and the details may change.
 
 **Next:**
 
-- **Freeze rows and columns:** keep a table's first rows and columns in view as you scroll, in Live Preview and Reading view, set from a command or the right-click menu. A wide table's sideways scrollbar can stay at the bottom of the pane too.
+- **Finish freezing rows and columns:** keep cells in view around them, make drags work, and set them from a command or the right-click menu, in Reading view too. A wide table's sideways scrollbar can stay at the bottom of the pane as well.
 
 **After that:**
 
@@ -109,6 +129,8 @@ npm run test-vault  # build, then copy the plugin into the test vault
 Open the folder as a vault in Obsidian (**Open another vault → Open folder as vault**), turn on community plugins when asked, and enable **Selectable Tables** in **Settings → Community plugins**. Obsidian keeps its own state in the vault's `.obsidian` folder; git ignores all of it except `app.json` and `community-plugins.json`.
 
 `scripts/make-long-note.mjs` regenerates the vault's **Long note**, which is used only for timing.
+
+`scripts/make-frozen-note.mjs` regenerates **Frozen tables**, for frozen rows and columns.
 
 ## License
 

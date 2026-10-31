@@ -1252,8 +1252,15 @@
 			cm.scrollDOM.scrollTop = widgetTop + 500;
 			await frames();
 			check('Frozen 5 the selected table\'s tint lies over the frozen rows and column', plants.el.classList.contains('is-selected') && parseInt(getComputedStyle(tableBox, '::after').zIndex) > parseInt(getComputedStyle(header).zIndex), getComputedStyle(tableBox, '::after').zIndex);
+			plants.el.scrollLeft = 300;
+			await frames();
+			const tinted = getComputedStyle(tableBox, '::after');
+			check('Frozen 5 scrolled sideways, the tint stops at the frozen column', tinted.animationName === 'selectable-tables-tint' && tinted.clipPath.includes('calc('), `${tinted.animationName} ${tinted.clipPath}`);
+			plants.el.scrollLeft = 0;
+			await frames();
 			await press(cm, 'Enter');
-			check('Frozen 5 Enter selects a cell, and it shows its frame', at(cm) === '0,0' && parseFloat(getComputedStyle(rowsOf(plants)[0].cells[0], '::after').borderTopWidth) > 0, at(cm));
+			const frame = getComputedStyle(rowsOf(plants)[0].cells[0], '::after');
+			check('Frozen 5 Enter selects a cell, and its frame sits inside it, where no neighbor covers it', at(cm) === '0,0' && parseFloat(frame.borderTopWidth) > 0 && [frame.top, frame.right, frame.bottom, frame.left].every((side) => side === '0px'), { at: at(cm), top: frame.top, right: frame.right, bottom: frame.bottom, left: frame.left });
 			await press(cm, 'Escape');
 			await press(cm, 'Escape');
 

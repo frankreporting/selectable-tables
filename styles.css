@@ -44,6 +44,11 @@
 	scroll-margin: var(--size-4-4);
 }
 
+/* A frozen cell can't draw over the frozen cells beside it, or an unfrozen one over a frozen one, so in a frozen table the frame sits inside its cell. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen :is(th, td).selectable-tables-cell::after {
+	inset: 0;
+}
+
 /* Enter can't open a cell of this table: the frame turns red until the selection moves on. */
 .markdown-source-view.mod-cm6 .cm-table-widget th.selectable-tables-refused::after,
 .markdown-source-view.mod-cm6 .cm-table-widget td.selectable-tables-refused::after {
@@ -232,4 +237,44 @@
 /* The selected table's tint lies over everything in the table, frozen cells included. */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen.is-selected table::after {
 	z-index: 4;
+}
+
+/*
+ * The tint belongs to the table, which slides left under the frozen columns, so it would show in the strip
+ * beside them. Its clip follows the table's sideways scroll, and stops where the frozen columns start: the
+ * table's width less the box's is how far the table can scroll, and the frame adds its width to the tint.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns {
+	container-type: inline-size;
+}
+
+@supports (animation-timeline: scroll()) {
+	.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns.is-selected table::after {
+		animation: selectable-tables-tint linear both;
+		animation-timeline: scroll(nearest inline);
+	}
+
+	.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns.is-selected:dir(rtl) table::after {
+		animation-name: selectable-tables-tint-rtl;
+	}
+}
+
+@keyframes selectable-tables-tint {
+	from {
+		clip-path: inset(0);
+	}
+
+	to {
+		clip-path: inset(0 0 0 calc(100% - 100cqi - var(--table-selection-border-width)));
+	}
+}
+
+@keyframes selectable-tables-tint-rtl {
+	from {
+		clip-path: inset(0);
+	}
+
+	to {
+		clip-path: inset(0 calc(100% - 100cqi - var(--table-selection-border-width)) 0 0);
+	}
 }

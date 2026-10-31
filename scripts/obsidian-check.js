@@ -1165,6 +1165,188 @@
 		cm = view.editor.cm;
 		check('I32 Source mode draws no table widgets', tables(cm).length === 0);
 		await view.setState({ ...view.getState(), mode: 'source', source: false }, { history: false });
+		await sleep(400);
+
+		// --- What frozen rows and columns rely on
+		{
+			const frames = async (count = 3) => {
+				for (let i = 0; i < count; i++) await new Promise((resolve) => requestAnimationFrame(resolve));
+			};
+			const FROZEN = 'selectable-tables-frozen', ROW = 'selectable-tables-frozen-row';
+			cm = await open('Frozen tables');
+			original = cm.state.doc.toString();
+			const pane = () => cm.scrollDOM.getBoundingClientRect();
+			// A table with its top at the pane's top, and its element, which Obsidian can replace.
+			async function frozenTable(heading, past = 0) {
+				const start = cm.state.doc.toString().indexOf(`## ${heading}`);
+				cm.dispatch({ effects: cm.constructor.scrollIntoView(start, { y: 'start' }) });
+				await sleep(300);
+				const found = tables(cm).find((t) => t.from > start);
+				cm.scrollDOM.scrollTop += found.el.getBoundingClientRect().top - pane().top + 16 + past;
+				await frames();
+				await sleep(150);
+				return { ...tables(cm).find((t) => t.from > start), heading };
+			}
+			const rowsOf = (t) => t.el.querySelector('table').rows;
+			const frozenRows = (t) => Array.from(rowsOf(t)).filter((row) => row.classList.contains(ROW)).map((row) => row.rowIndex);
+			const topInPane = (el) => el.getBoundingClientRect().top - pane().top;
+
+			const plain = await frozenTable('Sheds');
+			const padding = getComputedStyle(plain.el);
+			check('relies 13: a table widget is padded by the drag handle size, and scrolls sideways', parseFloat(padding.paddingLeft) === 16 && padding.paddingLeft === padding.getPropertyValue('--table-drag-handle-size').trim() && padding.overflowX === 'auto' && padding.overflowY === 'hidden', { padding: padding.paddingLeft, x: padding.overflowX, y: padding.overflowY });
+			const rebuilt = { table: plain.el.querySelector('table'), widget: plain.el };
+			plain.el.querySelector('.table-row-btn').click();
+			await sleep(300);
+			check('relies 14: building a table anew keeps the widget and empties what\'s in it', tables(cm).some((t) => t.el === rebuilt.widget) && rebuilt.widget.querySelector('table') !== rebuilt.table && !rebuilt.table.isConnected, rebuilt.widget.isConnected);
+			await restore(cm, original);
+			await sleep(300);
+
+			const reading = app.workspace.getMostRecentLeaf().view;
+			await reading.setState({ ...reading.getState(), mode: 'preview' }, { history: false });
+			await sleep(600);
+			const box = reading.containerEl.querySelector('.markdown-preview-view .el-table');
+			check('relies 15: a table in Reading view sits in an .el-table box with its own scroll', box && getComputedStyle(box).overflowX === 'auto', box && getComputedStyle(box).overflowX);
+			await reading.setState({ ...reading.getState(), mode: 'source', source: false }, { history: false });
+			await sleep(400);
+			cm = reading.editor.cm;
+
+			// --- Frozen rows and columns
+			const plants = await frozenTable('Plants');
+			check('Frozen 1 a mark of 2 rows and 1 column marks those', plants.el.classList.contains(FROZEN) && plants.el.classList.contains(`${FROZEN}-rows`) && plants.el.classList.contains(`${FROZEN}-columns-1`) && frozenRows(plants).join() === '0,1', { classes: plants.el.className, rows: frozenRows(plants) });
+			check('Frozen 1 a frozen table draws its own borders, and stays the note\'s text', getComputedStyle(plants.el.querySelector('table')).borderCollapse === 'separate' && cm.state.doc.toString() === original);
+			check('Frozen 1 the mark doesn\'t show in the cell', rowsOf(plants)[0].cells[0].textContent.trim() === 'Name', rowsOf(plants)[0].cells[0].textContent);
+			const header = rowsOf(plants)[0];
+			const height = header.offsetHeight + rowsOf(plants)[1].offsetHeight;
+			const tableBox = plants.el.querySelector('table');
+			const widgetTop = plants.el.getBoundingClientRect().top - pane().top + cm.scrollDOM.scrollTop;
+			const placed = [];
+			for (const past of [-200, 0, 16, 40, 400, 1000, tableBox.offsetHeight - height - 10, tableBox.offsetHeight - height + 16, tableBox.offsetHeight - 40]) {
+				cm.scrollDOM.scrollTop = widgetTop + past;
+				await frames();
+				const top = topInPane(tableBox), bottom = top + tableBox.offsetHeight;
+				placed.push({ past, row: topInPane(header), wanted: Math.min(Math.max(0, top), bottom - height) });
+			}
+			check('Frozen 1 the rows wait for the table\'s top, pin at the pane\'s top, and leave at its end', placed.every(({ row, wanted }) => Math.abs(row - wanted) <= 1), placed);
+			const body = rowsOf(plants)[10];
+			cm.scrollDOM.scrollTop = widgetTop + 500;
+			await frames();
+			const under = document.elementFromPoint(pane().left + pane().width / 2, pane().top + 6);
+			check('Frozen 1 the rows are solid, and on top of what passes under them', under && !!under.closest(`.${ROW}`) && getComputedStyle(header.cells[3]).backgroundColor !== 'rgba(0, 0, 0, 0)', under?.tagName);
+			const lefts = [];
+			for (const x of [0, 1, 8, 16, 17, 60, 300, 8, 0]) {
+				plants.el.scrollLeft = x;
+				await frames(2);
+				lefts.push(body.cells[0].getBoundingClientRect().left - plants.el.getBoundingClientRect().left);
+			}
+			check('Frozen 3 the frozen column doesn\'t move as sideways scrolling starts or ends', lefts.every((left) => Math.abs(left - 16) < 0.5), lefts);
+			plants.el.scrollLeft = 300;
+			await frames();
+			check('Frozen 3 the first column covers the strip beside it, and what passes is below it', parseFloat(getComputedStyle(body.cells[0]).boxShadow.match(/-?\d+(\.\d+)?px/)[0]) === -16 && parseInt(getComputedStyle(body.cells[0]).zIndex) === 2, getComputedStyle(body.cells[0]).boxShadow);
+			const corner = rowsOf(plants)[0].cells[0];
+			const cornerPoint = corner.getBoundingClientRect();
+			check('Frozen 3 the top-left cell stays above everything', document.elementFromPoint(cornerPoint.left + 6, cornerPoint.top + 6)?.closest('th, td') === corner);
+			plants.el.scrollLeft = 0;
+			await frames();
+
+			await selectTable(cm, plants);
+			cm.scrollDOM.scrollTop = widgetTop + 500;
+			await frames();
+			check('Frozen 5 the selected table\'s tint lies over the frozen rows and column', plants.el.classList.contains('is-selected') && parseInt(getComputedStyle(tableBox, '::after').zIndex) > parseInt(getComputedStyle(header).zIndex), getComputedStyle(tableBox, '::after').zIndex);
+			await press(cm, 'Enter');
+			check('Frozen 5 Enter selects a cell, and it shows its frame', at(cm) === '0,0' && parseFloat(getComputedStyle(rowsOf(plants)[0].cells[0], '::after').borderTopWidth) > 0, at(cm));
+			await press(cm, 'Escape');
+			await press(cm, 'Escape');
+
+			const grown = await frozenTable('Plants', 300);
+			const pinEnd = () => rowsOf(grown)[0].style.getPropertyValue('--selectable-tables-pin-end');
+			const before = pinEnd();
+			await selectTable(cm, grown);
+			await press(cm, 'Enter');
+			await keys(cm, grown, 'ArrowDown');
+			await press(cm, 'Enter');
+			cellView(cm).dispatch({ changes: { from: 0, insert: 'Some text that wraps. ' }, userEvent: 'input.type' });
+			await sleep(300);
+			check('Frozen a frozen cell that grows updates the rows', pinEnd() !== before && grown.el.classList.contains(`${FROZEN}-rows`), { before, after: pinEnd() });
+			cellView(cm).dispatch({ changes: { from: 0, insert: 'A long line of text that wraps inside the cell. '.repeat(6) }, userEvent: 'input.type' });
+			await sleep(300);
+			check('Frozen rows taller than half the pane stop pinning', !grown.el.classList.contains(`${FROZEN}-rows`), grown.el.className);
+			await closeCell(cm, cm.state.doc.line(grown.first - 1).from);
+			await restore(cm, original);
+			await sleep(300);
+			const room = await frozenTable('Plants', 300);
+			check('Frozen they pin again when there\'s room', room.el.classList.contains(`${FROZEN}-rows`), room.el.className);
+
+			const tools = await frozenTable('Tools', 300);
+			const toolRow = rowsOf(tools)[12];
+			check('Frozen 2 another table has its own freeze', frozenRows(tools).join() === '0' && tools.el.classList.contains(`${FROZEN}-columns-2`), tools.el.className);
+			check('Frozen 2 its rows take over at the pane\'s top', Math.abs(topInPane(rowsOf(tools)[0])) <= 1, topInPane(rowsOf(tools)[0]));
+			tools.el.scrollLeft = 400;
+			await frames();
+			const [first, second, third] = Array.from(toolRow.cells).map((cell) => cell.getBoundingClientRect());
+			check('Frozen 3 a second frozen column sits against the first, and the third passes under it', Math.abs(first.right - second.left) <= 1 && third.left < second.right, { first: first.right, second: second.left, third: third.left });
+			tools.el.scrollLeft = 0;
+			await frames();
+
+			const shed = await frozenTable('Sheds');
+			check('Frozen 2 a table with no mark isn\'t frozen, and keeps its collapsed borders', !shed.el.classList.contains(FROZEN) && frozenRows(shed).length === 0 && getComputedStyle(shed.el.querySelector('table')).borderCollapse === 'collapse', shed.el.className);
+			await selectTable(cm, shed);
+			await press(cm, 'Enter');
+			await press(cm, 'Enter');
+			const typedIn = cellView(cm);
+			typedIn.dispatch({ changes: { from: 0, insert: '%%freeze 1 1%% ' }, selection: { anchor: 15 }, userEvent: 'input.type' });
+			await sleep(200);
+			check('Frozen 6 a mark typed in a cell freezes the table at once', frozenRows(shed).join() === '0' && shed.el.classList.contains(`${FROZEN}-columns-1`), { rows: frozenRows(shed), classes: shed.el.className });
+			await press(typedIn, 'Escape');
+			await press(cm, 'Escape');
+			await sleep(200);
+			const typed = await frozenTable('Sheds');
+			check('Frozen 6 the typed mark doesn\'t show', rowsOf(typed)[0].cells[0].textContent.trim() === 'Name', rowsOf(typed)[0].cells[0].textContent);
+			await selectTable(cm, typed);
+			await press(cm, 'Enter');
+			await press(cm, 'Enter');
+			check('Frozen 6 Enter still opens its cells', openAt(cm) === '0,0', openAt(cm));
+			await closeCell(cm, cm.state.doc.line(typed.first - 1).from);
+			await restore(cm, original);
+			await sleep(300);
+			const unfrozen = await frozenTable('Sheds');
+			check('Frozen 6 taking the mark out ends the freeze, and leaves nothing behind', !unfrozen.el.classList.contains(FROZEN) && frozenRows(unfrozen).length === 0 && !unfrozen.el.getAttribute('style'), { classes: unfrozen.el.className, style: unfrozen.el.getAttribute('style') });
+
+			const edited = await frozenTable('Plants');
+			edited.el.querySelector('.table-row-btn').click();
+			await sleep(300);
+			check('Frozen 7 a row added from the table\'s button keeps the freeze', frozenRows(edited).join() === '0,1' && rowsOf(edited)[0].style.getPropertyValue('--selectable-tables-travel') !== '', frozenRows(edited));
+			edited.el.querySelector('.table-col-btn').click();
+			await sleep(300);
+			check('Frozen 7 a column added from the table\'s button keeps the mark', cm.state.doc.toString().includes('%%freeze 2 1%%') && edited.el.classList.contains(`${FROZEN}-columns-1`), edited.el.className);
+			await restore(cm, original);
+			await sleep(300);
+
+			const back = await frozenTable('Plants', 300);
+			cm.scrollDOM.scrollTop = cm.scrollDOM.scrollHeight;
+			await sleep(400);
+			const gone = !back.el.isConnected;
+			const returned = await frozenTable('Plants', 300);
+			await frames();
+			check('Frozen a table that leaves the editor\'s drawn range comes back pinned', gone && returned.el === back.el && Math.abs(topInPane(rowsOf(returned)[0])) <= 1, { gone, same: returned.el === back.el, top: topInPane(rowsOf(returned)[0]) });
+
+			const leafView = app.workspace.getMostRecentLeaf().view;
+			await leafView.setState({ ...leafView.getState(), mode: 'source', source: true }, { history: false });
+			await sleep(400);
+			check('Frozen Source mode leaves the table as text', cm.contentDOM.querySelectorAll(`.${FROZEN}`).length === 0);
+			await leafView.setState({ ...leafView.getState(), mode: 'source', source: false }, { history: false });
+			await sleep(400);
+			const frozenAgain = await frozenTable('Plants');
+			check('Frozen back in Live Preview, it\'s frozen again', frozenAgain.el.classList.contains(FROZEN) && frozenRows(frozenAgain).join() === '0,1', frozenAgain.el.className);
+			await app.plugins.disablePlugin('selectable-tables');
+			await sleep(400);
+			const off = frozenAgain.el;
+			check('Frozen turning the plugin off takes everything off', !off.classList.contains(FROZEN) && !off.querySelector(`.${ROW}`), off.className);
+			await app.plugins.enablePlugin('selectable-tables');
+			await sleep(800);
+			const on = await frozenTable('Plants');
+			check('Frozen turning it on again finds the table', on.el.classList.contains(FROZEN) && frozenRows(on).join() === '0,1', on.el.className);
+			check('Frozen: the note is as it was', cm.state.doc.toString() === original);
+		}
 	} catch (error) {
 		results.push({ name: 'the check script itself', ok: false, detail: String(error && error.stack || error) });
 	}

@@ -77,3 +77,159 @@
 	padding-block: 0;
 	overflow: hidden;
 }
+
+/*
+ * Frozen rows and columns. Collapsed borders belong to the table and stay behind when cells move, so a
+ * frozen table's cells draw their own, with Obsidian's variables, to look the same.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen table {
+	border-collapse: separate;
+	border-spacing: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen :is(th, td) {
+	border-block-start-width: 0;
+	border-inline-start-width: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen th {
+	border-block-start-width: var(--table-header-border-width);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen :is(th, td):first-child {
+	border-inline-start-width: var(--table-column-first-border-width);
+}
+
+/*
+ * Frozen cells need a solid background, since a table's is transparent by default and cells pass under
+ * them. The colors a theme gives rows and columns are read here and laid over it.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen thead tr {
+	--selectable-tables-row-color: var(--table-header-background);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen tbody tr {
+	--selectable-tables-row-color: var(--table-background);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen tbody tr:nth-child(odd) {
+	--selectable-tables-row-color: var(--table-row-alt-background);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen :is(th, td):nth-child(even) {
+	--selectable-tables-column-color: var(--table-column-alt-background);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget .selectable-tables-frozen-row > :is(th, td),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-1 :is(th, td):nth-child(-n + 1),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-2 :is(th, td):nth-child(-n + 2),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-3 :is(th, td):nth-child(-n + 3),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-4 :is(th, td):nth-child(-n + 4),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-5 :is(th, td):nth-child(-n + 5),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-6 :is(th, td):nth-child(-n + 6),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-7 :is(th, td):nth-child(-n + 7),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-8 :is(th, td):nth-child(-n + 8),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-9 :is(th, td):nth-child(-n + 9) {
+	background-color: var(--background-primary);
+	background-image: linear-gradient(var(--selectable-tables-column-color, transparent) 0 0), linear-gradient(var(--selectable-tables-row-color, transparent) 0 0);
+}
+
+/*
+ * Frozen columns stick where they sit, past the widget's padding, so they don't move as scrolling starts.
+ * Cells pass through that padding, so the first column's shadow covers it. The handles Obsidian draws
+ * there are the cells' children, so they stay above it.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-1 :is(th, td):nth-child(-n + 1),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-2 :is(th, td):nth-child(-n + 2),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-3 :is(th, td):nth-child(-n + 3),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-4 :is(th, td):nth-child(-n + 4),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-5 :is(th, td):nth-child(-n + 5),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-6 :is(th, td):nth-child(-n + 6),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-7 :is(th, td):nth-child(-n + 7),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-8 :is(th, td):nth-child(-n + 8),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-9 :is(th, td):nth-child(-n + 9) {
+	position: sticky;
+	z-index: 2;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(1) {
+	inset-inline-start: 0;
+	box-shadow: calc(-1 * var(--table-drag-handle-size)) 0 0 var(--background-primary);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns:dir(rtl) :is(th, td):nth-child(1) {
+	box-shadow: var(--table-drag-handle-size) 0 0 var(--background-primary);
+}
+
+/* A column's place is set only while that column is frozen, so these do nothing on other cells. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(2) {
+	inset-inline-start: var(--selectable-tables-column-2);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(3) {
+	inset-inline-start: var(--selectable-tables-column-3);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(4) {
+	inset-inline-start: var(--selectable-tables-column-4);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(5) {
+	inset-inline-start: var(--selectable-tables-column-5);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(6) {
+	inset-inline-start: var(--selectable-tables-column-6);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(7) {
+	inset-inline-start: var(--selectable-tables-column-7);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(8) {
+	inset-inline-start: var(--selectable-tables-column-8);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(9) {
+	inset-inline-start: var(--selectable-tables-column-9);
+}
+
+/*
+ * Frozen rows can't stick to the note's scroll: the widget scrolls sideways, so it's the box sticky binds to.
+ * So the browser moves them with a scroll-driven animation that follows the table through the pane: it runs
+ * where the scrolling does, and no script runs as the note moves. It starts when the table's top reaches the
+ * pane's top. The rows reach the table's end at --selectable-tables-pin-end, and rest there. The animation
+ * goes on 4000 px past the pane's top, the reach freeze.ts allows for, because a finished animation isn't
+ * kept where scrolling runs: coming back into it, the rows would stay put until the page caught up. Without
+ * scroll-driven animations the table scrolls as usual.
+ */
+@supports (animation-timeline: view()) {
+	.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows {
+		view-timeline: --selectable-tables-table block;
+		view-timeline-inset: -4000px 0;
+	}
+
+	.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows .selectable-tables-frozen-row {
+		position: relative;
+		z-index: 3;
+		will-change: transform;
+		animation: selectable-tables-pin linear(0, 1 var(--selectable-tables-pin-end), 1) both;
+		animation-timeline: --selectable-tables-table;
+		animation-range: exit-crossing calc(var(--table-drag-handle-size) - 4000px) exit-crossing 100%;
+	}
+}
+
+@keyframes selectable-tables-pin {
+	from {
+		transform: translateY(0);
+	}
+
+	to {
+		transform: translateY(var(--selectable-tables-travel));
+	}
+}
+
+/* The selected table's tint lies over everything in the table, frozen cells included. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen.is-selected table::after {
+	z-index: 4;
+}

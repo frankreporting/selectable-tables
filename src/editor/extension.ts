@@ -3,6 +3,7 @@ import { EditorView, KeyBinding, keymap } from '@codemirror/view';
 import { editorEditorField, editorLivePreviewField, Notice } from 'obsidian';
 import { cellSelected, cellSelection, TABLE_CLASS } from './cells';
 import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab } from './decide';
+import { frozenTables } from './freeze';
 import { viewLayout } from './layout';
 import type { Span } from './table-text';
 
@@ -317,5 +318,5 @@ const keepCellsClosed = EditorState.transactionFilter.of((tr) => {
 
 /** The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. */
 export function selectableTables(): Extension {
-	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, keepCellsClosed, markSelectedTable, cellSelection, EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
+	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, keepCellsClosed, markSelectedTable, cellSelection, frozenTables, EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
 }

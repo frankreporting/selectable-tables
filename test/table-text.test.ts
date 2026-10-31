@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Text } from '@codemirror/state';
-import { cellCaret, cellSource, frontmatterEnd, looksLikeTable, writtenByObsidian } from '../src/editor/table-text';
+import { cellCaret, cellSource, frontmatterEnd, looksLikeTable, tableInText, writtenByObsidian } from '../src/editor/table-text';
 
 const doc = (...lines: string[]) => Text.of(lines);
 const whole = (text: Text) => ({ from: 0, to: text.length });
@@ -176,4 +176,25 @@ test('the frontmatter ends at its closing line', () => {
 	assert.equal(frontmatterEnd(doc('---', 'status: draft', '---', '| a |')), '---\nstatus: draft\n---'.length);
 	assert.equal(frontmatterEnd(doc('# Title', '---')), -1);
 	assert.equal(frontmatterEnd(doc('---', 'never closed')), -1);
+});
+
+const ROWS = ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |'];
+
+test('any position in a table gives the whole table, read from its text', () => {
+	const text = doc('Above', '', ...ROWS, '', 'Below');
+	const from = 'Above\n\n'.length;
+	const to = from + ROWS.join('\n').length;
+	assert.deepEqual(tableInText(text, from), { from, to });
+	assert.deepEqual(tableInText(text, to - 3), { from, to });
+	assert.deepEqual(tableInText(text, to), { from, to });
+});
+
+test('a table read from its text ends at the first line with no pipe', () => {
+	assert.deepEqual(tableInText(doc(...ROWS, 'Below'), 0), { from: 0, to: ROWS.join('\n').length });
+});
+
+test('a line with no pipe, pipes with no delimiter row, and a single line are not tables', () => {
+	assert.equal(tableInText(doc('Above', '', ...ROWS), 2), null);
+	assert.equal(tableInText(doc('| Fern | Hall |', '| Moss | Shed |'), 3), null);
+	assert.equal(tableInText(doc('Above', '', 'Fern | Hall', '', 'Below'), 9), null);
 });

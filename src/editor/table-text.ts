@@ -26,6 +26,22 @@ export function looksLikeTable(doc: Text, span: Span): boolean {
 	return delimiter.split('|').every((cell) => delimiterCell.test(cell));
 }
 
+/**
+ * The table around `pos`, read from the text alone, for one Obsidian hasn't drawn yet: the lines with
+ * pipes around it, when they read as a table. Table-like text in a code block reads as one too.
+ */
+export function tableInText(doc: Text, pos: number): Span | null {
+	const isRow = (line: number) => doc.line(line).text.includes('|');
+	const at = doc.lineAt(pos).number;
+	if (!isRow(at)) return null;
+	let first = at;
+	while (first > 1 && isRow(first - 1)) first--;
+	let last = at;
+	while (last < doc.lines && isRow(last + 1)) last++;
+	const span = { from: doc.line(first).from, to: doc.line(last).to };
+	return looksLikeTable(doc, span) ? span : null;
+}
+
 /** The line that holds a row. A row past the table's end, which Obsidian can draw, is on its last line. */
 function rowLine(doc: Text, table: Span, row: number): Line {
 	const first = doc.lineAt(table.from).number;

@@ -1,5 +1,6 @@
 // In-Obsidian checks for Selectable Tables. They test the Obsidian behaviors the plugin relies on, then
-// the plugin's keys on the test vault's notes, with simulated key presses. Every check that shouldn't
+// the plugin's keys on the test vault's notes, with simulated key presses, and with real ones through the
+// browser for the keys the check on key moves has to tell apart. Every check that shouldn't
 // edit a note compares its text before and after, and every note is put back as it was.
 //
 // Run in the test vault only, with the plugin built and copied in (npm run test-vault):
@@ -57,12 +58,47 @@
 		cm.dispatch({ selection: { anchor: Math.min(line.to, line.from + column) }, scrollIntoView: true });
 		await settle();
 	};
+	const selectsWhole = (cm, t) => Math.min(sel(cm).anchor, sel(cm).head) === t.from && Math.max(sel(cm).anchor, sel(cm).head) === t.to;
 	const keyCodes = { ArrowDown: 'ArrowDown', ArrowUp: 'ArrowUp', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight', Enter: 'Enter', Escape: 'Escape', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete' };
 	async function press(target, key, mods = {}) {
 		const el = target.contentDOM ?? target;
 		el.dispatchEvent(new KeyboardEvent('keydown', { key, code: keyCodes[key] ?? key, bubbles: true, cancelable: true, ...mods }));
 		await settle();
 	}
+	// The keyboard and mouse as the browser gets them, not an event sent to one element. The check on key
+	// moves has to tell these apart, so its own checks use them.
+	const cdp = window.electron.remote.getCurrentWebContents().debugger;
+	const attachedHere = !cdp.isAttached();
+	if (attachedHere) cdp.attach('1.3');
+	const virtualKeys = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, PageUp: 33, PageDown: 34, End: 35, Home: 36 };
+	async function real(key, { altKey, ctrlKey, metaKey, shiftKey } = {}, wait = settle) {
+		const modifiers = (altKey ? 1 : 0) | (ctrlKey ? 2 : 0) | (metaKey ? 4 : 0) | (shiftKey ? 8 : 0);
+		const event = { key, code: key, windowsVirtualKeyCode: virtualKeys[key], modifiers };
+		await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+		await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+		await wait();
+	}
+	async function realClick(el) {
+		const { left, top, width, height } = el.getBoundingClientRect();
+		const point = { x: left + width / 2, y: top + height / 2, button: 'left', clickCount: 1 };
+		await cdp.sendCommand('Input.dispatchMouseEvent', { ...point, type: 'mousePressed' });
+		await cdp.sendCommand('Input.dispatchMouseEvent', { ...point, type: 'mouseReleased' });
+		await sleep(400);
+	}
+	// What each transaction an action sends says about where it came from.
+	async function eventsDuring(cm, action) {
+		const seen = [];
+		const update = cm.update;
+		cm.update = function (transactions) {
+			for (const tr of transactions) if (tr.selection && !tr.docChanged) seen.push(tr.isUserEvent('select.pointer') ? 'select.pointer' : tr.isUserEvent('select') ? 'select' : 'none');
+			return update.call(this, transactions);
+		};
+		await action();
+		delete cm.update;
+		return seen;
+	}
+	const option = { altKey: true };
+	const command = { metaKey: true };
 	// Closes an open cell: the note's caret leaves the table first, or focusing would open the cell again.
 	async function closeCell(cm, pos) {
 		cm.dispatch({ selection: { anchor: pos } });
@@ -359,8 +395,9 @@
 		check('27 moving the selection elsewhere drops the cell', marked(cm).length === 0 && sel(cm).line === seed.last + 2, at(cm));
 		await selectTable(cm, seed);
 		await press(cm, 'Enter');
-		await press(cm, 'ArrowDown', { metaKey: true });
-		check('28 Cmd+↓ goes to the note\'s end, and no cell stays marked', marked(cm).length === 0 && sel(cm).head === cm.state.doc.length, at(cm));
+		await press(cm, 'Escape');
+		await press(cm, 'ArrowDown', command);
+		check('28 Cmd+↓ on the selected table goes to the note\'s end, and no cell stays marked', marked(cm).length === 0 && sel(cm).head === cm.state.doc.length, at(cm));
 		seed = await tableUnder(cm, 'Seed trays');
 		await selectTable(cm, seed);
 		await press(cm, 'Enter');
@@ -585,6 +622,338 @@
 		await press(cm, 'Escape');
 		check('Cells: the note is as it was', cm.state.doc.toString() === original);
 
+		// --- What the check on key moves relies on
+		cm = await open('Two report tables');
+		original = cm.state.doc.toString();
+		[t1, t2] = tables(cm);
+		await caretOnLine(cm, 3);
+		const wordEvents = await eventsDuring(cm, () => real('ArrowRight', option));
+		const lineEvents = await eventsDuring(cm, () => real('ArrowDown', option));
+		check('relies 9a: a word jump and Option+↓ send select', wordEvents.join() === 'select' && lineEvents.join() === 'select', { wordEvents, lineEvents });
+		const textLine = cm.contentDOM.querySelectorAll('.cm-line')[1];
+		const clickEvents = await eventsDuring(cm, () => realClick(textLine));
+		check('relies 9b: a click sends select.pointer', clickEvents.includes('select.pointer') && !clickEvents.includes('select'), clickEvents);
+		const leftOpen = t1.el.querySelector('table').rows[2].cells[0];
+		await realClick(leftOpen);
+		check('a real click on a cell still opens it', openAt(cm) === '2,0' && cm.state.doc.toString() === original, openAt(cm));
+		const betweenCells = await eventsDuring(cm, () => press(cellEditor(cm), 'Tab'));
+		await sleep(200);
+		check('relies 9c: Obsidian\'s own moves between cells send no user event', openAt(cm) === '2,1' && !betweenCells.some((e) => e.startsWith('select')), { open: openAt(cm), betweenCells });
+		await closeCell(cm, t1.from - 1);
+		await restore(cm, original);
+
+		// --- Jumps A. Word jumps next to a table
+		[t1, t2] = tables(cm);
+		await caretOnLine(cm, 3, 100);
+		await real('ArrowRight', option);
+		check('J1 Option+→ at the end of the line above selects the table, and opens no cell', selectsWhole(cm, t1) && sel(cm).head === t1.to && !openCell(cm) && tint(t1), sel(cm));
+		await real('ArrowRight', option);
+		check('J2 Option+→ again: the caret on the line below', sel(cm).line === t1.last + 1 && sel(cm).anchor === sel(cm).head && !openCell(cm), sel(cm));
+		await caretOnLine(cm, t1.last + 2);
+		await real('ArrowLeft', option);
+		check('J3 Option+← at the start of the line below selects the table', selectsWhole(cm, t1) && sel(cm).head === t1.from && !openCell(cm), sel(cm));
+		await real('ArrowLeft', option);
+		check('J4 Option+← again: the caret on the line above', sel(cm).line === t1.first - 1 && sel(cm).anchor === sel(cm).head && !openCell(cm), sel(cm));
+		await caretOnLine(cm, 3, 100);
+		await real('ArrowRight', option);
+		await press(cm, 'Escape');
+		check('J5 Escape goes back to the side the word jump came from', sel(cm).line === t1.first - 1 && sel(cm).anchor === sel(cm).head, sel(cm));
+		const sizes = `${box(t1.el)} ${box(t2.el)}`;
+		// Walks the note with one key: nothing may open, and each table takes exactly one press.
+		async function walk(key, mods, done) {
+			const walked = { stops: [], onFirst: 0, onSecond: 0, opened: false };
+			for (let i = 0; i < 300 && !done(); i++) {
+				await real(key, mods, () => sleep(60));
+				walked.stops.push(sel(cm).line);
+				walked.opened = walked.opened || !!openCell(cm);
+				if (selectsWhole(cm, t1)) walked.onFirst++;
+				if (selectsWhole(cm, t2)) walked.onSecond++;
+			}
+			return walked;
+		}
+		const atEnd = () => sel(cm).head === cm.state.doc.length && sel(cm).anchor === sel(cm).head;
+		const atStart = () => sel(cm).head === 0 && sel(cm).anchor === 0;
+		await caretOnLine(cm, 1);
+		const forward = await walk('ArrowRight', option, atEnd);
+		check('J6 holding Option+→: one press on each table, nothing opens, nothing changes size', forward.onFirst === 1 && forward.onSecond === 1 && !forward.opened && atEnd() && `${box(t1.el)} ${box(t2.el)}` === sizes, forward);
+		const backward = await walk('ArrowLeft', option, atStart);
+		check('J6 holding Option+←: the same, going back', backward.onFirst === 1 && backward.onSecond === 1 && !backward.opened && atStart(), backward);
+		const down = await walk('ArrowDown', option, atEnd);
+		const up = await walk('ArrowUp', option, atStart);
+		results.push({ name: 'J7 Option+↓ and Option+↑, real keys: no cell opens, each table takes one press', ok: !down.opened && !up.opened && down.onFirst === 1 && down.onSecond === 1 && up.onFirst === 1 && up.onSecond === 1, stops: { down: down.stops, up: up.stops } });
+		check('Jumps A: the note is as it was', cm.state.doc.toString() === original);
+
+		// --- Jumps B. Page keys and big jumps in the note
+		// A note that has just opened, held at key-repeat speed: this outruns Obsidian's parser, so the
+		// keys land on tables that are still text.
+		await open('Two report tables');
+		cm = await open('Long note');
+		original = cm.state.doc.toString();
+		await caretOnLine(cm, 1);
+		const passedDown = { selected: 0, opened: false };
+		for (let i = 0; i < 400 && sel(cm).head !== cm.state.doc.length; i++) {
+			await real('PageDown', {}, () => sleep(30));
+			passedDown.selected += sel(cm).anchor === sel(cm).head ? 0 : 1;
+			passedDown.opened = passedDown.opened || !!openCell(cm);
+		}
+		check('J8 holding Page Down through a long note selects no table and opens no cell', sel(cm).head === cm.state.doc.length && !passedDown.selected && !passedDown.opened, { passedDown, ...sel(cm) });
+		for (let i = 0; i < 400 && sel(cm).head !== 0; i++) {
+			await real('PageUp', {}, () => sleep(30));
+			passedDown.selected += sel(cm).anchor === sel(cm).head ? 0 : 1;
+			passedDown.opened = passedDown.opened || !!openCell(cm);
+		}
+		check('J8 holding Page Up back does the same', sel(cm).head === 0 && !passedDown.selected && !passedDown.opened, { passedDown, ...sel(cm) });
+
+		// Held at key-repeat speed, Option+↓ steps a line at a time, so it stays where tables are drawn.
+		await caretOnLine(cm, 1);
+		let heldOpened = false;
+		for (let i = 0; i < 200; i++) {
+			await real('ArrowDown', option, () => sleep(30));
+			heldOpened = heldOpened || !!openCell(cm);
+		}
+		check('J8 holding Option+↓ in a long note opens no cell', !heldOpened, sel(cm));
+		await restore(cm, original);
+
+		cm = await open('Cell moves');
+		original = cm.state.doc.toString();
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		await real('PageDown');
+		check('J9 Page Down on a selected table: the caret on the line below', sel(cm).line === seed.last + 1 && sel(cm).anchor === sel(cm).head && !openCell(cm), sel(cm));
+		await press(cm, 'ArrowLeft');
+		await real('PageUp');
+		check('J10 Page Up on a selected table: the caret on the line above', sel(cm).line === seed.first - 1 && sel(cm).anchor === sel(cm).head && !openCell(cm), sel(cm));
+		await press(cm, 'ArrowRight');
+		await real('ArrowDown', option);
+		const optionBelow = sel(cm).line;
+		await press(cm, 'ArrowLeft');
+		await real('ArrowUp', option);
+		check('J11 Option+↓ and Option+↑ leave a selected table the same way', optionBelow === seed.last + 1 && sel(cm).line === seed.first - 1 && !openCell(cm), { optionBelow, ...sel(cm) });
+		await press(cm, 'ArrowRight');
+		const kept = sel(cm);
+		for (const [key, mods] of [['Home'], ['End'], ['ArrowLeft', command], ['ArrowRight', command]]) await real(key, mods);
+		check('J12 Home, End, Cmd+← and Cmd+→ do nothing on a selected table', sel(cm).anchor === kept.anchor && sel(cm).head === kept.head && !openCell(cm), sel(cm));
+		await real('ArrowDown', command);
+		const noteEnd = sel(cm).head;
+		await real('ArrowUp', command);
+		check('J13 Cmd+↓ and Cmd+↑ go to the note\'s end and start from a selected table', noteEnd === cm.state.doc.length && sel(cm).head === 0 && !openCell(cm), { noteEnd, ...sel(cm) });
+		check('Jumps B: the note is as it was', cm.state.doc.toString() === original);
+
+		cm = await open('Table last');
+		original = cm.state.doc.toString();
+		const [ending] = tables(cm);
+		await caretOnLine(cm, 1);
+		await real('ArrowDown', command);
+		check('J14 Cmd+↓ into a table that ends the note selects it, and opens no cell', selectsWhole(cm, ending) && !openCell(cm), sel(cm));
+		for (const [key, mods] of [['ArrowDown', command], ['PageDown'], ['ArrowRight', option], ['End']]) await real(key, mods);
+		check('J14 with no line beyond it, the keys keep it selected', selectsWhole(cm, ending) && !openCell(cm) && cm.state.doc.toString() === original, sel(cm));
+		await caretOnLine(cm, 1);
+		await real('PageDown');
+		check('J14 Page Down into a table that ends the note selects it', selectsWhole(cm, ending) && !openCell(cm), sel(cm));
+		await press(cm, 'Escape');
+
+		// --- Jumps C. A selected cell
+		cm = await open('Cell moves');
+		original = cm.state.doc.toString();
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		await keys(cm, seed, 'ArrowDown', 'ArrowRight');
+		const visit = async (t, ...pressed) => {
+			const places = [];
+			let quietly = true;
+			for (const p of pressed) {
+				quietly = (await keys(cm, t, p)) && quietly;
+				places.push(at(cm));
+			}
+			return quietly ? places.join(' ') : `not quiet: ${places.join(' ')}`;
+		};
+		let places = await visit(seed, 'End', 'Home', ['ArrowRight', command], ['ArrowLeft', command]);
+		check('J16 End, Home, Cmd+→ and Cmd+← go to the row\'s ends, nothing opening', places === '1,2 1,0 1,2 1,0', places);
+		await keys(cm, seed, 'ArrowRight');
+		places = await visit(seed, 'PageDown', 'PageUp', ['ArrowDown', command], ['ArrowUp', command], ['End', { metaKey: true }], ['Home', { metaKey: true }], ['ArrowDown', { ctrlKey: true }], ['ArrowUp', { ctrlKey: true }]);
+		check('J17 Page keys, Cmd+↑/↓, Cmd+Home/End and Ctrl+↑/↓ go to the column\'s ends, nothing opening', places === '4,1 0,1 4,1 0,1 4,1 0,1 4,1 0,1', places);
+		places = await visit(seed, ['ArrowUp', command], 'PageUp');
+		check('J18 already at the top, they stay there, and the table stays selected', places === '0,1 0,1' && selectsWhole(cm, seed), places);
+		for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown']) await real(key, option);
+		check('J19 Option with an arrow does nothing, with real keys', at(cm) === '0,1' && selectsWhole(cm, seed) && !openCell(cm), at(cm));
+		places = await visit(seed, ['End', { shiftKey: true }], ['PageDown', { shiftKey: true }], ['ArrowDown', { shiftKey: true, metaKey: true }], ['ArrowRight', { shiftKey: true, altKey: true }]);
+		check('J20 Shift with any of these does nothing', places === '0,1 0,1 0,1 0,1' && selectsWhole(cm, seed), places);
+		await keys(cm, seed, ['ArrowDown', command], 'Escape', 'Enter');
+		const remembered = at(cm);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		check('J21 a cell reached by a jump is remembered like any other', remembered === '4,1' && sel(cm).line === seed.first - 1 && sel(cm).anchor === sel(cm).head, { remembered, ...sel(cm) });
+
+		const unevenRows2 = await tableUnder(cm, 'Uneven rows');
+		await selectTable(cm, unevenRows2);
+		await press(cm, 'Enter');
+		await keys(cm, unevenRows2, ...repeat('ArrowDown', 2));
+		places = await visit(unevenRows2, 'End', 'ArrowDown', 'PageDown', 'PageUp');
+		check('J22 on uneven rows, End goes to the filled cell at the table\'s edge, and the column goes on from there', places === '2,3 3,3 4,3 0,3', places);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+
+		const wideTable = await tableUnder(cm, 'Wide table');
+		await selectTable(cm, wideTable);
+		await press(cm, 'Enter');
+		await press(cm, 'End');
+		await sleep(200);
+		const lastColumn = at(cm);
+		const wideShown = wideTable.el.scrollLeft > 0;
+		await press(cm, 'Home');
+		await sleep(200);
+		check('J23 End and Home scroll a wide table sideways to the cell', lastColumn === '0,15' && wideShown && at(cm) === '0,0' && wideTable.el.scrollLeft < 2, { lastColumn, wideShown, left: wideTable.el.scrollLeft });
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+
+		const tallTable = await tableUnder(cm, 'Tall table');
+		await selectTable(cm, tallTable);
+		await press(cm, 'Enter');
+		await keys(cm, tallTable, 'ArrowRight');
+		const inView = () => {
+			const cell = marked(cm)[0].getBoundingClientRect();
+			const view = cm.scrollDOM.getBoundingClientRect();
+			return cell.top >= view.top - 1 && cell.bottom <= view.bottom + 1;
+		};
+		await press(cm, 'PageDown');
+		await sleep(200);
+		const bottomShown = at(cm) === '40,1' && inView();
+		await press(cm, 'PageUp');
+		await sleep(200);
+		check('J24 Page Down and Page Up scroll a tall table to the cell', bottomShown && at(cm) === '0,1' && inView(), { at: at(cm), bottomShown });
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		check('Jumps C: the note is as it was', cm.state.doc.toString() === original);
+
+		// --- Jumps D. An open cell
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		await keys(cm, seed, 'ArrowDown', 'ArrowRight', 'Enter');
+		await sleep(250);
+		const fernOpen = openAt(cm);
+		const scrolled = cm.scrollDOM.scrollTop;
+		await press(cellEditor(cm), 'PageDown');
+		await sleep(250);
+		check('J25 Page Down in a cell closes it and selects the column\'s bottom cell, and the note stays put', fernOpen === '1,1' && !openCell(cm) && at(cm) === '4,1' && selectsWhole(cm, seed) && cm.hasFocus && cm.scrollDOM.scrollTop === scrolled, { fernOpen, at: at(cm), ...sel(cm) });
+		await press(cm, 'Enter');
+		await sleep(250);
+		await press(cellEditor(cm), 'ArrowUp', command);
+		await sleep(250);
+		check('J26 Cmd+↑ in a cell closes it and selects the column\'s top cell', !openCell(cm) && at(cm) === '0,1', at(cm));
+		await press(cm, 'Enter');
+		await sleep(250);
+		await press(cellEditor(cm), 'ArrowDown', { ctrlKey: true });
+		await sleep(250);
+		const byControl = at(cm);
+		await press(cm, 'Enter');
+		await sleep(250);
+		await press(cellEditor(cm), 'Home', command);
+		await sleep(250);
+		check('J26 Ctrl+↓ and Cmd+Home in a cell do the same', byControl === '4,1' && at(cm) === '0,1' && !openCell(cm), { byControl, at: at(cm) });
+		await keys(cm, seed, ...repeat('ArrowDown', 4), 'ArrowRight');
+		await press(cm, 'Enter');
+		await sleep(250);
+		cellView(cm).dispatch(cellView(cm).state.replaceSelection('x'), { userEvent: 'input.type' });
+		await settle();
+		await press(cellEditor(cm), 'ArrowUp', command);
+		await sleep(300);
+		check('J27 a jump keeps what was typed in the cell it left', at(cm) === '0,2' && !openCell(cm) && cm.state.doc.toString().includes('Water twicex'), at(cm));
+		await restore(cm, original);
+		seed = await tableUnder(cm, 'Seed trays');
+		await selectTable(cm, seed);
+		await press(cm, 'Enter');
+		await keys(cm, seed, 'ArrowDown', 'ArrowRight', 'Enter');
+		await sleep(250);
+		inner = cellView(cm);
+		const textCaret = [];
+		for (const [key, mods] of [['Home'], ['End'], ['ArrowLeft', command], ['ArrowRight', command], ['ArrowLeft', option], ['ArrowRight', option]]) {
+			await press(cellEditor(cm), key, mods);
+			textCaret.push(openCell(cm) ? inner.state.selection.main.head : 'closed');
+		}
+		check('J28 Home, End, Cmd+←/→ and Option+←/→ move through the open cell\'s text', !textCaret.includes('closed') && openAt(cm) === '1,1' && new Set(textCaret).size > 1, textCaret);
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		seed = await tableUnder(cm, 'Seed trays');
+		await realClick(seed.el.querySelector('table').rows[1].cells[2]);
+		const clicked = openAt(cm);
+		await press(cellEditor(cm), 'ArrowDown', command);
+		await sleep(250);
+		check('J30 a cell opened with a click: Cmd+↓ selects the column\'s bottom cell', clicked === '1,2' && at(cm) === '4,2' && !openCell(cm), { clicked, at: at(cm) });
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		await restore(cm, original);
+
+		// --- Jumps E. What stays as it was
+		cm = await open('Two report tables');
+		original = cm.state.doc.toString();
+		const pastedTable = '| Tool  | Shed |\n| ----- | ---- |\n| Rake  | Back |';
+		const noteLength = cm.state.doc.length;
+		cm.dispatch({ changes: { from: noteLength, insert: pastedTable }, selection: { anchor: noteLength + pastedTable.length }, userEvent: 'input.paste' });
+		await sleep(400);
+		await real('ArrowLeft', option);
+		await sleep(250);
+		s = sel(cm);
+		check('J35 Option+← right after pasting a table selects it, and opens no cell', !openCell(cm) && s.anchor === noteLength + pastedTable.length && s.head === noteLength, s);
+		await restore(cm, original);
+		[t1] = tables(cm);
+		await selectTable(cm, t1);
+		await press(cm, 'Enter');
+		await press(cm, 'a', { metaKey: navigator.platform.startsWith('Mac'), ctrlKey: !navigator.platform.startsWith('Mac'), code: 'KeyA' });
+		await settle();
+		check('J36 Select all from a selected cell selects the note, and takes the cell off', sel(cm).head === cm.state.doc.length && sel(cm).anchor === 0 && marked(cm).length === 0, sel(cm));
+		await caretOnLine(cm, 1);
+		const leafView = app.workspace.getMostRecentLeaf().view;
+		leafView.editor.setCursor({ line: t1.first + 1, ch: 3 });
+		await sleep(300);
+		check('J38 a caret set with no user event, as the Search pane and other plugins do, still opens a cell', openCell(cm), sel(cm));
+		await closeCell(cm, t1.from - 1);
+		await restore(cm, original);
+		await leafView.setState({ ...leafView.getState(), mode: 'source', source: true }, { history: false });
+		await sleep(400);
+		cm = leafView.editor.cm;
+		await caretOnLine(cm, 3, 100);
+		await real('ArrowRight', option);
+		check('J39 Source mode: Option+→ moves through the table\'s text', sel(cm).anchor === sel(cm).head && sel(cm).line === 5, sel(cm));
+		await leafView.setState({ ...leafView.getState(), mode: 'source', source: false }, { history: false });
+		await sleep(400);
+
+		// --- Vim: its motions stay its own while it's driving, so the check stands aside. Turning it on
+		// writes the vault's tracked app.json, so that goes back exactly as it was, whatever happens here.
+		const fs = window.require('fs');
+		const appConfig = window.require('path').join(app.vault.adapter.basePath, '.obsidian', 'app.json');
+		const savedConfig = fs.readFileSync(appConfig, 'utf8');
+		cm = await open('Two report tables');
+		original = cm.state.doc.toString();
+		try {
+			app.vault.setConfig('vimMode', true);
+			await sleep(800);
+			cm = await open('Two report tables');
+			check('relies 10: Vim puts cm-vimMode on the scroller outside insert mode', cm.scrollDOM.classList.contains('cm-vimMode'), cm.scrollDOM.className);
+			[t1] = tables(cm);
+			await caretOnLine(cm, t1.first - 1);
+			await press(cm, 'w');
+			await sleep(300);
+			const vimState = cm.cm?.state?.vim;
+			check('in Vim\'s normal mode, w is Vim\'s: it enters the table, and starts no Visual mode', sel(cm).anchor === sel(cm).head && sel(cm).head >= t1.from && !vimState?.visualMode, { ...sel(cm), visual: vimState?.visualMode });
+			await closeCell(cm, t1.from - 1);
+			await press(cm, 'i');
+			await settle();
+			const insertClass = cm.scrollDOM.classList.contains('cm-vimMode');
+			await caretOnLine(cm, 3, 100);
+			await real('ArrowRight', option);
+			const insertSelected = selectsWhole(cm, t1) && !openCell(cm);
+			await press(cm, 'Escape');
+			check('in Vim\'s insert mode, the class is off and a word jump selects the table', !insertClass && insertSelected && cm.state.doc.toString() === original, { insertClass, insertSelected });
+		} finally {
+			app.vault.setConfig('vimMode', undefined);
+			await sleep(2500);
+			fs.writeFileSync(appConfig, savedConfig);
+		}
+
 		// --- Open cells keep their width
 		const columns = (t) => Array.from(t.el.querySelector('table').rows[0].cells, (c) => Math.round(c.getBoundingClientRect().width * 10) / 10).join(', ');
 		cm = await open('Markdown in cells');
@@ -788,6 +1157,7 @@
 	} catch (error) {
 		results.push({ name: 'the check script itself', ok: false, detail: String(error && error.stack || error) });
 	}
+	if (attachedHere) cdp.detach();
 
 	const failed = results.filter((r) => !r.ok);
 	// The obsidian module isn't loadable from the CLI's eval, so the app's version comes from its main process.

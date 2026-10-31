@@ -103,7 +103,10 @@ class DrawnTable {
 
 		if (this.cover) setVariable(this.cover, TABLE_HEIGHT_VARIABLE, `${table.offsetHeight}px`);
 
-		const widths = headers.map((cell) => cell.offsetWidth);
+		// Real widths, not rounded ones: rounded up, an offset leaves a gap between frozen columns that passing
+		// text shows through. The scale is for a table drawn smaller or larger, as on a canvas.
+		const scale = widget.getBoundingClientRect().width / widget.offsetWidth || 1;
+		const widths = headers.map((cell) => cell.getBoundingClientRect().width / scale);
 		const pinColumns = headers.length > 0 && sum(widths) < widget.clientWidth - 2 * padding;
 		// The first column sits at 0, and each later one past the columns before it. This has to be above
 		// all of a column's cells, but it changes only when a frozen column changes width.

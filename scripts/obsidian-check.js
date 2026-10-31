@@ -1317,7 +1317,7 @@
 			tools.el.scrollLeft = 400;
 			await frames();
 			const [first, second, third] = Array.from(toolRow.cells).map((cell) => cell.getBoundingClientRect());
-			check('Frozen 3 a second frozen column sits against the first, and the third passes under it', Math.abs(first.right - second.left) <= 1 && third.left < second.right, { first: first.right, second: second.left, third: third.left });
+			check('Frozen 3 a second frozen column sits exactly against the first, and the third passes under it', Math.abs(first.right - second.left) < 0.1 && third.left < second.right, { first: first.right, second: second.left, third: third.left });
 			tools.el.scrollLeft = 0;
 			await frames();
 

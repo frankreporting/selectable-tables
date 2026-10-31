@@ -1,18 +1,18 @@
 # Selectable Tables
 
-An Obsidian plugin for Live Preview. It lets the arrow keys pass a table in one press, select a whole table as one block, the way Obsidian treats an image, and move between its cells without opening them.
+An Obsidian plugin that augments tables in Live Preview mode. Treats a table as a single block, the same way Obsidian treats an image. This unlocks the ability to use arrow keys to select and navigate tables and cells without touching or viewing the raw Markdown. You hit `Enter` to drop into the cell for editing, which is also similar to hitting `Enter` on an image to get to its Markdown link. This also brings table editing a little closer to how it works in apps like Notion.
 
-Without it, every arrow press that lands in a table opens an editor for that cell. Holding ↓ through a note stalls at every table, links in the table flicker as cells switch between rendered and source text, and the table changes size as they do.
+## Why I made this
+
+One of the original objectives was to make scrolling notes with large tables a little more seamless, especially tables that include Markdown inside the cells, e.g. links or formatting. You can now bypass a table in one keypress rather than having to scroll through every cell, which typically results in flickering and stuttering as Obsidian tries to reveal the Markdown for every cell your caret passes. Without the plugin, every arrow press that lands in a table opens an editor for that cell. Holding ↓ through a note stalls at every table, links in the table flicker as cells switch between rendered and source text, and the table changes size as they do.
 
 ![A selected table, tinted and framed with a thick border](docs/selected-table.png)
 
 ## Install
 
-Until it's in the community plugin list, install it from a release:
-
-1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/frankreporting/selectable-tables/releases/latest).
-2. Put them in `<vault>/.obsidian/plugins/selectable-tables/`.
-3. Reload Obsidian and enable **Selectable Tables** in **Settings → Community plugins**.
+1. In Obsidian, open **Settings → Community plugins**. If you see **Exit Restricted mode**, select it.
+2. Select **Browse** and search for **Selectable Tables**.
+3. Select **Install**, then **Enable**.
 
 It needs Obsidian 1.14.4 or later.
 
@@ -63,6 +63,28 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 With Vim mode on, Vim's own keys come first: in normal mode, j, k and the arrows still step into tables.
 
 With an input method (IME), starting to compose on a selected table or cell moves the caret beside the table, and the text lands there.
+
+## Roadmap
+
+What's planned, broadly. The order and the details may change.
+
+**Next:**
+
+- **Freeze rows and columns:** keep a table's first rows and columns in view as you scroll, in Live Preview and Reading view, set from a command or the right-click menu. A wide table's sideways scrollbar can stay at the bottom of the pane too.
+
+**After that:**
+
+- **Edit from a selected cell:** Backspace, Delete, Cut and Paste act on the cell, with nothing to open first.
+- **Move rows and columns** from a selected cell, without opening the cells for edit.
+- **Select a range of cells** with Shift and the arrows.
+
+**Still being worked out:**
+
+- The arrow keys stay in the table while a cell is open, until Escape.
+- Bold, italic and other formatting act on a selected cell.
+- Vim's j and k pass a table in one press, like the arrows.
+- A search result in a table selects its cell instead of opening it.
+- ← and → swap around a table in right-to-left text.
 
 ## Development
 

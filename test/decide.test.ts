@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EditorState, Transaction } from '@codemirror/state';
-import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, noCells, selectedTable, stay, stopsEdit, tab } from '../src/editor/decide';
+import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
+import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
 
 const TABLE = '| Plant  | Room |\n| ------ | ---- |\n| Fern   | Hall |';
@@ -456,5 +456,301 @@ describe('Shift with an arrow', () => {
 
 	test('Shift+↓ on a wrapped line steps aside until its last row', () => {
 		assert.equal(press(`# Lo‸ng\n${TABLE}\n`, 'down', { shift: true, leaves: false }), null);
+	});
+});
+
+describe('a selected cell and the keys that jump', () => {
+	const BIG = '| a   | b   | c   |\n| --- | --- | --- |\n| d   | e   | f   |\n| g   | h   | i   |';
+	const grid: Grid = { rows: 3, columns: () => 3 };
+	const on3 = (row: number, column: number, cells: Grid = grid) => on(note(`\n⟨${BIG}⟩\n`), { selected: { row, column }, left: null, grid: cells });
+	const to = (row: number, column: number): Action => ({ type: 'cell', cell: { row, column } });
+
+	test('Home and Cmd+← go to the first cell of the row', () => {
+		assert.deepEqual(rowEnd(on3(1, 1), false), to(1, 0));
+	});
+
+	test('End and Cmd+→ go to the last cell of the row', () => {
+		assert.deepEqual(rowEnd(on3(1, 1), true), to(1, 2));
+	});
+
+	test('Page Up goes to the top of the column', () => {
+		assert.deepEqual(page(on3(2, 1), false), to(0, 1));
+	});
+
+	test('Page Down goes to the bottom of the column', () => {
+		assert.deepEqual(page(on3(0, 1), true), to(2, 1));
+	});
+
+	test('Cmd+↑ and Cmd+Home go to the top of the column', () => {
+		assert.deepEqual(noteEnd(on3(2, 1), false), to(0, 1));
+	});
+
+	test('Cmd+↓ and Cmd+End go to the bottom of the column', () => {
+		assert.deepEqual(noteEnd(on3(0, 1), true), to(2, 1));
+	});
+
+	test('already on that cell, a jump stays on it', () => {
+		assert.deepEqual(rowEnd(on3(1, 0), false), to(1, 0));
+		assert.deepEqual(rowEnd(on3(1, 2), true), to(1, 2));
+		assert.deepEqual(page(on3(0, 1), false), to(0, 1));
+		assert.deepEqual(noteEnd(on3(2, 1), true), to(2, 1));
+	});
+
+	test('End goes to the last cell drawn on the row', () => {
+		const uneven: Grid = { rows: 3, columns: (row) => (row === 1 ? 2 : 4) };
+		assert.deepEqual(rowEnd(on3(1, 0, uneven), true), to(1, 1));
+	});
+
+	test('a jump onto a shorter row lands on its last cell', () => {
+		const uneven: Grid = { rows: 3, columns: (row) => (row === 2 ? 2 : 4) };
+		assert.deepEqual(page(on3(0, 3, uneven), true), to(2, 1));
+	});
+
+	test('a table with no drawn rows keeps the cell where it is', () => {
+		assert.deepEqual(page(on3(1, 1, noCells.grid), true), to(1, 1));
+		assert.deepEqual(rowEnd(on3(1, 1, noCells.grid), true), to(1, 1));
+	});
+
+	test('Option with an arrow is taken, and does nothing', () => {
+		assert.deepEqual(option(on3(1, 1), true), { type: 'stay' });
+		assert.deepEqual(option(on3(1, 1), false), { type: 'stay' });
+	});
+
+	test('Shift with a jump is taken, and does nothing', () => {
+		assert.deepEqual(shifted(on3(1, 1)), { type: 'stay' });
+		assert.deepEqual(shiftedRowEnd(on3(1, 1)), { type: 'stay' });
+	});
+});
+
+describe('a selected table and the keys that jump', () => {
+	const text = selected('Above\n\n', '\nBelow');
+	const span = spanOf(text);
+
+	test('Page Down and Option+→ put the caret at the start of the line below', () => {
+		assert.deepEqual(page(on(note(text)), true), { type: 'caret', pos: span.to + 1 });
+		assert.deepEqual(option(on(note(text)), true), { type: 'caret', pos: span.to + 1 });
+	});
+
+	test('Page Up and Option+← put the caret at the end of the line above', () => {
+		assert.deepEqual(page(on(note(text)), false), { type: 'caret', pos: span.from - 1 });
+		assert.deepEqual(option(on(note(text)), false), { type: 'caret', pos: span.from - 1 });
+	});
+
+	test('with no line beyond the table, they are left to the check on key moves', () => {
+		assert.equal(page(on(note(`\n⟨${TABLE}⟩`)), true), null);
+		assert.equal(option(on(note(`⟨${TABLE}⟩\n`)), false), null);
+	});
+
+	test('Home, End, Cmd+← and Cmd+→ do nothing', () => {
+		assert.deepEqual(rowEnd(on(note(text)), false), { type: 'stay' });
+		assert.deepEqual(rowEnd(on(note(text)), true), { type: 'stay' });
+	});
+
+	test('Shift with Home, End, Cmd+← or Cmd+→ does nothing, since Obsidian would shrink it to a caret on its edge', () => {
+		assert.deepEqual(shiftedRowEnd(on(note(text))), { type: 'stay' });
+		assert.deepEqual(shiftedRowEnd(on(note(selected('Above\n\n', '\nBelow', false)))), { type: 'stay' });
+	});
+
+	test('Cmd+↑ and Cmd+↓ are left to Obsidian, which goes to the note\'s start or end', () => {
+		assert.equal(noteEnd(on(note(text)), false), null);
+		assert.equal(noteEnd(on(note(text)), true), null);
+	});
+
+	test('Shift with a jump is left to Obsidian', () => {
+		assert.equal(shifted(on(note(text))), null);
+	});
+});
+
+describe('a caret and the keys that jump', () => {
+	const state = () => note(`Ab‸ove\n\n${TABLE}\n`);
+
+	test('every one of them is left to Obsidian', () => {
+		for (const forward of [true, false]) {
+			assert.equal(rowEnd(on(state()), forward), null);
+			assert.equal(page(on(state()), forward), null);
+			assert.equal(noteEnd(on(state()), forward), null);
+			assert.equal(option(on(state()), forward), null);
+		}
+		assert.equal(shifted(on(state())), null);
+		assert.equal(shiftedRowEnd(on(state())), null);
+	});
+
+	test('Home and End with a caret on a table\'s edge, as a paste leaves it, select the table', () => {
+		const text = `Above\n\n${TABLE}‸`;
+		assert.deepEqual(rowEnd(on(note(text)), false), { type: 'select', table: spanOf(text), fromAbove: false });
+		assert.deepEqual(rowEnd(on(note(text)), true), { type: 'select', table: spanOf(text), fromAbove: false });
+		const top = `\n‸${TABLE}\n`;
+		assert.deepEqual(rowEnd(on(note(top)), true), { type: 'select', table: spanOf(top), fromAbove: true });
+	});
+
+	test('Home and End with a selection Shift left on a table\'s edge select the table', () => {
+		const text = `⟨Above\n\n${TABLE}⟩\n\nBelow`;
+		assert.deepEqual(rowEnd(on(note(text)), true), { type: 'select', table: spanOf(text), fromAbove: true });
+	});
+
+	test('with several carets, they stay with Obsidian', () => {
+		assert.equal(rowEnd(on(note(`‸Above\n\n${TABLE}‸`)), false), null);
+	});
+});
+
+describe('the check on key moves', () => {
+	const outside = (text: string) => ({ state: note(text), inside: text.replace(/[‸⟨⟩]/g, '').indexOf('Fern') });
+	const editor = (state: EditorState) => ({ layout: layoutOf(state), active: true, vim: false, left: null, cellSelected: false });
+	const move = (state: EditorState, anchor: number, userEvent = 'select') => state.update({ selection: { anchor }, userEvent });
+
+	test('a word jump into a table from above selects it from above', () => {
+		const text = `Above‸\n\n${TABLE}\n\nBelow`;
+		const { state, inside } = outside(text);
+		assert.deepEqual(landing(move(state, inside), editor(state)), { type: 'select', table: spanOf(text), fromAbove: true });
+	});
+
+	test('a word jump into a table from below selects it from below', () => {
+		const text = `Above\n\n${TABLE}\n‸Below`;
+		const { state, inside } = outside(text);
+		assert.deepEqual(landing(move(state, inside), editor(state)), { type: 'select', table: spanOf(text), fromAbove: false });
+	});
+
+	test('a jump to the note\'s end, where a table ends it, selects it', () => {
+		const text = `Ab‸ove\n\n${TABLE}`;
+		const { state } = outside(text);
+		assert.deepEqual(landing(move(state, state.doc.length), editor(state)), { type: 'select', table: spanOf(text), fromAbove: true });
+	});
+
+	test('a jump to the note\'s start, where a table starts it, selects it from below', () => {
+		const text = `${TABLE}\n\nBel‸ow`;
+		const { state } = outside(text);
+		assert.deepEqual(landing(move(state, 0), editor(state)), { type: 'select', table: spanOf(text), fromAbove: false });
+	});
+
+	test('a move in a caret left on a table\'s edge, as a paste leaves it, selects the table', () => {
+		const text = `Above\n\n${TABLE}‸`;
+		const { state, inside } = outside(text);
+		assert.deepEqual(landing(move(state, inside), editor(state)), { type: 'select', table: spanOf(text), fromAbove: false });
+	});
+
+	test('Cmd+U and Cmd+Shift+U, which put a selection back from the history, select the table', () => {
+		const text = `Above‸\n\n${TABLE}\n\nBelow`;
+		const { state, inside } = outside(text);
+		assert.deepEqual(landing(move(state, inside, 'select.undo'), editor(state)), { type: 'select', table: spanOf(text), fromAbove: true });
+		assert.deepEqual(landing(move(state, inside, 'select.redo'), editor(state)), { type: 'select', table: spanOf(text), fromAbove: true });
+	});
+
+	test('a move that lands outside a table is left alone', () => {
+		const { state } = outside(`‸Above\n\n${TABLE}\n\nBelow`);
+		assert.equal(landing(move(state, 3), editor(state)), null);
+	});
+
+	test('from that same table selected, the key does nothing', () => {
+		const { state, inside } = outside(selected('Above\n\n', '\nBelow'));
+		assert.deepEqual(landing(move(state, inside), editor(state)), { type: 'stay' });
+	});
+
+	test('from another selected table, it selects the one it lands in', () => {
+		const second = TABLE.replace('Fern', 'Moss');
+		const text = `⟨${TABLE}⟩\n\n${second}\n\nBelow`;
+		const state = note(text);
+		const inside = state.doc.toString().indexOf('Moss');
+		assert.deepEqual(landing(move(state, inside), editor(state)), { type: 'select', table: spanOf(text, second), fromAbove: true });
+	});
+
+	test('from a selected cell, the move is dropped', () => {
+		const { state, inside } = outside(selected('Above\n\n', '\nBelow'));
+		assert.deepEqual(landing(move(state, inside), { ...editor(state), cellSelected: true }), { type: 'stay' });
+	});
+
+	test('from a selected cell, a move out of the table is left alone', () => {
+		const { state } = outside(selected('Above\n\n', '\nBelow'));
+		assert.equal(landing(move(state, 0), { ...editor(state), cellSelected: true }), null);
+	});
+
+	describe('a big jump and a table Obsidian has not drawn yet', () => {
+		const undrawn = (state: EditorState) => ({ ...editor(state), layout: layoutOf(state, { undrawn: true }), left: 'jump down' as const });
+
+		test('going down, it lands on the line below the table', () => {
+			const text = `Ab‸ove\n\n${TABLE}\n\nBelow`;
+			const { state, inside } = outside(text);
+			assert.deepEqual(landing(move(state, inside), undrawn(state)), { type: 'caret', pos: spanOf(text).to + 1 });
+		});
+
+		test('going up, it lands on the line above the table', () => {
+			const text = `Above\n\n${TABLE}\n\nBel‸ow`;
+			const { state, inside } = outside(text);
+			assert.deepEqual(landing(move(state, inside), { ...undrawn(state), left: 'jump up' }), { type: 'caret', pos: spanOf(text).from - 1 });
+		});
+
+		test('the way it goes comes from the key, not from where the caret was', () => {
+			const text = `⟨Above\n\n${TABLE}⟩\n\nBelow`;
+			const state = note(text);
+			assert.deepEqual(landing(move(state, spanOf(text).to), undrawn(state)), { type: 'caret', pos: spanOf(text).to + 1 });
+		});
+
+		test('with no line beyond it, the text is left alone, since Obsidian may never draw it', () => {
+			const { state, inside } = outside(`Ab‸ove\n\n${TABLE}`);
+			assert.equal(landing(move(state, inside), undrawn(state)), null);
+		});
+
+		test('a line that only has a pipe in it is left alone', () => {
+			const { state, inside } = outside('Ab‸ove\n\nFern | Hall\n\nBelow');
+			assert.equal(landing(move(state, inside), undrawn(state)), null);
+		});
+
+		test('any other key move leaves text that looks like a table alone, as in a code block', () => {
+			const { state, inside } = outside(`Ab‸ove\n\n${TABLE}\n\nBelow`);
+			assert.equal(landing(move(state, inside), { ...undrawn(state), left: null }), null);
+			assert.equal(landing(move(state, inside), { ...undrawn(state), left: 'arrow' }), null);
+		});
+
+		test('a table that is drawn is selected, as with any other key', () => {
+			const text = `Ab‸ove\n\n${TABLE}`;
+			const { state, inside } = outside(text);
+			assert.deepEqual(landing(move(state, inside), { ...editor(state), left: 'jump down' }), { type: 'select', table: spanOf(text), fromAbove: true });
+		});
+	});
+
+	describe('stands aside', () => {
+		const text = `Above‸\n\n${TABLE}\n\nBelow`;
+		const { state, inside } = outside(text);
+
+		test('for a click', () => {
+			assert.equal(landing(move(state, inside, 'select.pointer'), editor(state)), null);
+		});
+
+		test('for a search result', () => {
+			assert.equal(landing(move(state, inside, 'select.search'), editor(state)), null);
+		});
+
+		test('for a move with no user event, such as another plugin\'s setCursor', () => {
+			assert.equal(landing(state.update({ selection: { anchor: inside } }), editor(state)), null);
+		});
+
+		test('for Enter\'s caret, which is meant to open a cell', () => {
+			const opening = state.update({ selection: { anchor: inside }, userEvent: 'select', annotations: opensCell.of(true) });
+			assert.equal(landing(opening, editor(state)), null);
+		});
+
+		test('in an editor without the keyboard, in a composition, or in a cell\'s editor', () => {
+			assert.equal(landing(move(state, inside), { ...editor(state), active: false }), null);
+		});
+
+		test('in Vim\'s normal and visual modes', () => {
+			assert.equal(landing(move(state, inside), { ...editor(state), vim: true }), null);
+		});
+
+		test('for a plain arrow left to Obsidian', () => {
+			assert.equal(landing(move(state, inside), { ...editor(state), left: 'arrow' as const }), null);
+		});
+
+		test('for several carets', () => {
+			const several = state.update({ selection: EditorSelection.create([EditorSelection.cursor(0), EditorSelection.cursor(inside)]), userEvent: 'select' });
+			assert.equal(landing(several, editor(state)), null);
+		});
+
+		test('for a range', () => {
+			assert.equal(landing(state.update({ selection: { anchor: 0, head: inside }, userEvent: 'select' }), editor(state)), null);
+		});
+
+		test('for an edit', () => {
+			assert.equal(landing(state.update({ changes: { from: 0, insert: 'x' }, selection: { anchor: inside }, userEvent: 'select' }), editor(state)), null);
+		});
 	});
 });

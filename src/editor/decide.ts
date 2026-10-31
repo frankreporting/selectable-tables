@@ -1,6 +1,6 @@
-import { EditorState, Line, Transaction } from '@codemirror/state';
+import { Annotation, EditorState, Line, Transaction } from '@codemirror/state';
 import type { Layout } from './layout';
-import { Cell, cellCaret, cellSource, frontmatterEnd, Span, writtenByObsidian } from './table-text';
+import { Cell, cellCaret, cellSource, frontmatterEnd, Span, tableInText, writtenByObsidian } from './table-text';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -122,6 +122,17 @@ function moveCell(grid: Grid, cell: Cell, direction: Direction): Cell {
 	else if (direction === 'down') row = Math.min(row + 1, grid.rows - 1);
 	else if (direction === 'left') column = Math.max(column - 1, 0);
 	else column++;
+	return { row, column: Math.min(column, grid.columns(row) - 1) };
+}
+
+/** A jump on a selected cell: the last cell that way along its row or column. */
+function edgeCell(grid: Grid, cell: Cell, direction: Direction): Cell {
+	if (grid.rows === 0) return cell;
+	let { row, column } = cell;
+	if (direction === 'up') row = 0;
+	else if (direction === 'down') row = grid.rows - 1;
+	else if (direction === 'left') column = 0;
+	else column = grid.columns(row) - 1;
 	return { row, column: Math.min(column, grid.columns(row) - 1) };
 }
 
@@ -274,6 +285,119 @@ export function deleteForward(state: EditorState, layout: Layout): Action | null
 /** A key that would type over a selected table does nothing, so a stray key can't change it. */
 export function stay(state: EditorState, layout: Layout): Action | null {
 	return selectedTable(state, layout) && { type: 'stay' };
+}
+
+/** The caret leaves a selected table on one side. With no line there, the check on key moves keeps it. */
+function leave({ state, layout }: TableContext, forward: boolean): Action | null {
+	const table = selectedTable(state, layout);
+	return table && beyond(state, layout, table, forward);
+}
+
+/** A jump to the top or bottom of a selected cell's column. */
+function columnEnd({ cells }: TableContext, forward: boolean): Action | null {
+	return cells.selected && { type: 'cell', cell: edgeCell(cells.grid, cells.selected, forward ? 'down' : 'up') };
+}
+
+/**
+ * Home, End, Cmd+← and Cmd+→ go to the ends of a selected cell's row, and do nothing on a selected table.
+ * Obsidian's own moves here send no user event, so the check on key moves wouldn't see the caret land in
+ * the table's text. For the same reason, a head left on a table's edge, by Shift or a paste, selects it.
+ */
+export function rowEnd(context: TableContext, forward: boolean): Action | null {
+	const { state, layout, cells } = context;
+	if (cells.selected) return { type: 'cell', cell: edgeCell(cells.grid, cells.selected, forward ? 'right' : 'left') };
+	return stay(state, layout) ?? headOnTable(state, layout);
+}
+
+function headOnTable(state: EditorState, layout: Layout): Action | null {
+	const { ranges, main } = state.selection;
+	const table = ranges.length === 1 ? layout.tableAt(main.head) : null;
+	// A caret came from the side it's on. A range reaches the head from the other side.
+	return table && { type: 'select', table, fromAbove: main.head === (main.empty ? table.from : table.to) };
+}
+
+/** Page Up and Page Down go to the ends of a selected cell's column, and leave a selected table. */
+export function page(context: TableContext, forward: boolean): Action | null {
+	return columnEnd(context, forward) ?? leave(context, forward);
+}
+
+/**
+ * Cmd+↑, Cmd+↓, Cmd+Home and Cmd+End go to the ends of a selected cell's column. A selected table is one
+ * block in the note, not somewhere to be inside, so there they keep going to the note's start or end.
+ */
+export function noteEnd(context: TableContext, forward: boolean): Action | null {
+	return columnEnd(context, forward);
+}
+
+/** Option with an arrow does nothing on a selected cell, and leaves a selected table. */
+export function option(context: TableContext, forward: boolean): Action | null {
+	return context.cells.selected ? { type: 'stay' } : leave(context, forward);
+}
+
+/** Shift with a jump does nothing on a selected cell, as it does with an arrow. */
+export function shifted({ cells }: TableContext): Action | null {
+	return cells.selected && { type: 'stay' };
+}
+
+/**
+ * The same for Home, End, Cmd+← and Cmd+→, which also do nothing on a selected table. There Obsidian
+ * would move the head to the table's far end, shrink the selection to a caret, and open a cell.
+ */
+export function shiftedRowEnd(context: TableContext): Action | null {
+	return shifted(context) ?? stay(context.state, context.layout);
+}
+
+/** On Enter's caret: the one key move that means to open a cell. */
+export const opensCell = Annotation.define<boolean>();
+
+/** What the check on key moves needs to know about the editor a move is in. */
+export interface Landing {
+	layout: Layout;
+	/** The note's own editor has the keyboard, in Live Preview, with no composition under way. */
+	active: boolean;
+	/** Vim's normal or visual mode: its motions move the caret, and a selection would start Visual mode. */
+	vim: boolean;
+	/** The key the plugin has just left to Obsidian, if it's one the check treats differently. */
+	left: 'arrow' | 'jump up' | 'jump down' | null;
+	cellSelected: boolean;
+}
+
+/**
+ * A big jump held down outruns Obsidian's parser, and a table it hasn't reached is still lines of text:
+ * the move lands in it, Obsidian draws it a moment later with the caret inside, and a cell opens. So here
+ * the text decides, and the caret goes past the table, as these keys go past one that's drawn. Other
+ * moves stay near what's drawn, so text there that reads as a table really is text, as in a code block.
+ */
+function pastUndrawn(state: EditorState, layout: Layout, head: number, forward: boolean): Action | null {
+	const table = tableInText(state.doc, head);
+	return table && beyond(state, layout, table, forward);
+}
+
+/**
+ * The moves that come from a key: every `select` but a click's and a search's. Search results are left
+ * alone: a result is one deliberate jump, and an open cell shows the match.
+ */
+function keyMove(tr: Transaction): boolean {
+	return tr.isUserEvent('select') && !tr.isUserEvent('select.pointer') && !tr.isUserEvent('select.search');
+}
+
+/**
+ * The check on key moves. A key that leaves one caret in a table's text would open a cell, so the table
+ * is selected instead, from the side the caret came from. From that same table selected, or from a
+ * selected cell, the move is dropped, so what's selected stays. It covers any key that sends `select`,
+ * with no list to keep: word jumps, Option+↑/↓, Ctrl+F, Cmd+U and other plugins' moves. Obsidian's own
+ * moves between cells send no user event, so they don't come here. A plain arrow left to Obsidian stays
+ * as it was: it enters a table with no line beyond it.
+ */
+export function landing(tr: Transaction, { layout, active, vim, left, cellSelected }: Landing): Action | null {
+	if (!tr.selection || tr.docChanged || !keyMove(tr) || tr.annotation(opensCell)) return null;
+	if (!active || vim || left === 'arrow') return null;
+	const { ranges, main } = tr.selection;
+	if (ranges.length !== 1 || !main.empty) return null;
+	const table = layout.tableAt(main.head);
+	if (!table) return left ? pastUndrawn(tr.startState, layout, main.head, left === 'jump down') : null;
+	if (cellSelected || selectedTable(tr.startState, layout)?.from === table.from) return { type: 'stay' };
+	return { type: 'select', table, fromAbove: tr.startState.selection.main.head < main.head };
 }
 
 /** Tab moves a selected cell. On a selected table, it does nothing. */

@@ -26,6 +26,8 @@ export interface Drawing {
 	properties?: boolean;
 	/** Ranges drawn as other block widgets, such as a rendered callout. */
 	widgets?: Span[];
+	/** Obsidian's parser hasn't reached the tables, so they're still lines of text. */
+	undrawn?: boolean;
 }
 
 /**
@@ -51,7 +53,7 @@ export function tablesIn(doc: Text): Span[] {
 }
 
 export function layoutOf(state: EditorState, drawing: Drawing = {}): Layout {
-	const tables = tablesIn(state.doc);
+	const tables = drawing.undrawn ? [] : tablesIn(state.doc);
 	const hidden: Span[] = [...(drawing.widgets ?? [])];
 	const fmEnd = frontmatterEnd(state.doc);
 	if (drawing.properties && fmEnd >= 0) hidden.push({ from: 0, to: fmEnd });

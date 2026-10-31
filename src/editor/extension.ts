@@ -1,13 +1,13 @@
 import { EditorSelection, EditorState, Extension, Prec, SelectionRange } from '@codemirror/state';
 import { EditorView, KeyBinding, keymap } from '@codemirror/view';
-import { editorLivePreviewField } from 'obsidian';
-import { Action, arrow, Context, Direction, enter, escape, selectedTable, tab } from './decide';
+import { editorLivePreviewField, Notice } from 'obsidian';
+import { cellSelected, cellSelection, TABLE_CLASS } from './cells';
+import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, noCells, selectedTable, stay, stopsEdit, tab } from './decide';
 import { viewLayout } from './layout';
 import type { Span } from './table-text';
 
 /** On the editor while a table is selected; styles.css hides the caret then, as Obsidian does for images. */
 export const SELECTED_CLASS = 'selectable-tables-selected';
-const TABLE_CLASS = 'cm-table-widget';
 
 /** The editor Obsidian opens inside a table cell. */
 function cellWidget(view: EditorView): HTMLElement | null {
@@ -23,6 +23,7 @@ function context(view: EditorView): Context {
 	return {
 		state: view.state,
 		layout: viewLayout(view),
+		cells: view.plugin(cellSelection) ?? noCells,
 		leavesLine(forward) {
 			const range = view.state.selection.main;
 			const line = view.state.doc.lineAt(range.head);
@@ -83,6 +84,21 @@ function run(view: EditorView, action: Action | null): boolean {
 		case 'extendTo':
 			view.dispatch({ selection: EditorSelection.range(main.anchor, action.pos), scrollIntoView: true, userEvent: 'select' });
 			return true;
+		case 'cell':
+			view.plugin(cellSelection)?.select(action.cell);
+			return true;
+		case 'table':
+			view.plugin(cellSelection)?.climb();
+			return true;
+		case 'open':
+			view.plugin(cellSelection)?.opening();
+			// Obsidian scrolls the cell into view as it opens. Scrolling to a caret in a tall table wouldn't.
+			view.dispatch({ selection: EditorSelection.cursor(action.pos), userEvent: 'select' });
+			return true;
+		case 'refuse':
+			view.plugin(cellSelection)?.refuse();
+			new Notice('This table can\'t open from the keyboard. Click a cell to edit it.');
+			return true;
 	}
 }
 
@@ -95,7 +111,15 @@ function onArrow(direction: Direction, shift: boolean) {
 	};
 }
 
-/** Escape in a cell closes it and selects the whole table, the way Escape in an image's link does. */
+/** A selection of exactly a table, from the side the keys can later go back to. */
+function wholeTable({ from, to }: Span, fromAbove: boolean): SelectionRange {
+	return fromAbove ? EditorSelection.range(from, to) : EditorSelection.range(to, from);
+}
+
+/**
+ * Escape in a cell closes it and selects that cell, the way Escape in an image's link selects the image.
+ * A table whose cell Enter opened keeps the side it was selected from.
+ */
 function escapeCell(view: EditorView): boolean {
 	const widget = cellWidget(view);
 	const outer = widget?.parentElement?.closest<HTMLElement>('.cm-editor');
@@ -103,36 +127,51 @@ function escapeCell(view: EditorView): boolean {
 	if (!widget || !main || main.state.field(editorLivePreviewField, false) !== true) return false;
 	const table = viewLayout(main).tableAt(main.posAtDOM(widget));
 	if (!table) return false;
-	main.dispatch({ selection: EditorSelection.range(table.to, table.from), userEvent: 'select' });
+	const cell = view.dom.closest<HTMLTableCellElement>('td, th');
+	const row = cell?.closest<HTMLTableRowElement>('tr');
+	const cells = main.plugin(cellSelection);
+	const fromAbove = cells?.fromAbove(table) ?? false;
+	// A range dragged across cells goes only when the selection leaves the table, so it leaves first.
+	if (widget.classList.contains('has-selection')) {
+		const beside = table.from > 0 ? table.from - 1 : table.to < main.state.doc.length ? table.to + 1 : null;
+		if (beside !== null) main.dispatch({ selection: EditorSelection.cursor(beside), userEvent: 'select' });
+	}
+	main.dispatch({ selection: wholeTable(table, fromAbove), userEvent: 'select' });
 	// Obsidian closes the cell when its note's editor takes the focus back. If anything in that moves
 	// the table's end, the whole table is selected again from what's there now.
 	main.focus();
 	const now = viewLayout(main).tableAt(main.state.selection.main.from);
-	if (now && (main.state.selection.main.from !== now.from || main.state.selection.main.to !== now.to)) {
-		main.dispatch({ selection: EditorSelection.range(now.to, now.from), userEvent: 'select' });
+	if (!now) return true;
+	if (main.state.selection.main.from !== now.from || main.state.selection.main.to !== now.to) {
+		main.dispatch({ selection: wholeTable(now, fromAbove), userEvent: 'select' });
 	}
+	if (cell && row) cells?.select({ row: row.rowIndex, column: cell.cellIndex });
 	return true;
 }
 
 const bindings: KeyBinding[] = [
+	// Held down, Enter stops at the selected table or cell. Its repeats would walk on into a cell, and
+	// from there add rows. This comes first so it runs ahead of the key's own binding.
+	{ any: (view, event) => event.key === 'Enter' && event.repeat && active(view) && selectedTable(view.state, viewLayout(view)) !== null },
 	{ key: 'ArrowDown', run: onArrow('down', false), shift: onArrow('down', true) },
 	{ key: 'ArrowUp', run: onArrow('up', false), shift: onArrow('up', true) },
 	{ key: 'ArrowRight', run: onArrow('right', false), shift: onArrow('right', true) },
 	{ key: 'ArrowLeft', run: onArrow('left', false), shift: onArrow('left', true) },
 	{
 		key: 'Enter',
-		run: (view) => active(view) && run(view, enter(view.state, viewLayout(view))),
-		// Shift+Enter would type a line break over the table: it does nothing, like Tab.
-		shift: (view) => active(view) && run(view, tab(view.state, viewLayout(view))),
+		run: (view) => active(view) && run(view, enter(context(view))),
+		// Shift+Enter would type a line break over the table: it does nothing.
+		shift: (view) => active(view) && run(view, stay(view.state, viewLayout(view))),
 	},
+	{ key: 'Delete', run: (view) => active(view) && run(view, deleteForward(view.state, viewLayout(view))) },
 	{
 		key: 'Escape',
-		run: (view) => (active(view) ? run(view, escape(view.state, viewLayout(view))) : view.hasFocus && escapeCell(view)),
+		run: (view) => (active(view) ? run(view, escape(context(view))) : view.hasFocus && escapeCell(view)),
 	},
 	{
 		key: 'Tab',
-		run: (view) => active(view) && run(view, tab(view.state, viewLayout(view))),
-		shift: (view) => active(view) && run(view, tab(view.state, viewLayout(view))),
+		run: (view) => active(view) && run(view, tab(context(view), true)),
+		shift: (view) => active(view) && run(view, tab(context(view), false)),
 	},
 ];
 
@@ -154,29 +193,39 @@ const markSelectedTable = EditorView.editorAttributes.of((view) => {
 /**
  * Typing on a selected table does nothing, so a stray key can't change it. This stops the browser's
  * text input itself: with the table selected, the browser's own caret can't sit across the table, so
- * a typed character would otherwise land on the line below.
+ * a typed character would otherwise land on the line below. On a selected cell, no input goes through.
+ * Copy gives the cell, not the table underneath it, and Cut and Paste do nothing.
  */
-const stopTyping = EditorView.domEventHandlers({
+const selectedEvents = EditorView.domEventHandlers({
 	beforeinput(event, view) {
+		if (cellSelected(view.state)) return event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo';
 		if (event.inputType !== 'insertText' && event.inputType !== 'insertReplacementText') return false;
 		return selectedTables.has(view.state);
 	},
+	// An input method composes past beforeinput, and at a note's start or right below the properties it
+	// would replace the selected table. Its keydown comes first, with key code 229, and the caret steps
+	// beside the table then. Moving the selection any later leaves the composition stuck, and Live Preview
+	// stops drawing until it ends, so an input method with no keydown is left alone.
+	keydown(event, view) {
+		if (event.keyCode === 229 && !view.compositionStarted && selectedTables.has(view.state)) run(view, escape({ ...context(view), cells: noCells }));
+		return false;
+	},
+	copy(event, view) {
+		const text = copied(context(view));
+		if (text === null) return false;
+		event.clipboardData?.setData('text/plain', text);
+		return true;
+	},
+	cut: (_, view) => cellSelected(view.state),
+	paste: (_, view) => cellSelected(view.state),
 });
 
-/**
- * Nor can any other key that types into the selected table, such as Shift+Enter, Ctrl+O or an indent
- * key. Edits elsewhere in the note pass. Deleting, cutting, pasting and dropping stay possible: those
- * are meant for the selection. Composed input (IME) is left alone, because dropping it would leave the
- * screen out of step with the note.
- */
 const keepSelectedTable = EditorState.transactionFilter.of((tr) => {
 	const table = tr.docChanged ? selectedTables.get(tr.startState) : undefined;
-	if (!table || !tr.changes.touchesRange(table.from, table.to)) return tr;
-	if (tr.isUserEvent('input.paste') || tr.isUserEvent('input.drop') || tr.isUserEvent('input.type.compose')) return tr;
-	return tr.isUserEvent('input') || tr.isUserEvent('indent') ? [] : tr;
+	return table && stopsEdit(tr, table, cellSelected(tr.startState)) ? [] : tr;
 });
 
 /** The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. */
 export function selectableTables(): Extension {
-	return [Prec.highest(keymap.of(bindings)), Prec.highest(stopTyping), keepSelectedTable, markSelectedTable];
+	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, markSelectedTable, cellSelection];
 }

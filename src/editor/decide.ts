@@ -1,6 +1,6 @@
-import type { EditorState, Line } from '@codemirror/state';
+import { EditorState, Line, Transaction } from '@codemirror/state';
 import type { Layout } from './layout';
-import { firstCellCaret, frontmatterEnd, Span } from './table-text';
+import { Cell, cellCaret, cellSource, frontmatterEnd, Span, writtenByObsidian } from './table-text';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -17,11 +17,40 @@ export type Action =
 	/** The selection's head moves to `pos`. */
 	| { type: 'extendTo'; pos: number }
 	/** The key is taken, and nothing changes. */
-	| { type: 'stay' };
+	| { type: 'stay' }
+	/** Selects a cell of the selected table. */
+	| { type: 'cell'; cell: Cell }
+	/** Back from a selected cell to the selected table. */
+	| { type: 'table' }
+	/** A caret at `pos`, in a selected cell's text, so that Obsidian opens the cell. */
+	| { type: 'open'; pos: number }
+	/** Enter can't safely open a cell of this table, and shows that. */
+	| { type: 'refuse' };
 
-export interface Context {
+/** A rendered table's shape. Obsidian fills short rows, but a row's own length is what counts. */
+export interface Grid {
+	rows: number;
+	columns(row: number): number;
+}
+
+/** The selected cell of the selected table, held on the editor, not in its state. */
+export interface Cells {
+	selected: Cell | null;
+	/** The cell Escape left, while its table stays selected: Enter goes back to it. */
+	left: Cell | null;
+	grid: Grid;
+}
+
+export const noCells: Cells = { selected: null, left: null, grid: { rows: 0, columns: () => 0 } };
+
+/** What the keys on a selected table or cell need to know. */
+export interface TableContext {
 	state: EditorState;
 	layout: Layout;
+	cells: Cells;
+}
+
+export interface Context extends TableContext {
 	/**
 	 * Whether a plain ↑ or ↓ would take the caret off its line, rather than to another row of the same
 	 * wrapped line. Asked only when a table is next to the caret, since it measures the screen.
@@ -79,8 +108,33 @@ function beyond(state: EditorState, layout: Layout, table: Span, forward: boolea
 }
 
 export function arrow(context: Context, direction: Direction, shift: boolean): Action | null {
+	const { cells } = context;
+	if (cells.selected) return shift ? { type: 'stay' } : { type: 'cell', cell: moveCell(cells.grid, cells.selected, direction) };
 	if (context.state.selection.ranges.length !== 1) return null;
 	return shift ? extend(context, direction) : move(context, direction);
+}
+
+/** An arrow on a selected cell: one cell along, stopping at the table's outer edge. */
+function moveCell(grid: Grid, cell: Cell, direction: Direction): Cell {
+	if (grid.rows === 0) return cell;
+	let { row, column } = cell;
+	if (direction === 'up') row = Math.max(row - 1, 0);
+	else if (direction === 'down') row = Math.min(row + 1, grid.rows - 1);
+	else if (direction === 'left') column = Math.max(column - 1, 0);
+	else column++;
+	return { row, column: Math.min(column, grid.columns(row) - 1) };
+}
+
+/** Tab on a selected cell: reading order, wrapping between rows and stopping at the table's ends. */
+function tabCell(grid: Grid, cell: Cell, forward: boolean): Cell {
+	if (grid.rows === 0) return cell;
+	const { row, column } = cell;
+	if (forward) {
+		if (column + 1 < grid.columns(row)) return { row, column: column + 1 };
+		return row + 1 < grid.rows ? { row: row + 1, column: 0 } : cell;
+	}
+	if (column > 0) return { row, column: column - 1 };
+	return row > 0 ? { row: row - 1, column: grid.columns(row - 1) - 1 } : cell;
 }
 
 function move({ state, layout, leavesLine }: Context, direction: Direction): Action | null {
@@ -89,6 +143,8 @@ function move({ state, layout, leavesLine }: Context, direction: Direction): Act
 
 	const { main } = state.selection;
 	if (!main.empty) return collapse(state, layout, main.from, main.to, direction);
+	const edge = tableEntered(layout, main.head, direction);
+	if (edge) return edge;
 	const line = state.doc.lineAt(main.head);
 	switch (direction) {
 		case 'down': {
@@ -110,6 +166,17 @@ function move({ state, layout, leavesLine }: Context, direction: Direction): Act
 			return table && { type: 'select', table, fromAbove: false };
 		}
 	}
+}
+
+/**
+ * A caret on a table's outer edge is in its text with no cell open, as a paste leaves it. Stepping
+ * further in would open a cell, so the table is selected, as it is from the line beyond.
+ */
+function tableEntered(layout: Layout, head: number, direction: Direction): Action | null {
+	const table = layout.tableAt(head);
+	if (!table) return null;
+	const backward = direction === 'up' || direction === 'left';
+	return head === (backward ? table.to : table.from) ? { type: 'select', table, fromAbove: !backward } : null;
 }
 
 /**
@@ -153,17 +220,25 @@ function extend({ state, layout, leavesLine }: Context, direction: Direction): A
 	return { type: 'extendTo', pos };
 }
 
-/** Enter on a selected table: the caret goes into its first cell, and Obsidian opens that cell. */
-export function enter(state: EditorState, layout: Layout): Action | null {
+/**
+ * Enter on a selected table selects a cell: the one Escape left, or else the first. On a selected cell,
+ * it puts the caret at the end of the cell's text, and Obsidian opens that cell, as long as Obsidian wrote
+ * the table. It refuses any other. A press still opens a cell there, and tidies a malformed table.
+ */
+export function enter({ state, layout, cells }: TableContext): Action | null {
 	const table = selectedTable(state, layout);
-	return table && { type: 'caret', pos: firstCellCaret(state.doc, table) };
+	if (!table) return null;
+	if (!cells.selected) return { type: 'cell', cell: cells.left ?? { row: 0, column: 0 } };
+	if (!writtenByObsidian(state.doc, table)) return { type: 'refuse' };
+	return { type: 'open', pos: cellCaret(state.doc, table, cells.selected) };
 }
 
 /**
- * Escape on a selected table: the caret goes back to the side it was selected from, the line above or
- * the line below, or to the other side when that one doesn't exist.
+ * Escape on a selected cell goes back to its table. On a selected table, the caret goes back to the side
+ * it was selected from, the line above or the line below, or to the other side when that one doesn't exist.
  */
-export function escape(state: EditorState, layout: Layout): Action | null {
+export function escape({ state, layout, cells }: TableContext): Action | null {
+	if (cells.selected) return { type: 'table' };
 	const table = selectedTable(state, layout);
 	if (!table) return escapeOntoTable(state, layout);
 	const { anchor, head } = state.selection.main;
@@ -184,7 +259,49 @@ function escapeOntoTable(state: EditorState, layout: Layout): Action | null {
 	return { type: 'select', table, fromAbove: main.head === table.to };
 }
 
-/** Tab on a selected table does nothing, so a stray key can't change it. */
-export function tab(state: EditorState, layout: Layout): Action | null {
+/**
+ * Delete at the end of the line above a table selects the table, as Obsidian does for Backspace from the
+ * line below. Otherwise it would pull the table's first row up, or delete a blank line and open a cell.
+ */
+export function deleteForward(state: EditorState, layout: Layout): Action | null {
+	const { ranges, main } = state.selection;
+	if (ranges.length !== 1 || !main.empty) return null;
+	const line = state.doc.lineAt(main.head);
+	const table = main.head === line.to ? tableBelow(state, layout, line) : null;
+	return table && { type: 'select', table, fromAbove: true };
+}
+
+/** A key that would type over a selected table does nothing, so a stray key can't change it. */
+export function stay(state: EditorState, layout: Layout): Action | null {
 	return selectedTable(state, layout) && { type: 'stay' };
+}
+
+/** Tab moves a selected cell. On a selected table, it does nothing. */
+export function tab({ state, layout, cells }: TableContext, forward: boolean): Action | null {
+	if (cells.selected) return { type: 'cell', cell: tabCell(cells.grid, cells.selected, forward) };
+	return stay(state, layout);
+}
+
+/** What Copy gives for a selected cell: its Markdown. */
+export function copied({ state, layout, cells }: TableContext): string | null {
+	const table = selectedTable(state, layout);
+	return table && cells.selected && cellSource(state.doc, table, cells.selected);
+}
+
+/**
+ * Whether the edit guard drops a change to a selected table. Typing into it, as with Shift+Enter, Ctrl+O
+ * or an indent key, does nothing. Deleting, cutting, pasting and dropping stay possible on a selected
+ * table: those are meant for the selection. Composed input (IME) always passes: dropping it leaves the
+ * composition stuck, and Live Preview stops drawing until it ends.
+ *
+ * A selected cell looks like one cell over a selection of the whole table, so there every edit to the
+ * table is dropped, with or without a user event: Obsidian's formatting commands send none. What passes
+ * doesn't come from the selection: undo and redo, a search and replace, a reload from disk, which is how
+ * Sync arrives (`set`), and a remote edit, which is how a second pane arrives.
+ */
+export function stopsEdit(tr: Transaction, table: Span, cellSelected: boolean): boolean {
+	if (!tr.changes.touchesRange(table.from, table.to) || tr.isUserEvent('input.type.compose')) return false;
+	if (cellSelected) return !tr.annotation(Transaction.remote) && !['undo', 'redo', 'set', 'searchReplace'].some((event) => tr.isUserEvent(event));
+	if (tr.isUserEvent('input.paste') || tr.isUserEvent('input.drop')) return false;
+	return tr.isUserEvent('input') || tr.isUserEvent('indent');
 }

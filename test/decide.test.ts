@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Action, arrow, Direction, enter, escape, selectedTable, tab } from '../src/editor/decide';
+import { EditorState, Transaction } from '@codemirror/state';
+import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, noCells, selectedTable, stay, stopsEdit, tab } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
 
 const TABLE = '| Plant  | Room |\n| ------ | ---- |\n| Fern   | Hall |';
@@ -14,8 +15,11 @@ interface Options {
 
 function press(marked: string, direction: Direction, { shift = false, drawing, leaves = true }: Options = {}): Action | null {
 	const state = note(marked);
-	return arrow({ state, layout: layoutOf(state, drawing), leavesLine: () => leaves }, direction, shift);
+	return arrow({ state, layout: layoutOf(state, drawing), leavesLine: () => leaves, cells: noCells }, direction, shift);
 }
+
+/** The context of a key on a selected table or cell. */
+const on = (state: EditorState, cells: Cells = noCells, drawing?: Drawing) => ({ state, layout: layoutOf(state, drawing), cells });
 
 /** The table's span, and other positions, in the note without its markers. */
 function spanOf(marked: string, table = TABLE) {
@@ -114,6 +118,55 @@ describe('next to a table', () => {
 	});
 });
 
+describe('a caret on a table\'s outer edge, as a paste leaves it', () => {
+	test('← and ↑ from its end select the table, rather than step into its last cell', () => {
+		for (const text of [`Intro\n\n${TABLE}‸`, `Intro\n\n${TABLE}‸\n\nAfter`]) {
+			assert.deepEqual(press(text, 'left'), { type: 'select', table: spanOf(text), fromAbove: false });
+			assert.deepEqual(press(text, 'up'), { type: 'select', table: spanOf(text), fromAbove: false });
+		}
+	});
+
+	test('→ and ↓ from its start select the table, rather than step into its first cell', () => {
+		const text = `Intro\n\n‸${TABLE}\n\nAfter`;
+		assert.deepEqual(press(text, 'right'), { type: 'select', table: spanOf(text), fromAbove: true });
+		assert.deepEqual(press(text, 'down'), { type: 'select', table: spanOf(text), fromAbove: true });
+	});
+
+	test('moving away from the table is left to Obsidian', () => {
+		assert.equal(press(`Intro\n\n${TABLE}‸\n\nAfter`, 'right'), null);
+		assert.equal(press(`Intro\n\n${TABLE}‸\n\nAfter`, 'down'), null);
+		assert.equal(press(`Intro\n\n‸${TABLE}\n\nAfter`, 'left'), null);
+		assert.equal(press(`Intro\n\n‸${TABLE}\n\nAfter`, 'up'), null);
+	});
+});
+
+describe('Delete above a table', () => {
+	const run = (text: string) => {
+		const state = note(text);
+		return deleteForward(state, layoutOf(state));
+	};
+
+	test('at the end of the line above, it selects the table, as Backspace does from below', () => {
+		const blank = `Intro\n‸\n${TABLE}\n`;
+		assert.deepEqual(run(blank), { type: 'select', table: spanOf(blank), fromAbove: true });
+		const text = `# Intro‸\n${TABLE}\n`;
+		assert.deepEqual(run(text), { type: 'select', table: spanOf(text), fromAbove: true });
+	});
+
+	test('anywhere else it is left to Obsidian', () => {
+		assert.equal(run(`# Int‸ro\n${TABLE}\n`), null);
+		assert.equal(run(`‸Intro\n\n${TABLE}\n`), null);
+		assert.equal(run(`\n${TABLE}\n‸After`), null);
+		assert.equal(run('‸Plain text\nMore text'), null);
+	});
+
+	test('a selection or several carets are left to Obsidian', () => {
+		assert.equal(run(`⟨Intro⟩\n${TABLE}\n`), null);
+		assert.equal(run(`‸Intro‸\n${TABLE}\n`), null);
+		assert.equal(run(selected('\n', '\n')), null);
+	});
+});
+
 describe('a selected table', () => {
 	test('is one range over exactly the table text', () => {
 		const text = selected('\n', '\n');
@@ -144,10 +197,13 @@ describe('a selected table', () => {
 		assert.equal(press(underProperties, 'up', { drawing: { properties: true } }), null);
 	});
 
-	test('Enter puts the caret at the end of the first cell text', () => {
-		const text = selected('\n', '\n');
-		const state = note(text);
-		assert.deepEqual(enter(state, layoutOf(state)), { type: 'caret', pos: spanOf(text).from + '| Plant'.length });
+	test('Enter selects the first cell', () => {
+		assert.deepEqual(enter(on(note(selected('\n', '\n')))), { type: 'cell', cell: { row: 0, column: 0 } });
+	});
+
+	test('Enter goes back to the cell Escape left', () => {
+		const cells = { ...noCells, left: { row: 1, column: 1 } };
+		assert.deepEqual(enter(on(note(selected('\n', '\n')), cells)), { type: 'cell', cell: { row: 1, column: 1 } });
 	});
 
 	test('Escape goes back to the side the table was selected from', () => {
@@ -155,7 +211,7 @@ describe('a selected table', () => {
 		const fromBelow = selected('# Intro\n', '\nAfter', false);
 		const run = (text: string) => {
 			const state = note(text);
-			return escape(state, layoutOf(state));
+			return escape(on(state));
 		};
 		assert.deepEqual(run(fromAbove), { type: 'caret', pos: spanOf(fromAbove).from - 1 });
 		assert.deepEqual(run(fromBelow), { type: 'caret', pos: spanOf(fromBelow).to + 1 });
@@ -164,7 +220,7 @@ describe('a selected table', () => {
 	test('Escape goes to the other side when the first one is missing', () => {
 		const run = (text: string, drawing?: Drawing) => {
 			const state = note(text);
-			return escape(state, layoutOf(state, drawing));
+			return escape(on(state, noCells, drawing));
 		};
 		const tableFirst = selected('', '\nAfter');
 		assert.deepEqual(run(tableFirst), { type: 'caret', pos: spanOf(tableFirst).to + 1 });
@@ -178,7 +234,7 @@ describe('a selected table', () => {
 	test('Escape on a selection whose head is on a table edge selects the table', () => {
 		const run = (text: string) => {
 			const state = note(text);
-			return escape(state, layoutOf(state));
+			return escape(on(state));
 		};
 		const shifted = `⟨\n${TABLE}⟩`;
 		assert.deepEqual(run(shifted), { type: 'select', table: spanOf(shifted), fromAbove: true });
@@ -187,12 +243,163 @@ describe('a selected table', () => {
 	});
 
 	test('Tab is taken, and does nothing', () => {
-		const state = note(selected('\n', '\n'));
-		assert.deepEqual(tab(state, layoutOf(state)), { type: 'stay' });
+		assert.deepEqual(tab(on(note(selected('\n', '\n'))), true), { type: 'stay' });
+		assert.deepEqual(tab(on(note(selected('\n', '\n'))), false), { type: 'stay' });
 		const caret = note(`‸\n${TABLE}\n`);
-		assert.equal(tab(caret, layoutOf(caret)), null);
-		assert.equal(enter(caret, layoutOf(caret)), null);
-		assert.equal(escape(caret, layoutOf(caret)), null);
+		assert.equal(tab(on(caret), true), null);
+		assert.equal(enter(on(caret)), null);
+		assert.equal(escape(on(caret)), null);
+	});
+
+	test('Shift+Enter is taken, and does nothing', () => {
+		const state = note(selected('\n', '\n'));
+		assert.deepEqual(stay(state, layoutOf(state)), { type: 'stay' });
+		const caret = note(`‸\n${TABLE}\n`);
+		assert.equal(stay(caret, layoutOf(caret)), null);
+	});
+});
+
+describe('a selected cell', () => {
+	const BIG = '| a   | b   | c   |\n| --- | --- | --- |\n| d   | e   | f   |\n| g   | h   | i   |';
+	const grid: Grid = { rows: 3, columns: () => 3 };
+	const state = () => note(`\n⟨${BIG}⟩\n`);
+	const cellAt = (row: number, column: number): Cells => ({ selected: { row, column }, left: null, grid });
+	const go = (row: number, column: number, direction: Direction, shift = false) =>
+		arrow({ ...on(state(), cellAt(row, column)), leavesLine: () => true }, direction, shift);
+	const to = (row: number, column: number): Action => ({ type: 'cell', cell: { row, column } });
+
+	test('the arrows move it one cell', () => {
+		assert.deepEqual(go(1, 1, 'up'), to(0, 1));
+		assert.deepEqual(go(1, 1, 'down'), to(2, 1));
+		assert.deepEqual(go(1, 1, 'left'), to(1, 0));
+		assert.deepEqual(go(1, 1, 'right'), to(1, 2));
+	});
+
+	test('the arrows stop at the outer edge', () => {
+		assert.deepEqual(go(0, 1, 'up'), to(0, 1));
+		assert.deepEqual(go(2, 1, 'down'), to(2, 1));
+		assert.deepEqual(go(1, 0, 'left'), to(1, 0));
+		assert.deepEqual(go(1, 2, 'right'), to(1, 2));
+	});
+
+	test('moving onto a shorter row lands on its last cell', () => {
+		const uneven: Grid = { rows: 3, columns: (row) => (row === 1 ? 2 : 4) };
+		const cells = { selected: { row: 0, column: 3 }, left: null, grid: uneven };
+		assert.deepEqual(arrow({ ...on(state(), cells), leavesLine: () => true }, 'down', false), to(1, 1));
+	});
+
+	test('a table with no drawn rows keeps the cell where it is', () => {
+		const cells = { selected: { row: 1, column: 1 }, left: null, grid: noCells.grid };
+		assert.deepEqual(arrow({ ...on(state(), cells), leavesLine: () => true }, 'down', false), to(1, 1));
+		assert.deepEqual(tab(on(state(), cells), true), to(1, 1));
+	});
+
+	test('Shift with an arrow is taken, and does nothing', () => {
+		for (const direction of ['up', 'down', 'left', 'right'] as const) assert.deepEqual(go(1, 1, direction, true), { type: 'stay' });
+	});
+
+	test('Tab goes to the next cell, wrapping to the next row', () => {
+		assert.deepEqual(tab(on(state(), cellAt(1, 1)), true), to(1, 2));
+		assert.deepEqual(tab(on(state(), cellAt(1, 2)), true), to(2, 0));
+	});
+
+	test('Tab on the last cell stays there', () => {
+		assert.deepEqual(tab(on(state(), cellAt(2, 2)), true), to(2, 2));
+	});
+
+	test('Shift+Tab goes to the previous cell, wrapping to the previous row', () => {
+		assert.deepEqual(tab(on(state(), cellAt(1, 1)), false), to(1, 0));
+		assert.deepEqual(tab(on(state(), cellAt(1, 0)), false), to(0, 2));
+	});
+
+	test('Shift+Tab on the first cell stays there', () => {
+		assert.deepEqual(tab(on(state(), cellAt(0, 0)), false), to(0, 0));
+	});
+
+	test('Enter opens the cell with the caret at the end of its text', () => {
+		const start = note(`\n⟨${BIG}⟩\n`).doc.toString().indexOf('| d');
+		assert.deepEqual(enter(on(state(), cellAt(1, 1))), { type: 'open', pos: start + '| d   | e'.length });
+	});
+
+	test('Enter refuses a table Obsidian did not write, and opens nothing', () => {
+		const shortRow = '| a   | b   |\n| --- | --- |\n| c   |';
+		assert.deepEqual(enter(on(note(`\n⟨${shortRow}⟩\n`), cellAt(1, 0))), { type: 'refuse' });
+	});
+
+	test('a table Obsidian did not write can still have its cells selected', () => {
+		const shortRow = '| a   | b   |\n| --- | --- |\n| c   |';
+		assert.deepEqual(enter(on(note(`\n⟨${shortRow}⟩\n`))), { type: 'cell', cell: { row: 0, column: 0 } });
+	});
+
+	test('Escape goes back to the selected table', () => {
+		assert.deepEqual(escape(on(state(), cellAt(1, 1))), { type: 'table' });
+	});
+
+	test('Copy gives the cell\'s Markdown', () => {
+		assert.equal(copied(on(state(), cellAt(1, 1))), 'e');
+	});
+
+	test('Copy steps aside with no cell selected', () => {
+		assert.equal(copied(on(state())), null);
+	});
+});
+
+describe('the edit guard', () => {
+	const text = `# Intro\n⟨${TABLE}⟩\nAfter`;
+	const table = spanOf(text);
+	const edit = (userEvent?: string) => note(text).update({ changes: { from: table.from, to: table.to }, ...(userEvent ? { userEvent } : {}) });
+	const outside = (userEvent: string) => note(text).update({ changes: { from: 0, insert: 'x' }, userEvent });
+
+	test('on a selected table, typing and indenting are stopped', () => {
+		assert.ok(stopsEdit(edit('input.type'), table, false));
+		assert.ok(stopsEdit(edit('indent.more'), table, false));
+	});
+
+	test('on a selected table, deleting, cutting, pasting and dropping pass', () => {
+		for (const event of ['delete.backward', 'delete.cut', 'input.paste', 'input.drop']) assert.ok(!stopsEdit(edit(event), table, false), event);
+	});
+
+	test('on a selected cell, every user edit that touches the table is stopped', () => {
+		for (const event of ['input.type', 'indent.more', 'delete.backward', 'delete.forward', 'delete.cut', 'input.paste', 'input.drop', 'move.line']) {
+			assert.ok(stopsEdit(edit(event), table, true), event);
+		}
+	});
+
+	test('on a selected cell, an edit with no user event is stopped, as Obsidian\'s commands send', () => {
+		assert.ok(stopsEdit(edit(), table, true));
+	});
+
+	test('on a selected table, an edit with no user event passes', () => {
+		assert.ok(!stopsEdit(edit(), table, false));
+	});
+
+	test('on a selected cell, undo and redo pass', () => {
+		assert.ok(!stopsEdit(edit('undo'), table, true));
+		assert.ok(!stopsEdit(edit('redo'), table, true));
+	});
+
+	test('on a selected cell, a reload from disk passes: that is how Sync arrives', () => {
+		assert.ok(!stopsEdit(edit('set'), table, true));
+	});
+
+	test('on a selected cell, a search and replace passes', () => {
+		assert.ok(!stopsEdit(edit('searchReplace'), table, true));
+	});
+
+	test('on a selected cell, a remote edit passes: that is how a second pane arrives', () => {
+		const remote = note(text).update({ changes: { from: table.from, to: table.to }, annotations: Transaction.remote.of(true) });
+		assert.ok(!stopsEdit(remote, table, true));
+	});
+
+	test('composed input passes: dropping it leaves the composition stuck', () => {
+		assert.ok(!stopsEdit(edit('input.type.compose'), table, true));
+		assert.ok(!stopsEdit(edit('input.type.compose'), table, false));
+	});
+
+	test('edits elsewhere in the note pass', () => {
+		assert.ok(!stopsEdit(outside('input.type'), table, true));
+		assert.ok(!stopsEdit(outside('delete.backward'), table, true));
+		assert.ok(!stopsEdit(outside('input.type'), table, false));
 	});
 });
 

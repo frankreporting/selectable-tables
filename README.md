@@ -1,8 +1,8 @@
 # Selectable Tables
 
-An Obsidian plugin for Live Preview. It lets the arrow keys pass a table in one press, and select a whole table as one block, the way Obsidian treats an image.
+An Obsidian plugin for Live Preview. It lets the arrow keys pass a table in one press, select a whole table as one block, the way Obsidian treats an image, and move between its cells without opening them.
 
-Without it, every arrow press that lands in a table opens an editor for that cell. Holding ↓ through a note stalls at every table, and links in the table flicker as cells switch between rendered and source text.
+Without it, every arrow press that lands in a table opens an editor for that cell. Holding ↓ through a note stalls at every table, links in the table flicker as cells switch between rendered and source text, and the table changes size as they do.
 
 ![A selected table, tinted and framed with a thick border](docs/selected-table.png)
 
@@ -26,6 +26,7 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | -- | -- |
 | ↓ from the line above, ↑ from the line below | The caret passes the table and lands on the line beyond it, at the same horizontal position. No cell opens. |
 | → at the end of the line above, ← at the start of the line below | Selects the whole table, the way ← and → select an image: tinted and framed with the thick border Obsidian draws around selected cells. |
+| Delete at the end of the line above | Selects the whole table, the way Backspace at the start of the line below does. |
 | Shift with an arrow | The selection takes the whole table at once. |
 | ↓ or ↑ with no line beyond the table (it starts or ends the note, or sits right below the properties) | Left to Obsidian, as without the plugin. Obsidian keeps a blank line around the tables it makes, so this only happens in notes written elsewhere. |
 
@@ -35,15 +36,28 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | -- | -- |
 | ↓ or → | The caret goes to the start of the line below. |
 | ↑ or ← | The caret goes to the end of the line above. |
-| Enter | Opens the first cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. |
+| Enter | Selects the first cell, or the cell you just left with Escape. |
 | Escape | The caret goes back to the side you selected the table from. |
 | Backspace, Delete, Cut | Remove the table, undoable. |
 | Copy | Copies the table's Markdown. |
 | Typing, Tab, Shift+Enter | Nothing happens, so a stray key can't change the table. Paste replaces it, undoable. |
 
-**In a cell**, Escape closes the cell and selects the whole table. Every other key works as Obsidian has it, and clicking a cell still edits it directly.
+**With a cell selected:** it keeps showing its rendered text, with the tint and thick border Obsidian draws around selected cells. Nothing opens as you move, so the table keeps its size.
+
+| Key | What happens |
+| -- | -- |
+| ↑ ↓ ← → | The selection moves one cell, and stops at the table's edge. |
+| Tab, Shift+Tab | The next or previous cell, wrapping between rows. It stops on the last and first cells, and adds no rows. |
+| Enter | Opens the cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. On a table Obsidian didn't write, such as a hand-typed one, the frame turns red and nothing opens. Click a cell to edit it: that usually tidies the table, and Enter works from then on. |
+| Escape | Back to the selected table. |
+| Copy | Copies the cell's Markdown, the way the cell's editor shows it. |
+| Typing, Backspace, Delete, Cut, Paste, Shift with an arrow | Nothing happens. Editor commands leave the table alone too. |
+
+**In a cell**, Escape closes the cell and selects it. Every other key works as Obsidian has it, and clicking a cell still edits it directly.
 
 With Vim mode on, Vim's own keys come first: in normal mode, j, k and the arrows still step into tables.
+
+With an input method (IME), starting to compose on a selected table or cell moves the caret beside the table, and the text lands there.
 
 ## Development
 

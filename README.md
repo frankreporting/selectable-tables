@@ -2,8 +2,6 @@
 
 An Obsidian plugin that augments tables in Live Preview mode. Treats a table as a single block, the same way Obsidian treats an image. This unlocks the ability to use arrow keys to select and navigate tables and cells without touching or viewing the raw Markdown. You hit `Enter` to drop into the cell for editing, which is also similar to hitting `Enter` on an image to get to its Markdown link. This also brings table editing a little closer to how it works in apps like Notion.
 
-![A selected table, tinted and framed with a thick border](docs/selected-table.png)
-
 ![Demo with the keys shown on screen: holding ↓ passes the tables, → selects one, the arrows and jump keys move between cells without opening them, and Enter opens a cell](docs/demo.gif)
 
 ## Why I made this

@@ -1,6 +1,6 @@
 {
 	"name": "selectable-tables",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Make Live Preview tables selectable as whole blocks, like images. Arrow keys to bypass or select, enter to edit.",
 	"main": "main.js",
 	"type": "module",

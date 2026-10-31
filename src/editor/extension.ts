@@ -8,6 +8,8 @@ import type { Span } from './table-text';
 
 /** On the editor while a table is selected; styles.css hides the caret then, as Obsidian does for images. */
 export const SELECTED_CLASS = 'selectable-tables-selected';
+/** On every editor while the plugin is on; styles.css scopes what it changes in Obsidian's tables to it. */
+const ACTIVE_CLASS = 'selectable-tables';
 
 /** The editor Obsidian opens inside a table cell. */
 function cellWidget(view: EditorView): HTMLElement | null {
@@ -227,5 +229,5 @@ const keepSelectedTable = EditorState.transactionFilter.of((tr) => {
 
 /** The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. */
 export function selectableTables(): Extension {
-	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, markSelectedTable, cellSelection];
+	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, markSelectedTable, cellSelection, EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
 }

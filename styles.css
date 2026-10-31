@@ -53,3 +53,27 @@
 .markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.is-selected table.selectable-tables-holds-cell::after {
 	display: none;
 }
+
+/*
+ * An open cell keeps its width, and only its height changes. Table layout reads each cell's minimum and
+ * preferred widths, so these keep them as they were with the cell closed. The cell's editor adds nothing,
+ * except in an empty cell, which would otherwise wrap every word. All its text wraps inside the cell. And
+ * the rendered text, which Obsidian hides with an inline style, stays in the layout unseen, so the column
+ * holds the width it set. Only !important beats that inline style.
+ */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget :is(th, td):not(:has(> .table-cell-wrapper > br:only-child)) > .table-cell-wrapper .cm-content {
+	width: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget .table-cell-wrapper .cm-content.cm-lineWrapping {
+	white-space: break-spaces;
+	overflow-wrap: anywhere;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget .table-cell-wrapper[style*="display: none"] {
+	display: block !important;
+	visibility: hidden;
+	height: 0;
+	padding-block: 0;
+	overflow: hidden;
+}

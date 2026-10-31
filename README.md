@@ -53,7 +53,7 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | Copy | Copies the cell's Markdown, the way the cell's editor shows it. |
 | Typing, Backspace, Delete, Cut, Paste, Shift with an arrow | Nothing happens. Editor commands leave the table alone too. |
 
-**In a cell**, Escape closes the cell and selects it. Every other key works as Obsidian has it, and clicking a cell still edits it directly.
+**In a cell**, Escape closes the cell and selects it. Every other key works as Obsidian has it, and clicking a cell still edits it directly. An open cell keeps its width: only its height changes, so the columns stay put until you close it. An empty cell still grows as you type.
 
 With Vim mode on, Vim's own keys come first: in normal mode, j, k and the arrows still step into tables.
 

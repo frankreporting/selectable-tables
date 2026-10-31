@@ -24,6 +24,14 @@ A line of text below the table.
 
 A line between the tables.
 
+## Short delimiter
+
+| Name | Value |
+| --- | --- |
+| Moss | Damp  |
+
+A line between the tables.
+
 ## Wide table
 
 | Mon weather report    | Tue weather report    | Wed weather report    | Thu weather report    | Fri weather report    | Sat weather report    | Sun weather report    | Mon 2 weather report  | Tue 2 weather report  | Wed 2 weather report  | Thu 2 weather report  | Fri 2 weather report  | Sat 2 weather report  | Sun 2 weather report  | Mon 3 weather report  | Tue 3 weather report  |

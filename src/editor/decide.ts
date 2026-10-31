@@ -210,7 +210,7 @@ function extend({ state, layout, leavesLine }: Context, direction: Direction): A
 /**
  * Enter on a selected table selects a cell: the one Escape left, or else the first. On a selected cell,
  * it puts the caret at the end of the cell's text, and Obsidian opens that cell, as long as Obsidian wrote
- * the table. It refuses any other: a press repairs such a table, so a click makes Enter work again.
+ * the table. It refuses any other. A press still opens a cell there, and tidies a malformed table.
  */
 export function enter({ state, layout, cells }: TableContext): Action | null {
 	const table = selectedTable(state, layout);

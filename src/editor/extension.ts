@@ -97,7 +97,7 @@ function run(view: EditorView, action: Action | null): boolean {
 			return true;
 		case 'refuse':
 			view.plugin(cellSelection)?.refuse();
-			new Notice('This table can\'t open from the keyboard yet. Click any cell to tidy it first.');
+			new Notice('This table can\'t open from the keyboard. Click a cell to edit it.');
 			return true;
 	}
 }
@@ -206,7 +206,7 @@ const selectedEvents = EditorView.domEventHandlers({
 	// beside the table then. Moving the selection any later leaves the composition stuck, and Live Preview
 	// stops drawing until it ends, so an input method with no keydown is left alone.
 	keydown(event, view) {
-		if (event.keyCode === 229 && !view.composing && selectedTables.has(view.state)) run(view, escape({ ...context(view), cells: noCells }));
+		if (event.keyCode === 229 && !view.compositionStarted && selectedTables.has(view.state)) run(view, escape({ ...context(view), cells: noCells }));
 		return false;
 	},
 	copy(event, view) {

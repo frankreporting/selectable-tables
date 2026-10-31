@@ -75,31 +75,24 @@ function padded(text: string, width: number, alignment: Alignment): string {
 	return ' '.repeat(before) + text + ' '.repeat(space - before);
 }
 
-function delimiterOf(width: number, alignment: Alignment): string {
-	if (alignment === 'left') return ` :${'-'.repeat(width - 3)} `;
-	if (alignment === 'center') return ` :${'-'.repeat(width - 4)}: `;
-	if (alignment === 'right') return ` ${'-'.repeat(width - 3)}: `;
-	return ` ${'-'.repeat(width - 2)} `;
-}
-
 /**
- * Whether the table's text is exactly what Obsidian's table editor writes for its cells. Only then is a
- * caret safe in a cell. Obsidian repairs any other table when a press opens a cell, but not for a caret:
- * then typing can eat a pipe, or never reach the note. Obsidian's own test is private, so this doesn't
- * guess at it: it rebuilds the table's text and compares, and being wrong costs a click, not a table.
+ * Whether the table's rows are exactly what Obsidian's table editor writes for their cells. Only then is
+ * a caret safe in a cell. Obsidian repairs a malformed table when a press opens a cell, but not for a
+ * caret: then typing can eat a pipe, or never reach the note. Obsidian's own test is private, so this
+ * doesn't guess at it: it rebuilds the rows and compares. The delimiter's dashes don't count, as Obsidian
+ * ignores them too and rewrites that line whole.
  */
 export function writtenByObsidian(doc: Text, table: Span): boolean {
 	const lines: string[] = [];
 	for (let n = doc.lineAt(table.from).number; n <= doc.lineAt(table.to).number; n++) lines.push(doc.line(n).text);
 	const cellsOf = (line: string) => segmentsIn(line).map(({ from, to }) => line.slice(from, to));
 	const alignments = cellsOf(lines[1] ?? '').map(alignmentOf);
-	const rows = lines.filter((_, index) => index !== 1).map((line) => cellsOf(line).map((cell) => cell.trim()));
+	const body = lines.filter((_, index) => index !== 1);
+	const rows = body.map((line) => cellsOf(line).map((cell) => cell.trim()));
 	if (rows.some((row) => row.length !== alignments.length || row.every((cell) => dashCell.test(cell)))) return false;
 	const widths = alignments.map((_, column) => Math.max(MIN_COLUMN_WIDTH, ...rows.map((row) => (row[column]?.length ?? 0) + CELL_PADDING)));
-	const line = (cells: string[]) => `|${cells.join('|')}|`;
-	const expected = rows.map((row) => line(row.map((text, column) => padded(text, widths[column] ?? 0, alignments[column] ?? null))));
-	expected.splice(1, 0, line(alignments.map((alignment, column) => delimiterOf(widths[column] ?? 0, alignment))));
-	return expected.join('\n') === lines.join('\n');
+	const written = rows.map((row) => `|${row.map((text, column) => padded(text, widths[column] ?? 0, alignments[column] ?? null)).join('|')}|`);
+	return written.join('\n') === body.join('\n');
 }
 
 /**

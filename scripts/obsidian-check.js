@@ -504,6 +504,19 @@
 		await press(cm, 'Escape');
 		await restore(cm, original);
 
+		// Obsidian ignores the delimiter's dash count, so a click wouldn't change this table: it must open.
+		const shortDelimiter = await tableUnder(cm, 'Short delimiter');
+		await selectTable(cm, shortDelimiter);
+		await press(cm, 'Enter');
+		await press(cm, 'Enter');
+		await sleep(300);
+		check('a table with a short delimiter opens from the keyboard', openAt(cm) === '0,0', openAt(cm));
+		await press(cellEditor(cm), 'Escape');
+		await sleep(250);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		await restore(cm, original);
+
 		// Undo can put the selection back on a table other than the one holding the cell.
 		const firstTable = await tableUnder(cm, 'Seed trays');
 		const secondTable = await tableUnder(cm, 'Uneven rows');

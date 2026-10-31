@@ -5,7 +5,7 @@
 - Enter on a selected table selects a cell. The arrows and Tab move the selection between cells without opening them, so the table keeps its size and each press stays fast, whatever the note's length or your plugins. Enter opens the selected cell, and Escape climbs back up.
 - Escape in a cell selects that cell, not the whole table.
 - Copy on a selected cell copies its Markdown.
-- Enter only opens a cell in a table Obsidian wrote. Opening any other from the keyboard could corrupt it or lose what was typed, so its frame turns red instead. A click tidies the table, as it always has, and Enter works from then on.
+- Enter only opens a cell in a table Obsidian wrote. Opening any other from the keyboard could corrupt it or lose what was typed, so its frame turns red instead. A click still edits it, and that usually tidies the table, as it always has, so Enter works from then on.
 - With an input method, composing on a selected table moves the caret beside it, instead of replacing a table at the note's start or right below the properties.
 
 ## 0.1.0 (2026-10-30)

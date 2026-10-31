@@ -140,10 +140,20 @@ test('anything outside the outer pipes does not count', () => {
 	assert.ok(!written(' | a   |', ' | --- |', ' | b   |'));
 });
 
-test('a delimiter that differs from the columns does not count', () => {
-	assert.ok(!written('| a   |', '| ------- |', '| b   |'));
+test('the delimiter\'s dash count does not matter: Obsidian ignores it, so a click wouldn\'t change it', () => {
+	assert.ok(written('| Name | Value |', '| --- | --- |', '| a    | b     |'));
+	assert.ok(written('| Name | Value |', '|---|---|', '| a    | b     |'));
+	assert.ok(written('| a   |', '| ------- |', '| b   |'));
+});
+
+test('a delimiter with other columns than the rows does not count', () => {
 	assert.ok(!written('| a   | b   |', '| --- |', '| c   | d   |'));
 	assert.ok(!written('| a   |', '| --- | --- |', '| b   |'));
+});
+
+test('alignment still decides where the padding goes, whatever the dash count', () => {
+	assert.ok(written('| Plant | Count |', '| :-- | --: |', '| Fern  |    10 |'));
+	assert.ok(!written('| Plant | Count |', '| :-- | --: |', '| Fern  | 10    |'));
 });
 
 test('a row of only dashes does not count: Obsidian\'s parser drops it', () => {

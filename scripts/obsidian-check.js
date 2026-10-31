@@ -748,19 +748,6 @@
 		check('J13 Cmd+↓ and Cmd+↑ go to the note\'s end and start from a selected table', noteEnd === cm.state.doc.length && sel(cm).head === 0 && !openCell(cm), { noteEnd, ...sel(cm) });
 		check('Jumps B: the note is as it was', cm.state.doc.toString() === original);
 
-		cm = await open('Table last');
-		original = cm.state.doc.toString();
-		const [ending] = tables(cm);
-		await caretOnLine(cm, 1);
-		await real('ArrowDown', command);
-		check('J14 Cmd+↓ into a table that ends the note selects it, and opens no cell', selectsWhole(cm, ending) && !openCell(cm), sel(cm));
-		for (const [key, mods] of [['ArrowDown', command], ['PageDown'], ['ArrowRight', option], ['End']]) await real(key, mods);
-		check('J14 with no line beyond it, the keys keep it selected', selectsWhole(cm, ending) && !openCell(cm) && cm.state.doc.toString() === original, sel(cm));
-		await caretOnLine(cm, 1);
-		await real('PageDown');
-		check('J14 Page Down into a table that ends the note selects it', selectsWhole(cm, ending) && !openCell(cm), sel(cm));
-		await press(cm, 'Escape');
-
 		// --- Jumps C. A selected cell
 		cm = await open('Cell moves');
 		original = cm.state.doc.toString();

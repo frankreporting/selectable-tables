@@ -43,18 +43,21 @@ A table is a block widget over text that reads as a Markdown table. At a note's 
 
 ## Releases
 
-Every release gets release notes, drafted as part of the release, and Brian reads them before it's published. They read like Obsidian's own, for an average user:
+Every release gets one set of release notes, written when we're ready to release. `CHANGELOG.md` holds only released versions, so there's no Unreleased section, and PRs don't add to it: this replaces the usual changelog entry in each PR. The README still changes in the PR.
+
+The notes read like Obsidian's own, for an average user:
 
 - **One opening sentence** on what the release brings.
 - **Three headings, in this order: New, Improved, Fixed.** Leave out any that's empty.
 - **Short, plain bullets:** one line each, on what the user will notice, in their words. Name keys and buttons, not internals: no issue numbers, function names or Obsidian's internals, and no reasons they don't need.
 
-Each PR with a change a user would notice adds its bullet under `## Unreleased` in `CHANGELOG.md`, in this format. To release:
+To release:
 
-1. Tighten `## Unreleased` into the notes, and open `CHANGELOG.md` in Zed for Brian (`zed <path>`; he's asked for this each time, so it needs no asking first). He edits it there and saves, and his words are the notes. Wait for his OK, then commit what's in the file.
-2. Rename it `## <version> (<date>)`, bump the version, and merge that.
-3. Tag the release. The release workflow builds a draft on GitHub with no notes.
-4. Paste the same notes into that draft, and publish. Obsidian's plugin page links to it, and update checkers show it.
+1. Draft the notes in `.dev/release-notes.md` in the main clone, which git ignores, from what merged since the last tag (`git log <tag>..master` and those PRs' descriptions). Keep anything already in that file.
+2. Open that file in Zed for Brian (`zed <path>`; he's asked for this each time, so it needs no asking first). He edits it there and saves, and his words are the notes. Wait for his OK.
+3. Add them to `CHANGELOG.md` as `## <version> (<date>)`, bump the version, and merge that.
+4. Tag the release. The release workflow builds a draft on GitHub with no notes.
+5. Paste the same notes into that draft, and publish. Obsidian's plugin page links to it, and update checkers show it. Then empty `.dev/release-notes.md`.
 
 ## Working in Obsidian
 

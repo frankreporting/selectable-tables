@@ -18,8 +18,8 @@ export type Action =
 	| { type: 'extendTo'; pos: number }
 	/** The key is taken, and nothing changes. */
 	| { type: 'stay' }
-	/** Selects a cell of the selected table. */
-	| { type: 'cell'; cell: Cell }
+	/** Selects a cell of the selected table. `toward` says when the key moved up or left, toward the table's start. */
+	| { type: 'cell'; cell: Cell; toward?: 'up' | 'left' }
 	/** Back from a selected cell to the selected table. */
 	| { type: 'table' }
 	/** A caret at `pos`, in a selected cell's text, so that Obsidian opens the cell. */
@@ -109,9 +109,13 @@ function beyond(state: EditorState, layout: Layout, table: Span, forward: boolea
 
 export function arrow(context: Context, direction: Direction, shift: boolean): Action | null {
 	const { cells } = context;
-	if (cells.selected) return shift ? { type: 'stay' } : { type: 'cell', cell: moveCell(cells.grid, cells.selected, direction) };
+	if (cells.selected) return shift ? { type: 'stay' } : selectCell(moveCell(cells.grid, cells.selected, direction), direction);
 	if (context.state.selection.ranges.length !== 1) return null;
 	return shift ? extend(context, direction) : move(context, direction);
+}
+
+function selectCell(cell: Cell, direction: Direction): Action {
+	return direction === 'up' || direction === 'left' ? { type: 'cell', cell, toward: direction } : { type: 'cell', cell };
 }
 
 /** An arrow on a selected cell: one cell along, stopping at the table's outer edge. */
@@ -295,7 +299,9 @@ function leave({ state, layout }: TableContext, forward: boolean): Action | null
 
 /** A jump to the top or bottom of a selected cell's column. */
 function columnEnd({ cells }: TableContext, forward: boolean): Action | null {
-	return cells.selected && { type: 'cell', cell: edgeCell(cells.grid, cells.selected, forward ? 'down' : 'up') };
+	if (!cells.selected) return null;
+	const direction = forward ? 'down' : 'up';
+	return selectCell(edgeCell(cells.grid, cells.selected, direction), direction);
 }
 
 /**
@@ -305,7 +311,10 @@ function columnEnd({ cells }: TableContext, forward: boolean): Action | null {
  */
 export function rowEnd(context: TableContext, forward: boolean): Action | null {
 	const { state, layout, cells } = context;
-	if (cells.selected) return { type: 'cell', cell: edgeCell(cells.grid, cells.selected, forward ? 'right' : 'left') };
+	if (cells.selected) {
+		const direction = forward ? 'right' : 'left';
+		return selectCell(edgeCell(cells.grid, cells.selected, direction), direction);
+	}
 	return stay(state, layout) ?? headOnTable(state, layout);
 }
 
@@ -402,8 +411,11 @@ export function landing(tr: Transaction, { layout, active, vim, left, cellSelect
 
 /** Tab moves a selected cell. On a selected table, it does nothing. */
 export function tab({ state, layout, cells }: TableContext, forward: boolean): Action | null {
-	if (cells.selected) return { type: 'cell', cell: tabCell(cells.grid, cells.selected, forward) };
-	return stay(state, layout);
+	if (!cells.selected) return stay(state, layout);
+	const { row, column } = cells.selected;
+	const cell = tabCell(cells.grid, cells.selected, forward);
+	if (forward) return selectCell(cell, cell.column < column ? 'left' : 'right');
+	return selectCell(cell, cell.row < row ? 'up' : 'left');
 }
 
 /** What Copy gives for a selected cell: its Markdown. */

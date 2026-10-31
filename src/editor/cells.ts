@@ -7,7 +7,7 @@ import type { Cell, Span } from './table-text';
 /** On Obsidian's table widget, which holds the table element. */
 export const TABLE_CLASS = 'cm-table-widget';
 /** On the selected cell; styles.css draws it the way Obsidian draws selected cells. */
-const CELL_CLASS = 'selectable-tables-cell';
+export const CELL_CLASS = 'selectable-tables-cell';
 /** On the selected cell when Enter can't open it; styles.css turns its border red. */
 const REFUSED_CLASS = 'selectable-tables-refused';
 /** On a table while one of its cells is selected; styles.css takes the table's own tint off then. */

@@ -80,6 +80,7 @@ The comment doesn't show, and it stays with the table's text, so it copies, sync
 - `%%freeze 0 0%%`, or no comment, freezes nothing. Deleting the column that holds the comment ends the freeze.
 - A table can freeze up to 9 columns.
 - Rows taller than half the pane, or columns as wide as the table, stop pinning until there's room, so there's always somewhere to scroll.
+- With a cell selected, moving up into a frozen row or left into a frozen column takes the table back to that end, so the first rows and columns after them show. Moving along a frozen row or column leaves the view where it is.
 
 Two things don't work yet with a frozen table: the selected cell can end up hidden under the frozen rows or columns as you move, and a drag across cells selects the wrong cells.
 

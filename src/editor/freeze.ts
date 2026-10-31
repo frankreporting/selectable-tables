@@ -1,5 +1,5 @@
 import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/view';
-import { TABLE_CLASS } from './cells';
+import { CELL_CLASS, TABLE_CLASS } from './cells';
 import { Freeze, readFreeze } from './freeze-mark';
 
 /** On a table's widget while anything in it is frozen. styles.css gives its cells their own borders then. */
@@ -190,6 +190,29 @@ class FrozenTables implements PluginValue {
 		view.requestMeasure({
 			read: () => view.contentDOM.querySelectorAll<HTMLElement>(`:scope > .${TABLE_CLASS}`),
 			write: (widgets) => widgets.forEach((widget) => this.add(widget)),
+		});
+	}
+
+	/**
+	 * A key moved the selected cell up or left. A frozen cell is always in view, so the rows and columns that
+	 * belong beside it stay hidden, with no key to reach them, unless the table goes back to that end.
+	 */
+	backToStart(toward: 'up' | 'left') {
+		const { contentDOM, scrollDOM } = this.view;
+		this.view.requestMeasure({
+			key: 'backToStart',
+			read: () => {
+				const cell = contentDOM.querySelector<HTMLElement>(`.${CELL_CLASS}`);
+				const widget = cell?.closest<HTMLElement>(`.${TABLE_CLASS}`);
+				if (!cell || !widget) return null;
+				if (toward === 'left') return getComputedStyle(cell).position === 'sticky' ? { widget, past: 0 } : null;
+				if (!widget.classList.contains(ROWS_CLASS) || !cell.parentElement?.classList.contains(ROW_CLASS)) return null;
+				return { widget, past: scrollDOM.getBoundingClientRect().top - widget.getBoundingClientRect().top };
+			},
+			write: (found) => {
+				if (found && toward === 'left') found.widget.scrollLeft = 0;
+				if (found && found.past > 0) scrollDOM.scrollTop -= found.past;
+			},
 		});
 	}
 

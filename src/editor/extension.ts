@@ -94,6 +94,7 @@ function run(view: EditorView, action: Action | null): boolean {
 			return true;
 		case 'cell':
 			view.plugin(cellSelection)?.select(action.cell);
+			if (action.toward) view.plugin(frozenTables)?.backToStart(action.toward);
 			return true;
 		case 'table':
 			view.plugin(cellSelection)?.climb();

@@ -1269,10 +1269,10 @@
 			const pinnedAt = cm.scrollDOM.scrollTop;
 			await keys(cm, plants, 'ArrowRight', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowLeft');
 			await sleep(100);
-			check('Frozen 5 moving across a pinned row leaves the note where it is', Math.abs(cm.scrollDOM.scrollTop - pinnedAt) < 1 && at(cm) === '0,1', { moved: cm.scrollDOM.scrollTop - pinnedAt, at: at(cm) });
+			check('Frozen 5 moving across a pinned row leaves the note where it is', Math.abs(cm.scrollDOM.scrollTop - pinnedAt) < 1 && at(cm) === '0,0', { moved: cm.scrollDOM.scrollTop - pinnedAt, at: at(cm) });
 			await press(cm, 'ArrowUp');
 			await sleep(100);
-			check('Frozen 5 ↑ on the top row takes the table back to its start', at(cm) === '0,1' && Math.abs(topInPane(plants.el)) <= 1, { at: at(cm), top: topInPane(plants.el) });
+			check('Frozen 5 ↑ on the top row takes the table back to its start', at(cm) === '0,0' && Math.abs(topInPane(plants.el)) <= 1, { at: at(cm), top: topInPane(plants.el) });
 			await keys(cm, plants, 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowRight');
 			plants.el.scrollLeft = 300;
 			cm.scrollDOM.scrollTop = widgetTop + 700;

@@ -1,6 +1,6 @@
 import { EditorState, Line, Transaction } from '@codemirror/state';
 import type { Layout } from './layout';
-import { Cell, cellCaret, cellSource, frontmatterEnd, needsRepair, Span } from './table-text';
+import { Cell, cellCaret, cellSource, frontmatterEnd, Span, writtenByObsidian } from './table-text';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -24,8 +24,8 @@ export type Action =
 	| { type: 'table' }
 	/** A caret at `pos`, in a selected cell's text, so that Obsidian opens the cell. */
 	| { type: 'open'; pos: number }
-	/** A caret on the delimiter line first, so that Obsidian repairs the table, then into the cell. */
-	| { type: 'repair'; delimiter: number; table: number; cell: Cell };
+	/** Enter can't safely open a cell of this table, and shows that. */
+	| { type: 'refuse' };
 
 /** A rendered table's shape. Obsidian fills short rows, but a row's own length is what counts. */
 export interface Grid {
@@ -209,20 +209,15 @@ function extend({ state, layout, leavesLine }: Context, direction: Direction): A
 
 /**
  * Enter on a selected table selects a cell: the one Escape left, or else the first. On a selected cell,
- * it puts the caret at the end of the cell's text, and Obsidian opens that cell.
+ * it puts the caret at the end of the cell's text, and Obsidian opens that cell, as long as Obsidian wrote
+ * the table. It refuses any other: a press repairs such a table, so a click makes Enter work again.
  */
 export function enter({ state, layout, cells }: TableContext): Action | null {
 	const table = selectedTable(state, layout);
 	if (!table) return null;
 	if (!cells.selected) return { type: 'cell', cell: cells.left ?? { row: 0, column: 0 } };
-	if (!needsRepair(state.doc, table)) return { type: 'open', pos: cellCaret(state.doc, table, cells.selected) };
-	return { type: 'repair', delimiter: state.doc.line(state.doc.lineAt(table.from).number + 1).from, table: table.from, cell: cells.selected };
-}
-
-/** Where the caret goes once Obsidian has repaired a table, in its text as it is now. */
-export function repairedCaret(state: EditorState, layout: Layout, start: number, cell: Cell): number | null {
-	const table = layout.tableAt(start);
-	return table && cellCaret(state.doc, table, cell);
+	if (!writtenByObsidian(state.doc, table)) return { type: 'refuse' };
+	return { type: 'open', pos: cellCaret(state.doc, table, cells.selected) };
 }
 
 /**

@@ -44,6 +44,12 @@
 	scroll-margin: var(--size-4-4);
 }
 
+/* Enter can't open a cell of this table: the frame turns red until the selection moves on. */
+.markdown-source-view.mod-cm6 .cm-table-widget th.selectable-tables-refused::after,
+.markdown-source-view.mod-cm6 .cm-table-widget td.selectable-tables-refused::after {
+	border-color: var(--text-error);
+}
+
 .markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.is-selected table.selectable-tables-holds-cell::after {
 	display: none;
 }

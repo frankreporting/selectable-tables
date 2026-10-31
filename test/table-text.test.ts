@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Text } from '@codemirror/state';
-import { cellCaret, cellSource, frontmatterEnd, looksLikeTable, needsRepair } from '../src/editor/table-text';
+import { cellCaret, cellSource, frontmatterEnd, looksLikeTable, writtenByObsidian } from '../src/editor/table-text';
 
 const doc = (...lines: string[]) => Text.of(lines);
 const whole = (text: Text) => ({ from: 0, to: text.length });
@@ -102,45 +102,64 @@ test('a cell\'s source shows pipes and line breaks as its editor does', () => {
 	assert.equal(source(4), 'a\\\\|b');
 });
 
-test('a table as Obsidian pads it needs no repair', () => {
-	const padded = doc('| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |');
-	assert.equal(needsRepair(padded, whole(padded)), false);
-	const narrow = doc('| a   | b   |', '| --- | --- |', '| c   | d   |');
-	assert.equal(needsRepair(narrow, whole(narrow)), false);
-	const aligned = doc('| Plant | Count |', '| :---- | ----: |', '| Fern  |    10 |');
-	assert.equal(needsRepair(aligned, whole(aligned)), false);
-	const escaped = doc('| a \\| b |', '| ------ |', '| c      |');
-	assert.equal(needsRepair(escaped, whole(escaped)), false);
+const written = (...lines: string[]) => writtenByObsidian(doc(...lines), whole(doc(...lines)));
+
+test('a table as Obsidian writes it counts as written by Obsidian', () => {
+	assert.ok(written('| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |'));
+	assert.ok(written('| a   | b   |', '| --- | --- |', '| c   | d   |'));
+	assert.ok(written('| a \\| b |', '| ------ |', '| c      |'));
+	assert.ok(written('| a   |     |', '| --- | --- |', '|     | d   |'));
 });
 
-test('a short row needs repair: its filler cells have no text to edit', () => {
-	const short = doc('| Shelf | Pots | Soil |', '| ----- | ---- | ---- |', '| Mid   | 5    |');
-	assert.ok(needsRepair(short, whole(short)));
+test('aligned columns count when padded the way Obsidian pads them', () => {
+	assert.ok(written('| Plant | Count |', '| :---- | ----: |', '| Fern  |    10 |'));
+	assert.ok(written('| Plant |', '| :---: |', '|  ab   |'));
 });
 
-test('a long row needs repair', () => {
-	const long = doc('| a   | b   |', '| --- | --- |', '| c   | d   | e   |');
-	assert.ok(needsRepair(long, whole(long)));
+test('a short row or a long one does not count', () => {
+	assert.ok(!written('| Shelf | Pots | Soil |', '| ----- | ---- | ---- |', '| Mid   | 5    |'));
+	assert.ok(!written('| a   | b   |', '| --- | --- |', '| c   | d   | e   |'));
 });
 
-test('a column wider than its text needs repair: Obsidian trims a cell on leaving it without writing that', () => {
-	const stale = doc('| Fruit      | Qty |', '| ---------- | --- |', '| Apple red  | 10  |', '| Pear       | 20  |');
-	assert.ok(needsRepair(stale, whole(stale)));
+test('a column wider than its text does not count: closing a cell trims it without writing that', () => {
+	assert.ok(!written('| Fruit      | Qty |', '| ---------- | --- |', '| Apple red  | 10  |', '| Pear       | 20  |'));
 });
 
-test('padding that differs between rows needs repair', () => {
-	const unpadded = doc('| a | bbbb |', '|---|---|', '| cc | d |');
-	assert.ok(needsRepair(unpadded, whole(unpadded)));
+test('hand-typed padding does not count', () => {
+	assert.ok(!written('| a | bbbb |', '|---|---|', '| cc | d |'));
+	assert.ok(!written('|Fruit|Qty|', '|---|---|', '|Apple|10|'));
+	assert.ok(!written('|   a |', '| --- |', '| b   |'));
 });
 
-test('a table with no outer pipes needs repair', () => {
-	const bare = doc('Plant | Room', '--- | ---', 'Fern | Hall');
-	assert.ok(needsRepair(bare, whole(bare)));
+test('a table with no outer pipes does not count', () => {
+	assert.ok(!written('Plant | Room', '--- | ---', 'Fern | Hall'));
 });
 
-test('the delimiter line does not count towards a column', () => {
-	const wide = doc('| a   |', '| ------- |', '| b   |');
-	assert.equal(needsRepair(wide, whole(wide)), false);
+test('anything outside the outer pipes does not count', () => {
+	assert.ok(!written('| a   |  ', '| --- |', '| b   |'));
+	assert.ok(!written(' | a   |', ' | --- |', ' | b   |'));
+});
+
+test('a delimiter that differs from the columns does not count', () => {
+	assert.ok(!written('| a   |', '| ------- |', '| b   |'));
+	assert.ok(!written('| a   | b   |', '| --- |', '| c   | d   |'));
+	assert.ok(!written('| a   |', '| --- | --- |', '| b   |'));
+});
+
+test('a row of only dashes does not count: Obsidian\'s parser drops it', () => {
+	assert.ok(!written('| a   | b   |', '| --- | --- |', '| --- | --- |', '| c   | d   |'));
+	assert.ok(!written('| --- | --- |', '| --- | --- |', '| c   | d   |'));
+});
+
+test('a line with only its leading pipe does not count: Obsidian\'s parser stops there', () => {
+	assert.ok(!written('| a   |', '| --- |', '| Pears and more', '| b   |'));
+	assert.ok(!written('| a   |', '| --- |', '|'));
+});
+
+test('padding that is not plain spaces does not count', () => {
+	assert.ok(!written('| a\u00a0  |', '| --- |', '| b   |'));
+	assert.ok(!written('| a\u3000  |', '| --- |', '| b   |'));
+	assert.ok(!written('|\ta   |', '| --- |', '| b   |'));
 });
 
 test('the frontmatter ends at its closing line', () => {

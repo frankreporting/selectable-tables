@@ -1,8 +1,8 @@
 import { EditorSelection, EditorState, Extension, Prec, SelectionRange } from '@codemirror/state';
 import { EditorView, KeyBinding, keymap } from '@codemirror/view';
-import { editorLivePreviewField } from 'obsidian';
+import { editorLivePreviewField, Notice } from 'obsidian';
 import { cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, Context, copied, Direction, enter, escape, noCells, repairedCaret, selectedTable, stay, stopsEdit, tab } from './decide';
+import { Action, arrow, Context, copied, Direction, enter, escape, noCells, selectedTable, stay, stopsEdit, tab } from './decide';
 import { viewLayout } from './layout';
 import type { Span } from './table-text';
 
@@ -95,17 +95,10 @@ function run(view: EditorView, action: Action | null): boolean {
 			// Obsidian scrolls the cell into view as it opens. Scrolling to a caret in a tall table wouldn't.
 			view.dispatch({ selection: EditorSelection.cursor(action.pos), userEvent: 'select' });
 			return true;
-		case 'repair': {
-			view.plugin(cellSelection)?.opening();
-			// A caret on the delimiter line is in no cell, so Obsidian takes the way a press takes: it
-			// rewrites a malformed table and opens a first cell, on a timer. This one runs right after it.
-			view.dispatch({ selection: EditorSelection.cursor(action.delimiter), userEvent: 'select' });
-			view.dom.ownerDocument.defaultView?.setTimeout(() => {
-				const pos = repairedCaret(view.state, viewLayout(view), action.table, action.cell);
-				if (pos !== null) view.dispatch({ selection: EditorSelection.cursor(pos), userEvent: 'select' });
-			});
+		case 'refuse':
+			view.plugin(cellSelection)?.refuse();
+			new Notice('This table can\'t open from the keyboard yet. Click any cell to tidy it first.');
 			return true;
-		}
 	}
 }
 
@@ -213,7 +206,7 @@ const selectedEvents = EditorView.domEventHandlers({
 	// beside the table then. Moving the selection any later leaves the composition stuck, and Live Preview
 	// stops drawing until it ends, so an input method with no keydown is left alone.
 	keydown(event, view) {
-		if (event.keyCode === 229 && selectedTables.has(view.state)) run(view, escape({ ...context(view), cells: noCells }));
+		if (event.keyCode === 229 && !view.composing && selectedTables.has(view.state)) run(view, escape({ ...context(view), cells: noCells }));
 		return false;
 	},
 	copy(event, view) {

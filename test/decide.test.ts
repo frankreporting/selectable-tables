@@ -272,11 +272,14 @@ describe('a selected cell', () => {
 		assert.deepEqual(enter(on(state(), cellAt(1, 1))), { type: 'open', pos: start + '| d   | e'.length });
 	});
 
-	test('Enter repairs a table Obsidian would repair for a click, from its delimiter line', () => {
+	test('Enter refuses a table Obsidian did not write, and opens nothing', () => {
 		const shortRow = '| a   | b   |\n| --- | --- |\n| c   |';
-		const text = `\n⟨${shortRow}⟩\n`;
-		const start = text.replace(/[⟨⟩]/g, '').indexOf('| a');
-		assert.deepEqual(enter(on(note(text), cellAt(1, 0))), { type: 'repair', delimiter: start + '| a   | b   |\n'.length, table: start, cell: { row: 1, column: 0 } });
+		assert.deepEqual(enter(on(note(`\n⟨${shortRow}⟩\n`), cellAt(1, 0))), { type: 'refuse' });
+	});
+
+	test('a table Obsidian did not write can still have its cells selected', () => {
+		const shortRow = '| a   | b   |\n| --- | --- |\n| c   |';
+		assert.deepEqual(enter(on(note(`\n⟨${shortRow}⟩\n`))), { type: 'cell', cell: { row: 0, column: 0 } });
 	});
 
 	test('Escape goes back to the selected table', () => {

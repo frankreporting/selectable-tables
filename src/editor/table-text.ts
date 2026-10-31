@@ -58,28 +58,48 @@ function cellsIn(text: string): Span[] {
 const MIN_COLUMN_WIDTH = 5;
 /** A cell's text sits between one space on each side, and the longest text sets its column's width. */
 const CELL_PADDING = 2;
+/** A row of only such cells isn't a row to Obsidian's table editor. */
+const dashCell = /^\s*:?\s*-+\s*:?\s*$/;
+
+type Alignment = 'left' | 'center' | 'right' | null;
+
+function alignmentOf(delimiter: string): Alignment {
+	const cell = delimiter.trim();
+	if (cell.startsWith(':')) return cell.endsWith(':') ? 'center' : 'left';
+	return cell.endsWith(':') ? 'right' : null;
+}
+
+function padded(text: string, width: number, alignment: Alignment): string {
+	const space = width - text.length;
+	const before = alignment === 'right' ? space - 1 : alignment === 'center' ? Math.floor(space / 2) : 1;
+	return ' '.repeat(before) + text + ' '.repeat(space - before);
+}
+
+function delimiterOf(width: number, alignment: Alignment): string {
+	if (alignment === 'left') return ` :${'-'.repeat(width - 3)} `;
+	if (alignment === 'center') return ` :${'-'.repeat(width - 4)}: `;
+	if (alignment === 'right') return ` ${'-'.repeat(width - 3)}: `;
+	return ` ${'-'.repeat(width - 2)} `;
+}
 
 /**
- * Whether the table's text isn't what Obsidian's table editor writes: uneven rows, or a column padded to
- * anything but its longest text. Obsidian repairs such a table when a press opens a cell, but not when a
- * caret does. A short row's filler cells then have no text to write to, and a cell trimmed on closing
- * moves its neighbors without the note hearing of it, so typing goes astray or never reaches the note.
+ * Whether the table's text is exactly what Obsidian's table editor writes for its cells. Only then is a
+ * caret safe in a cell. Obsidian repairs any other table when a press opens a cell, but not for a caret:
+ * then typing can eat a pipe, or never reach the note. Obsidian's own test is private, so this doesn't
+ * guess at it: it rebuilds the table's text and compares, and being wrong costs a click, not a table.
  */
-export function needsRepair(doc: Text, table: Span): boolean {
-	const first = doc.lineAt(table.from).number;
-	const rows: { width: number; text: number }[][] = [];
-	for (let n = first; n <= doc.lineAt(table.to).number; n++) {
-		if (n === first + 1) continue;
-		const { text } = doc.line(n);
-		rows.push(segmentsIn(text).map(({ from, to }) => ({ width: to - from, text: text.slice(from, to).trim().length })));
-	}
-	const columns = Math.max(...rows.map((row) => row.length));
-	if (rows.some((row) => row.length !== columns)) return true;
-	for (let column = 0; column < columns; column++) {
-		const width = Math.max(MIN_COLUMN_WIDTH, ...rows.map((row) => (row[column]?.text ?? 0) + CELL_PADDING));
-		if (rows.some((row) => row[column]?.width !== width)) return true;
-	}
-	return false;
+export function writtenByObsidian(doc: Text, table: Span): boolean {
+	const lines: string[] = [];
+	for (let n = doc.lineAt(table.from).number; n <= doc.lineAt(table.to).number; n++) lines.push(doc.line(n).text);
+	const cellsOf = (line: string) => segmentsIn(line).map(({ from, to }) => line.slice(from, to));
+	const alignments = cellsOf(lines[1] ?? '').map(alignmentOf);
+	const rows = lines.filter((_, index) => index !== 1).map((line) => cellsOf(line).map((cell) => cell.trim()));
+	if (rows.some((row) => row.length !== alignments.length || row.every((cell) => dashCell.test(cell)))) return false;
+	const widths = alignments.map((_, column) => Math.max(MIN_COLUMN_WIDTH, ...rows.map((row) => (row[column]?.length ?? 0) + CELL_PADDING)));
+	const line = (cells: string[]) => `|${cells.join('|')}|`;
+	const expected = rows.map((row) => line(row.map((text, column) => padded(text, widths[column] ?? 0, alignments[column] ?? null))));
+	expected.splice(1, 0, line(alignments.map((alignment, column) => delimiterOf(widths[column] ?? 0, alignment))));
+	return expected.join('\n') === lines.join('\n');
 }
 
 /**

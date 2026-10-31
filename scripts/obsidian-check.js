@@ -100,6 +100,14 @@
 		return quiet;
 	}
 	const repeat = (key, times) => Array(times).fill(key);
+	// A press on a cell, as the mouse sends it.
+	async function click(cell) {
+		const { left, top, width, height } = cell.getBoundingClientRect();
+		const point = { bubbles: true, cancelable: true, button: 0, clientX: left + width / 2, clientY: top + height / 2, view: window };
+		cell.dispatchEvent(new PointerEvent('pointerdown', { ...point, isPrimary: true, pointerId: 1, pointerType: 'mouse' }));
+		cell.dispatchEvent(new MouseEvent('click', point));
+		await sleep(400);
+	}
 	// A clipboard event of the browser's own kind, which leaves the real clipboard alone.
 	function clipboard(cm, type, text) {
 		const data = new DataTransfer();
@@ -446,24 +454,24 @@
 		await press(cm, 'Enter');
 		await keys(cm, uneven, ...repeat('ArrowDown', 2), ...repeat('ArrowRight', 2));
 		const filler = at(cm);
-		await press(cm, 'Enter');
-		await sleep(350);
-		check('31 Enter on a blank cell in a short row repairs the table, as a click does, and opens that cell', filler === '2,2' && openAt(cm) === '2,2' && openCell(cm), { filler, open: openAt(cm) });
+		quiet = await keys(cm, uneven, 'Enter');
+		const refused = () => marked(cm)[0]?.classList.contains('selectable-tables-refused');
+		const redFrame = refused() && getComputedStyle(marked(cm)[0], '::after').borderTopColor;
+		check('31 Enter on a table Obsidian didn\'t write opens nothing, changes nothing, and frames the cell in red', filler === '2,2' && quiet && refused() && redFrame !== getComputedStyle(cm.dom.querySelector('.cm-content')).color, { filler, quiet, redFrame });
+		await keys(cm, uneven, 'ArrowUp');
+		check('31 the red goes when the selection moves on', at(cm) === '1,2' && !refused(), at(cm));
+		await click(uneven.el.querySelector('table').rows[2].cells[2]);
+		const tidied = cm.state.doc.toString() !== original;
+		check('31 a click tidies the table and opens that cell, as it always has', tidied && openAt(cm) === '2,2', { tidied, open: openAt(cm) });
 		cellView(cm).dispatch(cellView(cm).state.replaceSelection('x'), { userEvent: 'input.type' });
 		await settle();
 		await press(cellEditor(cm), 'Escape');
 		await sleep(300);
-		check('31 what\'s typed there reaches the note, and that cell is selected', at(cm) === '2,2' && cm.state.doc.toString().includes('| Mid') && /\| Mid +\| 5 +\| x +\|/.test(cm.state.doc.toString()), cm.state.doc.toString().split('\n').find((l) => l.startsWith('| Mid')));
-		await press(cm, 'Escape');
-		await press(cm, 'Escape');
-		await restore(cm, original);
-		const longRow = await tableUnder(cm, 'Uneven rows');
-		await selectTable(cm, longRow);
+		check('31 what\'s typed there reaches the note', at(cm) === '2,2' && /\| Mid +\| 5 +\| x +\|/.test(cm.state.doc.toString()), cm.state.doc.toString().split('\n').find((l) => l.startsWith('| Mid')));
+		await keys(cm, uneven, 'ArrowUp');
 		await press(cm, 'Enter');
-		await keys(cm, longRow, ...repeat('ArrowDown', 3), ...repeat('ArrowRight', 3));
-		await press(cm, 'Enter');
-		await sleep(350);
-		check('32 the fourth cell of a long row opens', openAt(cm) === '3,3', openAt(cm));
+		await sleep(300);
+		check('32 once tidied, Enter opens cells again', openAt(cm) === '1,2', openAt(cm));
 		await press(cellEditor(cm), 'Escape');
 		await sleep(250);
 		await press(cm, 'Escape');
@@ -481,15 +489,17 @@
 		await settle();
 		await press(cellEditor(cm), 'Escape');
 		await sleep(300);
-		await press(cm, 'Enter');
-		await sleep(350);
-		const reopened = openAt(cm);
+		const beforeRefusal = cm.state.doc.toString();
+		quiet = await keys(cm, trimmed, 'Enter');
+		check('a cell left ending in a space: Enter refuses rather than type in the wrong place', quiet && refused() && cm.state.doc.toString() === beforeRefusal, { quiet, open: openAt(cm) });
+		await click(trimmed.el.querySelector('table').rows[1].cells[2]);
 		cellView(cm).dispatch(cellView(cm).state.replaceSelection('x'), { userEvent: 'input.type' });
 		await settle();
 		await press(cellEditor(cm), 'Escape');
 		await sleep(300);
 		const keptRow = cm.state.doc.toString().split('\n').find((l) => l.includes('Keep damp'));
-		check('a cell ending in a space, opened again, takes what\'s typed in the right place', reopened === '1,2' && (keptRow.match(/(?<!\\)\|/g) ?? []).length === 4 && keptRow.includes('shadyx'), { reopened, keptRow });
+		// The caret sits where the press landed, mid-cell, so the x lands inside the text.
+		check('after a click, what\'s typed stays in that cell, and the row keeps its pipes', (keptRow.match(/(?<!\\)\|/g) ?? []).length === 4 && keptRow.replace('x', '').includes('**Keep damp** and shady'), keptRow);
 		await press(cm, 'Escape');
 		await press(cm, 'Escape');
 		await restore(cm, original);

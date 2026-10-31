@@ -8,6 +8,8 @@ import type { Cell, Span } from './table-text';
 export const TABLE_CLASS = 'cm-table-widget';
 /** On the selected cell; styles.css draws it the way Obsidian draws selected cells. */
 const CELL_CLASS = 'selectable-tables-cell';
+/** On the selected cell when Enter can't open it; styles.css turns its border red. */
+const REFUSED_CLASS = 'selectable-tables-refused';
 /** On a table while one of its cells is selected; styles.css takes the table's own tint off then. */
 const HOLDS_CELL_CLASS = 'selectable-tables-holds-cell';
 
@@ -69,6 +71,11 @@ class CellSelection implements PluginValue, Cells {
 		const { main } = this.view.state.selection;
 		this.side = main.anchor < main.head;
 		this.deselect();
+	}
+
+	/** Enter can't open the selected cell. It says so until the selection moves on. */
+	refuse() {
+		this.cell?.classList.add(REFUSED_CLASS);
 	}
 
 	/** Whether the table whose cell is closing was selected from above. */
@@ -172,7 +179,7 @@ class CellSelection implements PluginValue, Cells {
 			return;
 		}
 		if (cell !== this.cell) {
-			this.cell?.classList.remove(CELL_CLASS);
+			this.cell?.classList.remove(CELL_CLASS, REFUSED_CLASS);
 			cell?.classList.add(CELL_CLASS);
 			this.cell = cell;
 		}

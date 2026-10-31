@@ -47,7 +47,7 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | -- | -- |
 | ↑ ↓ ← → | The selection moves one cell, and stops at the table's edge. |
 | Tab, Shift+Tab | The next or previous cell, wrapping between rows. It stops on the last and first cells, and adds no rows. |
-| Enter | Opens the cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. On a table with uneven rows or padding Obsidian didn't write, it first tidies the table, as a click does. |
+| Enter | Opens the cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. On a table Obsidian didn't write, such as a hand-typed one, the frame turns red and nothing opens: click any cell once and Obsidian tidies the table, and Enter works from then on. |
 | Escape | Back to the selected table. |
 | Copy | Copies the cell's Markdown, the way the cell's editor shows it. |
 | Typing, Backspace, Delete, Cut, Paste, Shift with an arrow | Nothing happens. Editor commands leave the table alone too. |

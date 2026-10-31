@@ -4,6 +4,8 @@ An Obsidian plugin that augments tables in Live Preview mode. Treats a table as 
 
 ![A selected table, tinted and framed with a thick border](docs/selected-table.png)
 
+![Demo with the keys shown on screen: holding ↓ passes the tables, → selects one, the arrows and jump keys move between cells without opening them, and Enter opens a cell](docs/demo.gif)
+
 ## Why I made this
 
 One of the original objectives was to make scrolling notes with large tables a little more seamless, especially tables that include Markdown inside the cells, e.g. links or formatting. You can now bypass a table in one keypress rather than having to scroll through every cell, which typically results in flickering, stuttering, and a table that changes size as Obsidian tries to reveal the Markdown for every cell your caret passes.

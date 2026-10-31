@@ -2,7 +2,7 @@ import { EditorSelection, EditorState, Extension, Prec, SelectionRange, Transact
 import { EditorView, KeyBinding, keymap } from '@codemirror/view';
 import { editorEditorField, editorLivePreviewField, Notice } from 'obsidian';
 import { cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, stay, stopsEdit, tab } from './decide';
+import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab } from './decide';
 import { viewLayout } from './layout';
 import type { Span } from './table-text';
 
@@ -172,14 +172,15 @@ function escapeCell(view: EditorView): EditorView | null {
 	return main;
 }
 
+type Keys = Pick<KeyBinding, 'key' | 'mac'>;
 type Jump = (context: Context) => Action | null;
 
 /** A key that jumps in the note's editor. With Shift, it does nothing on a selected cell. */
-function jumpKey(keys: Pick<KeyBinding, 'key' | 'mac'>, jump: Jump): KeyBinding {
+function jumpKey(keys: Keys, jump: Jump, shift: Jump = shifted): KeyBinding {
 	return {
 		...keys,
 		run: (view) => active(view) && run(view, jump(context(view))),
-		shift: (view) => active(view) && run(view, shifted(context(view))),
+		shift: (view) => active(view) && run(view, shift(context(view))),
 	};
 }
 
@@ -189,13 +190,14 @@ function jumpKey(keys: Pick<KeyBinding, 'key' | 'mac'>, jump: Jump): KeyBinding 
  * which leaves a cell selected: opening the next one takes a caret, and a caret right after a cell is
  * trimmed is what can eat a table's pipes, so Enter opens it, through Enter's check.
  */
-function cellJumpKey(keys: Pick<KeyBinding, 'key' | 'mac'>, jump: Jump): KeyBinding {
+function cellJumpKey(keys: Keys, jump: (context: Context, forward: boolean) => Action | null, forward: boolean): KeyBinding {
+	const go: Jump = (c) => jump(c, forward);
 	return {
-		...jumpKey(keys, jump),
+		...jumpKey(keys, go),
 		run(view) {
-			if (active(view)) return run(view, jump(context(view))) || leaveToObsidian(view, 'big jump');
+			if (active(view)) return run(view, go(context(view))) || leaveToObsidian(view, forward ? 'jump down' : 'jump up');
 			const main = view.hasFocus && !view.composing ? escapeCell(view) : null;
-			if (main) run(main, jump(context(main)));
+			if (main) run(main, go(context(main)));
 			return main !== null;
 		},
 	};
@@ -225,18 +227,18 @@ const bindings: KeyBinding[] = [
 		run: (view) => active(view) && run(view, tab(context(view), true)),
 		shift: (view) => active(view) && run(view, tab(context(view), false)),
 	},
-	jumpKey({ key: 'Home' }, (c) => rowEnd(c, false)),
-	jumpKey({ mac: 'Cmd-ArrowLeft' }, (c) => rowEnd(c, false)),
-	jumpKey({ key: 'End' }, (c) => rowEnd(c, true)),
-	jumpKey({ mac: 'Cmd-ArrowRight' }, (c) => rowEnd(c, true)),
-	cellJumpKey({ key: 'PageUp' }, (c) => page(c, false)),
-	cellJumpKey({ mac: 'Ctrl-ArrowUp' }, (c) => page(c, false)),
-	cellJumpKey({ key: 'PageDown' }, (c) => page(c, true)),
-	cellJumpKey({ mac: 'Ctrl-ArrowDown' }, (c) => page(c, true)),
-	cellJumpKey({ key: 'Mod-Home' }, (c) => noteEnd(c, false)),
-	cellJumpKey({ mac: 'Cmd-ArrowUp' }, (c) => noteEnd(c, false)),
-	cellJumpKey({ key: 'Mod-End' }, (c) => noteEnd(c, true)),
-	cellJumpKey({ mac: 'Cmd-ArrowDown' }, (c) => noteEnd(c, true)),
+	jumpKey({ key: 'Home' }, (c) => rowEnd(c, false), shiftedRowEnd),
+	jumpKey({ mac: 'Cmd-ArrowLeft' }, (c) => rowEnd(c, false), shiftedRowEnd),
+	jumpKey({ key: 'End' }, (c) => rowEnd(c, true), shiftedRowEnd),
+	jumpKey({ mac: 'Cmd-ArrowRight' }, (c) => rowEnd(c, true), shiftedRowEnd),
+	cellJumpKey({ key: 'PageUp' }, page, false),
+	cellJumpKey({ mac: 'Ctrl-ArrowUp' }, page, false),
+	cellJumpKey({ key: 'PageDown' }, page, true),
+	cellJumpKey({ mac: 'Ctrl-ArrowDown' }, page, true),
+	cellJumpKey({ key: 'Mod-Home' }, noteEnd, false),
+	cellJumpKey({ mac: 'Cmd-ArrowUp' }, noteEnd, false),
+	cellJumpKey({ key: 'Mod-End' }, noteEnd, true),
+	cellJumpKey({ mac: 'Cmd-ArrowDown' }, noteEnd, true),
 	jumpKey({ key: 'Mod-ArrowLeft', mac: 'Alt-ArrowLeft' }, (c) => option(c, false)),
 	jumpKey({ key: 'Mod-ArrowRight', mac: 'Alt-ArrowRight' }, (c) => option(c, true)),
 	jumpKey({ mac: 'Alt-ArrowUp' }, (c) => option(c, false)),
@@ -303,7 +305,8 @@ const keepCellsClosed = EditorState.transactionFilter.of((tr) => {
 	if (!view || view.state !== tr.startState) return tr;
 	const action = landing(tr, {
 		layout: viewLayout(view),
-		active: active(view),
+		// `composing` starts only with the first change, and moving the selection before that freezes it too.
+		active: active(view) && !view.compositionStarted,
 		vim: view.scrollDOM.classList.contains(VIM_CLASS),
 		left: leftToObsidian?.view === view ? leftToObsidian.key : null,
 		cellSelected: cellSelected(tr.startState),

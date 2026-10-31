@@ -37,7 +37,7 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | -- | -- |
 | ↓, →, Page Down, or Option with ↓ or → | The caret goes to the start of the line below. |
 | ↑, ←, Page Up, or Option with ↑ or ← | The caret goes to the end of the line above. |
-| Home, End, Cmd+←, Cmd+→ | Nothing happens. |
+| Home, End, Cmd+←, Cmd+→, with or without Shift | Nothing happens. |
 | Cmd+↑, Cmd+↓ | The note's start or end. |
 | Enter | Selects the first cell, or the cell you just left with Escape. |
 | Escape | The caret goes back to the side you selected the table from. |

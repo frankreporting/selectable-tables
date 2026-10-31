@@ -51,7 +51,7 @@ Every release gets release notes, drafted as part of the release, and Brian read
 
 Each PR with a change a user would notice adds its bullet under `## Unreleased` in `CHANGELOG.md`, in this format. To release:
 
-1. Tighten `## Unreleased` into the notes, and show Brian the draft.
+1. Tighten `## Unreleased` into the notes, and open `CHANGELOG.md` in Zed for Brian (`zed <path>`; he's asked for this each time, so it needs no asking first). He edits it there and saves, and his words are the notes. Wait for his OK, then commit what's in the file.
 2. Rename it `## <version> (<date>)`, bump the version, and merge that.
 3. Tag the release. The release workflow builds a draft on GitHub with no notes.
 4. Paste the same notes into that draft, and publish. Obsidian's plugin page links to it, and update checkers show it.

@@ -22,6 +22,7 @@ These are Obsidian behaviors, not calls, so any Obsidian update can change them.
 5. A caret in a cell's text opens exactly that cell.
 6. The selected table's tint is drawn on the table element, so the plugin can take it off while a cell is selected.
 7. A press on a cell of a malformed table tidies it, which is what makes Enter work on it again. A table with only unusual padding stays as it is, and a press still opens its cells.
+8. An open cell keeps its rendered text in a `.table-cell-wrapper` hidden with an inline `display: none`, beside the wrapper holding its editor. `styles.css` keeps that text in the layout so the column holds its width. If this changes, the rule stops matching, and columns move again as in stock Obsidian.
 
 The plugin makes no private Obsidian calls. It reads only CodeMirror's public layout (`lineBlockAt`, `posAtDOM`, `moveVertically`) and `editorLivePreviewField`, plus three classes Obsidian puts in the DOM: `cm-table-widget`, to tell a cell's editor from a note's, `mod-image-selected`, and `has-selection`, which marks a dragged range of cells.
 

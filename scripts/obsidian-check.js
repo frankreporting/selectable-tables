@@ -585,6 +585,51 @@
 		await press(cm, 'Escape');
 		check('Cells: the note is as it was', cm.state.doc.toString() === original);
 
+		// --- Open cells keep their width
+		const columns = (t) => Array.from(t.el.querySelector('table').rows[0].cells, (c) => Math.round(c.getBoundingClientRect().width * 10) / 10).join(', ');
+		cm = await open('Markdown in cells');
+		original = cm.state.doc.toString();
+		const plants = await tableUnder(cm, 'Plants');
+		const closedWidths = columns(plants);
+		await selectTable(cm, plants);
+		await press(cm, 'Enter');
+		await keys(cm, plants, 'ArrowDown');
+		await press(cm, 'Enter');
+		await sleep(300);
+		const openFern = cm.contentDOM.querySelector('.cm-table-widget.has-focus .cm-editor').closest('td, th');
+		const renderedCopy = Array.from(openFern.querySelectorAll('.table-cell-wrapper')).find((w) => !w.querySelector('.cm-editor'));
+		check('relies 8: an open cell keeps its rendered text in a hidden wrapper, beside the one holding its editor', renderedCopy && renderedCopy.style.display === 'none', openFern.innerHTML.slice(0, 200));
+		check('opening a cell with a link moves no column', columns(plants) === closedWidths, { closedWidths, open: columns(plants) });
+		await press(cellEditor(cm), 'Tab');
+		await sleep(300);
+		check('moving to another open cell moves no column', columns(plants) === closedWidths, { closedWidths, moved: columns(plants) });
+		cellView(cm).dispatch(cellView(cm).state.replaceSelection(' and a good deal more text than the cell had'), { userEvent: 'input.type' });
+		await settle();
+		check('typing in an open cell moves no column', columns(plants) === closedWidths, { closedWidths, typing: columns(plants) });
+		await press(cellEditor(cm), 'Escape');
+		await sleep(300);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		await restore(cm, original);
+		cm = await open('Cell moves');
+		original = cm.state.doc.toString();
+		const empties = await tableUnder(cm, 'Seed trays');
+		const emptyClosed = columns(empties);
+		await selectTable(cm, empties);
+		await press(cm, 'Enter');
+		await keys(cm, empties, ...repeat('ArrowDown', 2), ...repeat('ArrowRight', 2));
+		await press(cm, 'Enter');
+		await sleep(300);
+		cellView(cm).dispatch(cellView(cm).state.replaceSelection('a sentence typed into an empty cell, which is wider than the column was'), { userEvent: 'input.type' });
+		await settle();
+		const emptyTyping = columns(empties);
+		await press(cellEditor(cm), 'Escape');
+		await sleep(300);
+		check('an empty cell still grows as you type, as it always has', emptyTyping !== emptyClosed, { emptyClosed, emptyTyping });
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		await restore(cm, original);
+
 		// --- D. Typing, Tab, delete
 		cm = await open('Two report tables');
 		original = cm.state.doc.toString();

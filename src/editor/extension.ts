@@ -2,7 +2,7 @@ import { EditorSelection, EditorState, Extension, Prec, SelectionRange } from '@
 import { EditorView, KeyBinding, keymap } from '@codemirror/view';
 import { editorLivePreviewField, Notice } from 'obsidian';
 import { cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, Context, copied, Direction, enter, escape, noCells, selectedTable, stay, stopsEdit, tab } from './decide';
+import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, noCells, selectedTable, stay, stopsEdit, tab } from './decide';
 import { viewLayout } from './layout';
 import type { Span } from './table-text';
 
@@ -163,6 +163,7 @@ const bindings: KeyBinding[] = [
 		// Shift+Enter would type a line break over the table: it does nothing.
 		shift: (view) => active(view) && run(view, stay(view.state, viewLayout(view))),
 	},
+	{ key: 'Delete', run: (view) => active(view) && run(view, deleteForward(view.state, viewLayout(view))) },
 	{
 		key: 'Escape',
 		run: (view) => (active(view) ? run(view, escape(context(view))) : view.hasFocus && escapeCell(view)),

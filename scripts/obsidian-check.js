@@ -614,6 +614,24 @@
 		check('D16 undo brings it back unchanged', cm.state.doc.toString() === original);
 		await restore(cm, original);
 
+		// --- Paste and Delete next to a table
+		await restore(cm, original);
+		const pasted = '| Tool  | Shed |\n| ----- | ---- |\n| Rake  | Back |';
+		const end = cm.state.doc.length;
+		cm.dispatch({ changes: { from: end, insert: pasted }, selection: { anchor: end + pasted.length }, userEvent: 'input.paste' });
+		await sleep(400);
+		await press(cm, 'ArrowLeft');
+		await sleep(250);
+		s = sel(cm);
+		check('40 ← right after pasting a table selects it, and opens no cell', !openCell(cm) && s.anchor === end + pasted.length && s.head === end, s);
+		await restore(cm, original);
+		[t1] = tables(cm);
+		await caretOnLine(cm, t1.first - 1);
+		await press(cm, 'Delete');
+		s = sel(cm);
+		check('Delete on the line above a table selects it, and removes nothing', !openCell(cm) && s.anchor === t1.from && s.head === t1.to && cm.state.doc.toString() === original, s);
+		await caretOnLine(cm, t1.first - 1);
+
 		// --- E. Shift
 		[t1] = tables(cm);
 		await caretOnLine(cm, t1.first - 1);

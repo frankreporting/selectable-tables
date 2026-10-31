@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorState, Transaction } from '@codemirror/state';
-import { Action, arrow, Cells, copied, Direction, enter, escape, Grid, noCells, selectedTable, stay, stopsEdit, tab } from '../src/editor/decide';
+import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, noCells, selectedTable, stay, stopsEdit, tab } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
 
 const TABLE = '| Plant  | Room |\n| ------ | ---- |\n| Fern   | Hall |';
@@ -115,6 +115,55 @@ describe('next to a table', () => {
 	test('a note without a rendered table steps aside', () => {
 		assert.equal(press('Intro\n‸\nPlain text', 'down'), null);
 		assert.equal(press('> [!note]\n> ‸\n> | a | b |\n> | - | - |\n', 'down'), null);
+	});
+});
+
+describe('a caret on a table\'s outer edge, as a paste leaves it', () => {
+	test('← and ↑ from its end select the table, rather than step into its last cell', () => {
+		for (const text of [`Intro\n\n${TABLE}‸`, `Intro\n\n${TABLE}‸\n\nAfter`]) {
+			assert.deepEqual(press(text, 'left'), { type: 'select', table: spanOf(text), fromAbove: false });
+			assert.deepEqual(press(text, 'up'), { type: 'select', table: spanOf(text), fromAbove: false });
+		}
+	});
+
+	test('→ and ↓ from its start select the table, rather than step into its first cell', () => {
+		const text = `Intro\n\n‸${TABLE}\n\nAfter`;
+		assert.deepEqual(press(text, 'right'), { type: 'select', table: spanOf(text), fromAbove: true });
+		assert.deepEqual(press(text, 'down'), { type: 'select', table: spanOf(text), fromAbove: true });
+	});
+
+	test('moving away from the table is left to Obsidian', () => {
+		assert.equal(press(`Intro\n\n${TABLE}‸\n\nAfter`, 'right'), null);
+		assert.equal(press(`Intro\n\n${TABLE}‸\n\nAfter`, 'down'), null);
+		assert.equal(press(`Intro\n\n‸${TABLE}\n\nAfter`, 'left'), null);
+		assert.equal(press(`Intro\n\n‸${TABLE}\n\nAfter`, 'up'), null);
+	});
+});
+
+describe('Delete above a table', () => {
+	const run = (text: string) => {
+		const state = note(text);
+		return deleteForward(state, layoutOf(state));
+	};
+
+	test('at the end of the line above, it selects the table, as Backspace does from below', () => {
+		const blank = `Intro\n‸\n${TABLE}\n`;
+		assert.deepEqual(run(blank), { type: 'select', table: spanOf(blank), fromAbove: true });
+		const text = `# Intro‸\n${TABLE}\n`;
+		assert.deepEqual(run(text), { type: 'select', table: spanOf(text), fromAbove: true });
+	});
+
+	test('anywhere else it is left to Obsidian', () => {
+		assert.equal(run(`# Int‸ro\n${TABLE}\n`), null);
+		assert.equal(run(`‸Intro\n\n${TABLE}\n`), null);
+		assert.equal(run(`\n${TABLE}\n‸After`), null);
+		assert.equal(run('‸Plain text\nMore text'), null);
+	});
+
+	test('a selection or several carets are left to Obsidian', () => {
+		assert.equal(run(`⟨Intro⟩\n${TABLE}\n`), null);
+		assert.equal(run(`‸Intro‸\n${TABLE}\n`), null);
+		assert.equal(run(selected('\n', '\n')), null);
 	});
 });
 

@@ -143,6 +143,8 @@ function move({ state, layout, leavesLine }: Context, direction: Direction): Act
 
 	const { main } = state.selection;
 	if (!main.empty) return collapse(state, layout, main.from, main.to, direction);
+	const edge = tableEntered(layout, main.head, direction);
+	if (edge) return edge;
 	const line = state.doc.lineAt(main.head);
 	switch (direction) {
 		case 'down': {
@@ -164,6 +166,17 @@ function move({ state, layout, leavesLine }: Context, direction: Direction): Act
 			return table && { type: 'select', table, fromAbove: false };
 		}
 	}
+}
+
+/**
+ * A caret on a table's outer edge is in its text with no cell open, as a paste leaves it. Stepping
+ * further in would open a cell, so the table is selected, as it is from the line beyond.
+ */
+function tableEntered(layout: Layout, head: number, direction: Direction): Action | null {
+	const table = layout.tableAt(head);
+	if (!table) return null;
+	const backward = direction === 'up' || direction === 'left';
+	return head === (backward ? table.to : table.from) ? { type: 'select', table, fromAbove: !backward } : null;
 }
 
 /**
@@ -244,6 +257,18 @@ function escapeOntoTable(state: EditorState, layout: Layout): Action | null {
 	const table = layout.tableAt(main.head);
 	if (!table || (main.head !== table.from && main.head !== table.to)) return null;
 	return { type: 'select', table, fromAbove: main.head === table.to };
+}
+
+/**
+ * Delete at the end of the line above a table selects the table, as Obsidian does for Backspace from the
+ * line below. Otherwise it would pull the table's first row up, or delete a blank line and open a cell.
+ */
+export function deleteForward(state: EditorState, layout: Layout): Action | null {
+	const { ranges, main } = state.selection;
+	if (ranges.length !== 1 || !main.empty) return null;
+	const line = state.doc.lineAt(main.head);
+	const table = main.head === line.to ? tableBelow(state, layout, line) : null;
+	return table && { type: 'select', table, fromAbove: true };
 }
 
 /** A key that would type over a selected table does nothing, so a stray key can't change it. */

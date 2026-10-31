@@ -14,7 +14,7 @@ One of the original objectives was to make scrolling notes with large tables a l
 2. Select **Browse** and search for **Selectable Tables**.
 3. Select **Install**, then **Enable**.
 
-It needs Obsidian 1.14.4 or later.
+Requires Obsidian 1.14.4 or later.
 
 ## Keys
 

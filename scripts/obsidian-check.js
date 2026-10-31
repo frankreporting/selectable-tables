@@ -1254,13 +1254,22 @@
 			check('Frozen 5 the selected table\'s tint lies over the frozen rows and column', plants.el.classList.contains('is-selected') && parseInt(getComputedStyle(tableBox, '::after').zIndex) > parseInt(getComputedStyle(header).zIndex), getComputedStyle(tableBox, '::after').zIndex);
 			plants.el.scrollLeft = 300;
 			await frames();
-			const tinted = getComputedStyle(tableBox, '::after');
-			check('Frozen 5 scrolled sideways, the tint stops at the frozen column', tinted.animationName === 'selectable-tables-tint' && tinted.clipPath.includes('calc('), `${tinted.animationName} ${tinted.clipPath}`);
+			const cover = plants.el.querySelector('.selectable-tables-tint-cover');
+			const covered = document.elementsFromPoint(plants.el.getBoundingClientRect().left + 6, pane().top + 200);
+			const coverBox = cover && getComputedStyle(cover, '::before');
+			check('Frozen 5 scrolled sideways, a cover keeps the tint out of the strip beside the frozen column, and sticks with it', cover && getComputedStyle(cover).display === 'block' && getComputedStyle(cover).position === 'sticky' && parseFloat(coverBox.width) === 14 && parseInt(getComputedStyle(cover).zIndex) > parseInt(getComputedStyle(tableBox, '::after').zIndex) && Math.abs(cover.getBoundingClientRect().left - body.cells[0].getBoundingClientRect().left) < 1, { cover: !!cover, width: coverBox?.width, hit: covered.length });
 			plants.el.scrollLeft = 0;
 			await frames();
 			await press(cm, 'Enter');
 			const frame = getComputedStyle(rowsOf(plants)[0].cells[0], '::after');
 			check('Frozen 5 Enter selects a cell, and its frame sits inside it, where no neighbor covers it', at(cm) === '0,0' && parseFloat(frame.borderTopWidth) > 0 && [frame.top, frame.right, frame.bottom, frame.left].every((side) => side === '0px'), { at: at(cm), top: frame.top, right: frame.right, bottom: frame.bottom, left: frame.left });
+			cm.scrollDOM.scrollTop = widgetTop + 700;
+			await frames();
+			await sleep(100);
+			const pinnedAt = cm.scrollDOM.scrollTop;
+			await keys(cm, plants, 'ArrowRight', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowLeft');
+			await sleep(100);
+			check('Frozen 5 moving across a pinned row leaves the note where it is', Math.abs(cm.scrollDOM.scrollTop - pinnedAt) < 1 && at(cm) === '0,1', { moved: cm.scrollDOM.scrollTop - pinnedAt, at: at(cm) });
 			await press(cm, 'Escape');
 			await press(cm, 'Escape');
 

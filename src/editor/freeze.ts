@@ -14,11 +14,16 @@ const ROW_CLASS = 'selectable-tables-frozen-row';
  */
 const COLUMNS_CLASS = 'selectable-tables-frozen-columns';
 
+/** Before the table, on a table with frozen columns. styles.css keeps the selected table's tint out of the strip beside them with it. */
+const COVER_CLASS = 'selectable-tables-tint-cover';
+
 const columnsClass = (count: number) => `${COLUMNS_CLASS}-${count}`;
 const columnVariable = (column: number) => `--selectable-tables-column-${column}`;
 /** How far the frozen rows travel, and how much of their animation that takes. They're on the rows: a variable on the table would restyle every cell. */
 const TRAVEL_VARIABLE = '--selectable-tables-travel';
 const PIN_END_VARIABLE = '--selectable-tables-pin-end';
+/** On the cover, for the same reason. */
+const TABLE_HEIGHT_VARIABLE = '--selectable-tables-table-height';
 /** How far past the pane's top the rows' animation goes on, as in styles.css. */
 export const ANIMATION_REACH = 4000;
 
@@ -43,6 +48,7 @@ class DrawnTable {
 	private rows: HTMLTableRowElement[] = [];
 	/** The header cells of the frozen columns. */
 	private headers: HTMLTableCellElement[] = [];
+	private cover: HTMLElement | null = null;
 
 	constructor(readonly widget: HTMLElement) {}
 
@@ -68,7 +74,10 @@ class DrawnTable {
 		this.headers = headers;
 		this.widget.classList.add(FROZEN_CLASS);
 		if (rows.length) this.widget.classList.add(ROWS_CLASS);
-		if (headers.length) this.widget.classList.add(COLUMNS_CLASS, columnsClass(headers.length));
+		if (headers.length) {
+			this.widget.classList.add(COLUMNS_CLASS, columnsClass(headers.length));
+			this.cover = table.parentElement?.createDiv({ cls: COVER_CLASS, prepend: true }) ?? null;
+		}
 		for (const row of rows) row.classList.add(ROW_CLASS);
 	}
 
@@ -92,6 +101,8 @@ class DrawnTable {
 		}
 		widget.classList.toggle(ROWS_CLASS, pinRows);
 
+		if (this.cover) setVariable(this.cover, TABLE_HEIGHT_VARIABLE, `${table.offsetHeight}px`);
+
 		const widths = headers.map((cell) => cell.offsetWidth);
 		const pinColumns = headers.length > 0 && sum(widths) < widget.clientWidth - 2 * padding;
 		// The first column sits at 0, and each later one past the columns before it. This has to be above
@@ -112,6 +123,8 @@ class DrawnTable {
 			row.style.removeProperty(PIN_END_VARIABLE);
 		}
 		headers.forEach((_, index) => widget.style.removeProperty(columnVariable(index + 1)));
+		this.cover?.remove();
+		this.cover = null;
 		widget.classList.remove(FROZEN_CLASS, ROWS_CLASS, COLUMNS_CLASS, columnsClass(headers.length));
 		this.table = null;
 		this.rows = [];

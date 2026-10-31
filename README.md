@@ -2,11 +2,11 @@
 
 An Obsidian plugin that augments tables in Live Preview mode. Treats a table as a single block, the same way Obsidian treats an image. This unlocks the ability to use arrow keys to select and navigate tables and cells without touching or viewing the raw Markdown. You hit `Enter` to drop into the cell for editing, which is also similar to hitting `Enter` on an image to get to its Markdown link. This also brings table editing a little closer to how it works in apps like Notion.
 
+![A selected table, tinted and framed with a thick border](docs/selected-table.png)
+
 ## Why I made this
 
-One of the original objectives was to make scrolling notes with large tables a little more seamless, especially tables that include Markdown inside the cells, e.g. links or formatting. You can now bypass a table in one keypress rather than having to scroll through every cell, which typically results in flickering and stuttering as Obsidian tries to reveal the Markdown for every cell your caret passes. Without the plugin, every arrow press that lands in a table opens an editor for that cell. Holding ↓ through a note stalls at every table, links in the table flicker as cells switch between rendered and source text, and the table changes size as they do.
-
-![A selected table, tinted and framed with a thick border](docs/selected-table.png)
+One of the original objectives was to make scrolling notes with large tables a little more seamless, especially tables that include Markdown inside the cells, e.g. links or formatting. You can now bypass a table in one keypress rather than having to scroll through every cell, which typically results in flickering, stuttering, and a table that changes size as Obsidian tries to reveal the Markdown for every cell your caret passes.
 
 ## Install
 
@@ -14,7 +14,7 @@ One of the original objectives was to make scrolling notes with large tables a l
 2. Select **Browse** and search for **Selectable Tables**.
 3. Select **Install**, then **Enable**.
 
-It needs Obsidian 1.14.4 or later.
+Requires Obsidian 1.14.4 or later.
 
 ## Keys
 

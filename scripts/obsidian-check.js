@@ -913,7 +913,7 @@
 		await real('Home');
 		await sleep(250);
 		s = sel(cm);
-		check('J35 Home right after pasting a table selects it, and opens no cell', !openCell(cm) && s.anchor === noteLength && s.head === noteLength + pastedTable.length, s);
+		check('J35 Home right after pasting a table selects it from below, and opens no cell', !openCell(cm) && s.anchor === noteLength + pastedTable.length && s.head === noteLength, s);
 		await restore(cm, original);
 		[t1] = tables(cm);
 		await caretOnLine(cm, t1.first - 1);

@@ -577,8 +577,10 @@ describe('a caret and the keys that jump', () => {
 
 	test('Home and End with a caret on a table\'s edge, as a paste leaves it, select the table', () => {
 		const text = `Above\n\n${TABLE}‸`;
-		assert.deepEqual(rowEnd(on(note(text)), false), { type: 'select', table: spanOf(text), fromAbove: true });
-		assert.deepEqual(rowEnd(on(note(text)), true), { type: 'select', table: spanOf(text), fromAbove: true });
+		assert.deepEqual(rowEnd(on(note(text)), false), { type: 'select', table: spanOf(text), fromAbove: false });
+		assert.deepEqual(rowEnd(on(note(text)), true), { type: 'select', table: spanOf(text), fromAbove: false });
+		const top = `\n‸${TABLE}\n`;
+		assert.deepEqual(rowEnd(on(note(top)), true), { type: 'select', table: spanOf(top), fromAbove: true });
 	});
 
 	test('Home and End with a selection Shift left on a table\'s edge select the table', () => {
@@ -682,10 +684,9 @@ describe('the check on key moves', () => {
 			assert.deepEqual(landing(move(state, spanOf(text).to), undrawn(state)), { type: 'caret', pos: spanOf(text).to + 1 });
 		});
 
-		test('with no line beyond the table, it selects it', () => {
-			const text = `Ab‸ove\n\n${TABLE}`;
-			const { state, inside } = outside(text);
-			assert.deepEqual(landing(move(state, inside), undrawn(state)), { type: 'select', table: spanOf(text), fromAbove: true });
+		test('with no line beyond it, the text is left alone, since Obsidian may never draw it', () => {
+			const { state, inside } = outside(`Ab‸ove\n\n${TABLE}`);
+			assert.equal(landing(move(state, inside), undrawn(state)), null);
 		});
 
 		test('a line that only has a pipe in it is left alone', () => {

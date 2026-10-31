@@ -312,7 +312,8 @@ export function rowEnd(context: TableContext, forward: boolean): Action | null {
 function headOnTable(state: EditorState, layout: Layout): Action | null {
 	const { ranges, main } = state.selection;
 	const table = ranges.length === 1 ? layout.tableAt(main.head) : null;
-	return table && { type: 'select', table, fromAbove: main.head === table.to };
+	// A caret came from the side it's on. A range reaches the head from the other side.
+	return table && { type: 'select', table, fromAbove: main.head === (main.empty ? table.from : table.to) };
 }
 
 /** Page Up and Page Down go to the ends of a selected cell's column, and leave a selected table. */
@@ -369,8 +370,7 @@ export interface Landing {
  */
 function pastUndrawn(state: EditorState, layout: Layout, head: number, forward: boolean): Action | null {
 	const table = tableInText(state.doc, head);
-	if (!table) return null;
-	return beyond(state, layout, table, forward) ?? { type: 'select', table, fromAbove: forward };
+	return table && beyond(state, layout, table, forward);
 }
 
 /**

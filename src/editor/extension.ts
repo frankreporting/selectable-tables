@@ -20,7 +20,7 @@ function cellWidget(view: EditorView): HTMLElement | null {
 
 /** The note's own editor, in Live Preview, with the keyboard and no composition under way. */
 function active(view: EditorView): boolean {
-	return view.hasFocus && !view.composing && view.state.field(editorLivePreviewField, false) === true && !cellWidget(view);
+	return view.hasFocus && !view.compositionStarted && view.state.field(editorLivePreviewField, false) === true && !cellWidget(view);
 }
 
 function context(view: EditorView): Context {
@@ -196,7 +196,7 @@ function cellJumpKey(keys: Keys, jump: (context: Context, forward: boolean) => A
 		...jumpKey(keys, go),
 		run(view) {
 			if (active(view)) return run(view, go(context(view))) || leaveToObsidian(view, forward ? 'jump down' : 'jump up');
-			const main = view.hasFocus && !view.composing ? escapeCell(view) : null;
+			const main = view.hasFocus && !view.compositionStarted ? escapeCell(view) : null;
 			if (main) run(main, go(context(main)));
 			return main !== null;
 		},
@@ -305,8 +305,7 @@ const keepCellsClosed = EditorState.transactionFilter.of((tr) => {
 	if (!view || view.state !== tr.startState) return tr;
 	const action = landing(tr, {
 		layout: viewLayout(view),
-		// `composing` starts only with the first change, and moving the selection before that freezes it too.
-		active: active(view) && !view.compositionStarted,
+		active: active(view),
 		vim: view.scrollDOM.classList.contains(VIM_CLASS),
 		left: leftToObsidian?.view === view ? leftToObsidian.key : null,
 		cellSelected: cellSelected(tr.startState),

@@ -13,6 +13,76 @@ const REFUSED_CLASS = 'selectable-tables-refused';
 /** On a table while one of its cells is selected; styles.css takes the table's own tint off then. */
 const HOLDS_CELL_CLASS = 'selectable-tables-holds-cell';
 
+/** What a frozen table has pinned: how many rows and columns, and the room they take. */
+export interface Pinned {
+	rows: number;
+	columns: number;
+	/** Down from the pane's top. None while the rows aren't pinned. */
+	height: number;
+	/** In from the widget's start, its padding included. None while the columns aren't pinned. */
+	width: number;
+}
+
+/** A frozen table's pinned rows and columns, by its widget, kept measured by freeze.ts. */
+export const pinnedTables = new WeakMap<HTMLElement, Pinned>();
+
+/** The room a cell has to stay clear of. A row or column can't cover its own cells: they move with it. */
+export function clearance({ row, column }: Cell, { rows, columns, height, width }: Pinned): { block: number; inline: number } {
+	return { block: row < rows ? 0 : height, inline: column < columns ? 0 : width };
+}
+
+/**
+ * Shows a cell, sideways in a wide table and down the note in a tall one. Pinned rows and columns cover
+ * what passes under them, and neither the browser's scroll nor Obsidian's knows it, so for this one scroll
+ * the cell's margins reach past them. Nothing else reads a scroll margin, and these are on the one cell:
+ * a size kept on the table would restyle every cell when it changed.
+ */
+function show(cell: HTMLTableCellElement) {
+	const widget = cell.closest<HTMLElement>(`.${TABLE_CLASS}`);
+	const pinned = widget && pinnedTables.get(widget);
+	const row = (cell.parentElement as HTMLTableRowElement).rowIndex;
+	const { block, inline } = pinned ? clearance({ row, column: cell.cellIndex }, pinned) : { block: 0, inline: 0 };
+	const { style } = cell;
+	if (block) style.scrollMarginBlockStart = `calc(${block}px + var(--size-4-2))`;
+	if (inline) style.scrollMarginInlineStart = `calc(${inline}px + var(--size-4-2))`;
+	cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+	style.scrollMarginBlockStart = '';
+	style.scrollMarginInlineStart = '';
+}
+
+/** The cell an element sits in, if its table has rows or columns pinned. */
+function frozenCell(element: Element): HTMLTableCellElement | null {
+	const cell = element.closest<HTMLTableCellElement>('td, th');
+	const widget = cell?.closest<HTMLElement>(`.${TABLE_CLASS}`);
+	return widget && pinnedTables.has(widget) ? cell : null;
+}
+
+/**
+ * Shows a frozen table's cell on the next frame, after a scroll that can't see what's pinned has run. That
+ * still comes before anything is painted, so the cell doesn't appear under the rows first.
+ */
+function showAfterScroll(view: EditorView, cell: HTMLTableCellElement) {
+	view.requestMeasure({
+		key: 'showCell',
+		read: () => undefined,
+		write: () => {
+			if (cell.isConnected) show(cell);
+		},
+	});
+}
+
+/**
+ * A cell's editor scrolls its caret into view as you type, and it takes a caret under a pinned row for one
+ * that's on screen. At a frozen column's cell it stops at the cell, which is sticky, and the note doesn't
+ * scroll at all. So the cell is shown after that scroll, and only when there is one: an edit that reaches an
+ * open cell from Sync doesn't move the note.
+ */
+export const cellFollowsCaret = EditorView.updateListener.of((update) => {
+	if (!update.transactions.some((transaction) => transaction.scrollIntoView)) return;
+	const cell = frozenCell(update.view.dom);
+	if (cell) showAfterScroll(update.view, cell);
+});
+
 /** The editor states with a cell selected, for the edit guard, which sees states but not editors. */
 const statesWithCell = new WeakSet<EditorState>();
 
@@ -122,9 +192,16 @@ class CellSelection implements PluginValue, Cells {
 		if (this.selected) this.forget();
 	};
 
-	/** The same for anything inside the content taking the focus, such as a cell's editor. */
+	/**
+	 * The same for anything inside the content taking the focus, such as a cell's editor. Obsidian scrolls to
+	 * a cell as it opens, right after this, and it takes a cell under a pinned row for one that's on screen.
+	 */
 	private readonly onFocus = (event: FocusEvent) => {
-		if (event.target !== this.view.contentDOM) this.onLeave();
+		const target = event.target as HTMLElement;
+		if (target === this.view.contentDOM) return;
+		this.onLeave();
+		const cell = frozenCell(target);
+		if (cell) showAfterScroll(this.view, cell);
 	};
 
 	private deselect() {
@@ -149,11 +226,12 @@ class CellSelection implements PluginValue, Cells {
 		},
 	};
 
-	/** Shows the selected cell, sideways in a wide table and down the note in a tall one. */
 	private readonly reveal = {
 		key: 'reveal',
 		read: () => undefined,
-		write: () => this.cell?.scrollIntoView({ block: 'nearest', inline: 'nearest' }),
+		write: () => {
+			if (this.cell) show(this.cell);
+		},
 	};
 
 	/** The selected table's element, found in the content's own block widgets when it's new. */

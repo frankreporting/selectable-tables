@@ -1291,6 +1291,199 @@
 			await press(cm, 'Escape');
 			await press(cm, 'Escape');
 
+			// --- Cells stay in view around frozen rows and columns
+			// What shows at a cell's top corners is the cell, not what's drawn over it, and its bottom is in the pane.
+			const inView = (cell) => {
+				const { left, right, top, bottom } = cell.getBoundingClientRect();
+				return [left + 3, right - 3].every((x) => document.elementFromPoint(x, top + 3)?.closest('td, th') === cell) && bottom <= pane().bottom + 1;
+			};
+			const selectedCell = () => marked(cm)[0];
+			const opened = () => openCell(cm)?.querySelector('.cm-editor').closest('td, th');
+			// Scrolls a cell to just below the frozen rows, as a hand would, and on under them by `under` px.
+			async function placeBelow(t, cell, under = 0) {
+				const last = Array.from(rowsOf(t)).filter((row) => row.classList.contains(ROW)).pop();
+				cm.scrollDOM.scrollTop += cell.getBoundingClientRect().top - last.getBoundingClientRect().bottom + under;
+				await frames();
+				await sleep(100);
+			}
+			// The same sideways, with the cell against the last of `columns` frozen columns.
+			async function placeBeside(t, cell, columns) {
+				t.el.scrollLeft += cell.getBoundingClientRect().left - cell.parentElement.cells[columns - 1].getBoundingClientRect().right;
+				await frames();
+				await sleep(100);
+			}
+
+			const stay = await frozenTable('Plants', 600);
+			const stayCell = (row, column) => rowsOf(stay)[row].cells[column];
+			await selectTable(cm, stay);
+			await press(cm, 'Enter');
+			await keys(cm, stay, ...repeat('ArrowDown', 20), 'ArrowRight', 'ArrowRight');
+			await placeBelow(stay, selectedCell());
+			const upward = [];
+			for (let i = 0; i < 4; i++) {
+				await press(cm, 'ArrowUp');
+				upward.push(inView(selectedCell()));
+			}
+			check('Stay 1 a selected cell moving ↑ is never under the frozen rows', at(cm) === '16,2' && upward.every(Boolean), { at: at(cm), upward });
+			check('Stay 1 its margins are gone once it\'s shown', selectedCell().style.scrollMarginBlockStart === '' && selectedCell().style.scrollMarginInlineStart === '', selectedCell().getAttribute('style'));
+			const moved = cm.scrollDOM.scrollTop;
+			await press(cm, 'ArrowDown');
+			check('Stay 1 a cell that\'s already clear moves with no scroll', Math.abs(cm.scrollDOM.scrollTop - moved) < 1 && at(cm) === '17,2', { moved: cm.scrollDOM.scrollTop - moved, at: at(cm) });
+			await keys(cm, stay, 'ArrowRight', 'ArrowRight');
+			await placeBeside(stay, selectedCell(), 1);
+			await press(cm, 'ArrowLeft');
+			check('Stay 2 a selected cell moving ← is never under the frozen column', inView(selectedCell()) && at(cm) === '17,3', { at: at(cm), left: stay.el.scrollLeft });
+			await keys(cm, stay, 'Home');
+			await placeBelow(stay, selectedCell());
+			await press(cm, 'ArrowUp');
+			check('Stay 1 a frozen column\'s cell moving ↑ clears the frozen rows', inView(selectedCell()) && at(cm) === '16,0', at(cm));
+			await keys(cm, stay, 'PageUp', 'ArrowDown', 'ArrowRight', 'ArrowRight', 'ArrowRight');
+			cm.scrollDOM.scrollTop += 500;
+			await frames();
+			await sleep(100);
+			await placeBeside(stay, selectedCell(), 1);
+			const pinned = cm.scrollDOM.scrollTop;
+			await press(cm, 'ArrowLeft');
+			check('Stay 2 a pinned row\'s cell moving ← clears the frozen column, and the note stays', inView(selectedCell()) && at(cm) === '1,2' && Math.abs(cm.scrollDOM.scrollTop - pinned) < 1, { at: at(cm), moved: cm.scrollDOM.scrollTop - pinned });
+			await keys(cm, stay, 'PageDown');
+			const rowsHeight = rowsOf(stay)[0].offsetHeight + rowsOf(stay)[1].offsetHeight;
+			cm.scrollDOM.scrollTop += stay.el.querySelector('table').getBoundingClientRect().bottom - pane().top - rowsHeight;
+			await frames();
+			await sleep(100);
+			await press(cm, 'ArrowRight');
+			check('Stay 1 a cell under the rows at the table\'s end comes clear of them', inView(selectedCell()), at(cm));
+			await keys(cm, stay, 'PageUp', ...repeat('ArrowDown', 20), 'ArrowLeft');
+			await placeBelow(stay, selectedCell(), selectedCell().offsetHeight);
+			check('Stay a cell scrolled under the frozen rows counts as hidden', !inView(selectedCell()), at(cm));
+			const heard = [];
+			const hear = (event) => heard.push(event.target.closest('td, th'));
+			cm.contentDOM.addEventListener('focusin', hear, true);
+			await press(cm, 'Enter');
+			cm.contentDOM.removeEventListener('focusin', hear, true);
+			check('relies 16: opening a cell focuses its own editor, inside the cell', heard.length === 1 && heard[0] === opened(), heard.length);
+			check('Stay 3 Enter on a hidden cell opens it clear of the frozen rows', openAt(cm) === '20,2' && inView(opened()), openAt(cm));
+			await placeBelow(stay, opened(), opened().offsetHeight);
+			await press(cellView(cm), 'Escape');
+			check('Stay 3 Escape from a hidden cell selects it, clear of the frozen rows', at(cm) === '20,2' && inView(selectedCell()), at(cm));
+			await press(cm, 'Escape');
+			await press(cm, 'Escape');
+
+			const openDown = await frozenTable('Plants', 900);
+			const openCellAt = (row, column) => rowsOf(openDown)[row].cells[column];
+			await placeBelow(openDown, openCellAt(25, 2));
+			await realClick(openCellAt(25, 2));
+			const openedAt = cm.scrollDOM.scrollTop;
+			check('Stay 3 a click opens a cell just below the frozen rows, and the note stays', openAt(cm) === '25,2' && Math.abs(cm.scrollDOM.scrollTop - openedAt) < 1, openAt(cm));
+			await real('ArrowUp');
+			await sleep(200);
+			check('Stay 3 an open cell moving ↑ is never under the frozen rows', openAt(cm) === '24,2' && inView(opened()), openAt(cm));
+			await closeCell(cm, cm.state.doc.line(openDown.first - 1).from);
+			const again = await frozenTable('Plants', 900);
+			const lowest = Array.from(rowsOf(again)).filter((row) => row.getBoundingClientRect().bottom < pane().bottom - 4).pop();
+			await realClick(lowest.cells[2]);
+			const downward = [];
+			for (let i = 0; i < 3; i++) {
+				await real('ArrowDown');
+				await sleep(200);
+				downward.push(inView(opened()));
+			}
+			check('Stay 3 an open cell moving ↓ past the pane\'s bottom stays in view', openAt(cm) === `${lowest.rowIndex + 3},2` && downward.every(Boolean), { at: openAt(cm), from: lowest.rowIndex, downward });
+			await closeCell(cm, cm.state.doc.line(again.first - 1).from);
+			const sideways = await frozenTable('Plants', 900);
+			const sideCell = rowsOf(sideways)[30].cells[3];
+			await placeBelow(sideways, sideCell, -80);
+			await placeBeside(sideways, sideCell, 1);
+			await realClick(sideCell);
+			await real('Tab', { shiftKey: true });
+			await sleep(200);
+			check('Stay 3 an open cell moving ← is never under the frozen column', openAt(cm) === '30,2' && inView(opened()), { at: openAt(cm), left: sideways.el.scrollLeft });
+			await closeCell(cm, cm.state.doc.line(sideways.first - 1).from);
+			sideways.el.scrollLeft = 0;
+			const far = await frozenTable('Plants', 1200);
+			const farLine = cm.state.doc.line(far.first + 6);
+			cm.focus();
+			cm.dispatch({ selection: { anchor: farLine.from + farLine.text.indexOf('|', 2) + 3 } });
+			await sleep(300);
+			check('Stay 3 a caret landing far above opens its cell clear of the frozen rows', openAt(cm) === '5,1' && inView(opened()), openAt(cm));
+			await closeCell(cm, cm.state.doc.line(far.first - 1).from);
+			const partly = await frozenTable('Plants', 900);
+			const partlyCell = rowsOf(partly)[25].cells[2];
+			await placeBelow(partly, partlyCell, partlyCell.offsetHeight / 3);
+			await realClick(partlyCell);
+			check('Stay 3 a click on a cell half under the frozen rows brings it clear', openAt(cm) === '25,2' && inView(opened()), openAt(cm));
+			await closeCell(cm, cm.state.doc.line(partly.first - 1).from);
+
+			const clicked = await frozenTable('Plants', 600);
+			const pinnedCell = rowsOf(clicked)[0].cells[3];
+			const { left: cellLeft, top: cellTop, width: cellWidth, height: cellHeight } = pinnedCell.getBoundingClientRect();
+			const point = { x: cellLeft + cellWidth / 2, y: cellTop + cellHeight / 2 };
+			const beforeClick = cm.scrollDOM.scrollTop;
+			await realClick(pinnedCell);
+			const clickedEditor = cellView(cm);
+			check('Stay 4 a click on a pinned cell opens it where it was pressed, and the note stays', openAt(cm) === '0,3' && Math.abs(cm.scrollDOM.scrollTop - beforeClick) < 1 && clickedEditor.state.selection.main.head === clickedEditor.posAtCoords(point), { at: openAt(cm), moved: cm.scrollDOM.scrollTop - beforeClick, head: clickedEditor.state.selection.main.head, there: clickedEditor.posAtCoords(point) });
+			await cdp.sendCommand('Input.insertText', { text: 'x' });
+			await sleep(200);
+			check('Stay 4 it takes typing, and the note stays', cm.state.doc.toString() !== original && Math.abs(cm.scrollDOM.scrollTop - beforeClick) < 1, { at: openAt(cm), moved: cm.scrollDOM.scrollTop - beforeClick });
+			await closeCell(cm, cm.state.doc.line(clicked.first - 1).from);
+			await restore(cm, original);
+			await sleep(300);
+			// Typing brings back a cell scrolled out of sight, as it does in any table.
+			const underRows = (t, cell) => placeBelow(t, cell, cell.offsetHeight);
+			const underColumn = async (t, cell) => {
+				await placeBeside(t, cell, 1);
+				t.el.scrollLeft += cell.offsetWidth;
+				await frames();
+				await sleep(100);
+			};
+			for (const [name, column, hide] of [['under the frozen rows', 2, underRows], ['of a frozen column, under the frozen rows', 0, underRows], ['under the frozen column', 3, underColumn]]) {
+				const typedIn = await frozenTable('Plants', 900);
+				const typedCell = rowsOf(typedIn)[20].cells[column];
+				await placeBelow(typedIn, typedCell, -200);
+				await realClick(typedCell);
+				await hide(typedIn, opened());
+				const hid = !inView(opened());
+				await cdp.sendCommand('Input.insertText', { text: 'x' });
+				await sleep(200);
+				check(`Stay 3 typing in a cell ${name} brings it back`, hid && openAt(cm) === `20,${column}` && inView(opened()), { hid, at: openAt(cm) });
+				await closeCell(cm, cm.state.doc.line(typedIn.first - 1).from);
+				typedIn.el.scrollLeft = 0;
+				await restore(cm, original);
+				await sleep(300);
+			}
+			const columnClicked = await frozenTable('Plants', 600);
+			columnClicked.el.scrollLeft = 200;
+			await frames();
+			await sleep(100);
+			const stuck = rowsOf(columnClicked)[20].cells[0];
+			await placeBelow(columnClicked, stuck, -60);
+			const stuckAt = { top: cm.scrollDOM.scrollTop, left: columnClicked.el.scrollLeft };
+			await realClick(stuck);
+			check('Stay 4 a click on a frozen column\'s cell opens it, and nothing moves', openAt(cm) === '20,0' && Math.abs(cm.scrollDOM.scrollTop - stuckAt.top) < 1 && Math.abs(columnClicked.el.scrollLeft - stuckAt.left) < 1, { at: openAt(cm), top: cm.scrollDOM.scrollTop - stuckAt.top, left: columnClicked.el.scrollLeft - stuckAt.left });
+			await closeCell(cm, cm.state.doc.line(columnClicked.first - 1).from);
+			columnClicked.el.scrollLeft = 0;
+			await restore(cm, original);
+			await sleep(300);
+
+			const twoColumns = await frozenTable('Tools', 300);
+			await selectTable(cm, twoColumns);
+			await press(cm, 'Enter');
+			await keys(cm, twoColumns, ...repeat('ArrowDown', 12), ...repeat('ArrowRight', 5));
+			await placeBeside(twoColumns, selectedCell(), 2);
+			await press(cm, 'ArrowLeft');
+			check('Stay 2 a cell clears two frozen columns', inView(selectedCell()) && at(cm) === '12,4', { at: at(cm), left: twoColumns.el.scrollLeft });
+			await press(cm, 'Escape');
+			await press(cm, 'Escape');
+			twoColumns.el.scrollLeft = 0;
+
+			const unmarked = await frozenTable('Sheds', 100);
+			await selectTable(cm, unmarked);
+			await press(cm, 'Enter');
+			await keys(cm, unmarked, ...repeat('ArrowDown', 5), 'ArrowRight', 'ArrowRight');
+			check('Stay a table with nothing frozen gets no margins', selectedCell().getAttribute('style') === null, selectedCell().getAttribute('style'));
+			await press(cm, 'Escape');
+			await press(cm, 'Escape');
+			check('Stay: the note is as it was', cm.state.doc.toString() === original);
+
 			const grown = await frozenTable('Plants', 300);
 			const pinEnd = () => rowsOf(grown)[0].style.getPropertyValue('--selectable-tables-pin-end');
 			const before = pinEnd();

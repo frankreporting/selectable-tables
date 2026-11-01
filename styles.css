@@ -49,8 +49,8 @@
 	inset: 0;
 }
 
-/* A pinned row sits at the pane's top and stays there, so a margin above its cell would scroll the note on every move. */
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows .selectable-tables-frozen-row > :is(th, td).selectable-tables-cell {
+/* A pinned row sits at the pane's top and stays there, so a margin above a cell in it would scroll the note on every move, or as it opens. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows .selectable-tables-frozen-row > :is(th, td) {
 	scroll-margin-block: -1px;
 }
 

@@ -1,5 +1,5 @@
 import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/view';
-import { CELL_CLASS, TABLE_CLASS } from './cells';
+import { CELL_CLASS, pinnedTables, TABLE_CLASS } from './cells';
 import { Freeze, readFreeze } from './freeze-mark';
 
 /** On a table's widget while anything in it is frozen. styles.css gives its cells their own borders then. */
@@ -115,6 +115,7 @@ class DrawnTable {
 		});
 		widget.classList.toggle(COLUMNS_CLASS, pinColumns);
 		if (headers.length) widget.classList.toggle(columnsClass(headers.length), pinColumns);
+		pinnedTables.set(widget, { rows: rows.length, columns: headers.length, height: pinRows ? height : 0, width: pinColumns ? padding + sum(widths) : 0 });
 	}
 
 	/** Takes everything off. */
@@ -129,6 +130,7 @@ class DrawnTable {
 		this.cover?.remove();
 		this.cover = null;
 		widget.classList.remove(FROZEN_CLASS, ROWS_CLASS, COLUMNS_CLASS, columnsClass(headers.length));
+		pinnedTables.delete(widget);
 		this.table = null;
 		this.rows = [];
 		this.headers = [];

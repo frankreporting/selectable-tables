@@ -1583,9 +1583,14 @@
 				await app.plugins.enablePlugin('selectable-tables');
 				await sleep(800);
 			};
+			// A phone shows only tabs marked mod-visible, which a desktop's aren't.
+			const tabs = app.workspace.getMostRecentLeaf().containerEl.closest('.workspace-tabs');
 			try {
+				tabs.classList.add('mod-visible');
 				document.body.classList.add(...PHONE);
 				await sleep(500);
+				// A key pressed with the pane hidden would land in the note's text.
+				if (!pane().height) throw new Error('the pane is hidden, so the phone\'s layout can\'t be checked');
 				const phone = await frozenTable('Plants', 500);
 				const header = app.workspace.getMostRecentLeaf().view.containerEl.closest('.workspace-leaf-content').querySelector('.view-header');
 				const rowTop = () => topInPane(rowsOf(phone)[0]);
@@ -1628,14 +1633,16 @@
 				await press(cm, 'Escape');
 			} finally {
 				document.body.classList.remove(...PHONE, 'is-hidden-nav');
+				tabs.classList.remove('mod-visible');
 				await sleep(300);
+				await restore(cm, original);
 			}
 			const notPhone = await frozenTable('Plants', 300);
 			check('Phone off a phone, rows pin at the pane\'s top', Math.abs(topInPane(rowsOf(notPhone)[0])) <= 1, topInPane(rowsOf(notPhone)[0]));
 
 			// --- A device that can't pin rows
+			const supports = CSS.supports;
 			try {
-				const supports = CSS.supports;
 				CSS.supports = (...args) => (String(args[0]).includes('animation-timeline') ? false : supports.apply(CSS, args));
 				await reload();
 				const scrolled = await frozenTable('Plants', 300);
@@ -1649,8 +1656,9 @@
 				await press(cm, 'Escape');
 				await press(cm, 'Escape');
 			} finally {
-				delete CSS.supports;
+				CSS.supports = supports;
 				await reload();
+				await restore(cm, original);
 			}
 			const pinsAgain = await frozenTable('Plants');
 			check('No pinning: on a device that can, it freezes', pinsAgain.el.classList.contains(FROZEN) && frozenRows(pinsAgain).join() === '0,1', pinsAgain.el.className);

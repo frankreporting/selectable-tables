@@ -66,7 +66,7 @@ With an input method (IME), starting to compose on a selected table or cell move
 
 ## Freeze rows and columns
 
-A long or wide table can keep its first rows and columns in view as you scroll, like freeze panes in a spreadsheet. Each table scrolls on its own, and any number of tables in a note can freeze. This works in Live Preview.
+A long or wide table can keep its first rows and columns in view as you scroll, like freeze panes in a spreadsheet. Each table scrolls on its own, and any number of tables in a note can freeze. This works in Live Preview, on the desktop, on phones and on tablets. On a phone the rows stay clear of the status bar and the header, and move with the header as it hides and comes back. A device too old to pin rows, such as an iPhone or iPad before iOS 26, leaves the table to scroll as usual.
 
 For now you set it by hand. Add a comment to any cell of the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column:
 

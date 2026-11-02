@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 (2026-11-02)
+
+Frozen rows and columns: Keep a table's first rows and columns in view as you scroll
+
+### New
+
+- Freeze a table's first rows and columns, like freeze panes in a spreadsheet. Add a comment to any cell of its header row: `%%freeze 2 1%%` keeps 2 rows and 1 column in view.
+- A note can have any number of frozen tables.
+- For now this works in Live Preview only, and dragging across cells in a frozen table selects the wrong cells. Future updates fix that. Commands will also be added so you don't have to manually add the freeze comments to each table.
+
 ## 0.1.1 (2026-10-31)
 
 Selectable cells: Navigate cells without opening them or showing their raw Markdown

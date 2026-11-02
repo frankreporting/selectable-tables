@@ -81,7 +81,7 @@ The comment doesn't show, and it stays with the table's text, so it copies, sync
 - A table can freeze up to 9 columns.
 - Rows taller than half the pane, or columns as wide as the table, stop pinning until there's room, so there's always somewhere to scroll.
 - A cell you select, open or type in snaps back into view if it was partially hidden by a frozen cell.
-- A frozen table keeps its theme's lines and colors, striped rows included, and changes with the theme or with light and dark. Tested in Obsidian's default theme, Baseline, Minimal, Things, Catppuccin, Prism and Blue Topaz.
+- Tested in both light and dark mode on Obsidian's default theme, Baseline, Minimal, Things, Catppuccin, Prism and Blue Topaz.
 
 ### Known issues:
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 (2026-11-02)
+
+Expanded theme support for frozen tables
+
+### Fixed
+
+- Freezing a table no longer removes certain themes' lines between rows and columns, as it did in Baseline.
+- Frozen rows and columns keep more themes' colors, alternating rows included.
+- Tested and working in Obsidian's default theme, Baseline, Minimal, Things, Catppuccin, Prism and Blue Topaz, in light and dark.
+
 ## 0.2.0 (2026-11-02)
 
 Frozen rows and columns: Keep a table's first rows and columns in view as you scroll

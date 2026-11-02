@@ -81,7 +81,8 @@ function colorOf(element: Element): string {
 	if (typeof CSSTransition === 'undefined') return color;
 	for (const change of element.getAnimations()) {
 		if (!(change instanceof CSSTransition) || change.transitionProperty !== 'background-color' || !(change.effect instanceof KeyframeEffect)) continue;
-		const end: unknown = change.effect.getKeyframes().at(-1)?.backgroundColor;
+		const frames = change.effect.getKeyframes();
+		const end: unknown = frames[frames.length - 1]?.backgroundColor;
 		if (typeof end === 'string') return end;
 	}
 	return color;

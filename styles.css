@@ -205,28 +205,63 @@
 }
 
 /*
+ * Where frozen rows pin, down from the pane's top. On a phone a note runs to the top of the screen, under the
+ * status bar and Obsidian's floating header, and hiding the header as you scroll leaves only the status bar.
+ * These are the selectors and sizes Obsidian lays that out with. It's registered so script can read it in
+ * pixels. The rows can't glide with the header: a transition can't drive an animation's range, so they move
+ * at once, as Obsidian's fade does. Obsidian changes a variable on the body each time the header moves, so
+ * one here costs nothing more.
+ */
+@property --selectable-tables-pin-top {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+
+.is-phone.is-floating-nav .mod-root .workspace-leaf-content[data-type="markdown"],
+.is-phone.auto-full-screen .mod-root .workspace-leaf-content[data-type="markdown"] {
+	--selectable-tables-pin-top: calc(var(--view-header-top-offset) + var(--view-header-height) + var(--size-4-3));
+}
+
+.is-phone.is-hidden-nav .mod-root .workspace-leaf-content[data-type="markdown"] {
+	--selectable-tables-pin-top: var(--safe-area-inset-top);
+}
+
+/*
  * Frozen rows can't stick to the note's scroll: the widget scrolls sideways, so it's the box sticky binds to.
  * So the browser moves them with a scroll-driven animation that follows the table through the pane: it runs
- * where the scrolling does, and no script runs as the note moves. It starts when the table's top reaches the
- * pane's top. The rows reach the table's end at --selectable-tables-pin-end, and rest there. The animation
+ * where the scrolling does, and no script runs as the note moves. It starts when the table's top reaches
+ * where rows pin. The rows reach the table's end at --selectable-tables-pin-end, and rest there. The animation
  * goes on 4000 px past the pane's top, the reach freeze.ts allows for, because a finished animation isn't
- * kept where scrolling runs: coming back into it, the rows would stay put until the page caught up. Without
- * scroll-driven animations the table scrolls as usual.
+ * kept where scrolling runs: coming back into it, the rows would stay put until the page caught up. The
+ * pin's offset moves both ends of the range, so the range keeps the length freeze.ts works from.
  */
-@supports (animation-timeline: view()) {
-	.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows {
-		view-timeline: --selectable-tables-table block;
-		view-timeline-inset: -4000px 0;
-	}
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows {
+	view-timeline: --selectable-tables-table block;
+	view-timeline-inset: -4000px 0;
+}
 
-	.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows .selectable-tables-frozen-row {
-		position: relative;
-		z-index: 3;
-		will-change: transform;
-		animation: selectable-tables-pin linear(0, 1 var(--selectable-tables-pin-end), 1) both;
-		animation-timeline: --selectable-tables-table;
-		animation-range: exit-crossing calc(var(--table-drag-handle-size) - 4000px) exit-crossing 100%;
-	}
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows .selectable-tables-frozen-row {
+	position: relative;
+	z-index: 3;
+	will-change: transform;
+	animation: selectable-tables-pin linear(0, 1 var(--selectable-tables-pin-end), 1) both;
+	animation-timeline: --selectable-tables-table;
+	animation-range: exit-crossing calc(var(--table-drag-handle-size) - var(--selectable-tables-pin-top) - 4000px) exit-crossing calc(100% - var(--selectable-tables-pin-top));
+}
+
+/*
+ * Pinned below the pane's top, the rows leave a band above them that the table's other rows pass through. The
+ * header's cells fill it, and the widget's box clips that, so nothing shows until the rows have moved.
+ */
+.is-phone .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows thead .selectable-tables-frozen-row > :is(th, td)::before {
+	content: "";
+	position: absolute;
+	bottom: calc(100% + var(--table-header-border-width));
+	inset-inline: -1px;
+	height: var(--selectable-tables-pin-top);
+	background-color: var(--background-primary);
+	pointer-events: none;
 }
 
 @keyframes selectable-tables-pin {

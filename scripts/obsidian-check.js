@@ -1573,6 +1573,96 @@
 			const on = await frozenTable('Plants');
 			check('Frozen turning it on again finds the table', on.el.classList.contains(FROZEN) && frozenRows(on).join() === '0,1', on.el.className);
 			check('Frozen: the note is as it was', cm.state.doc.toString() === original);
+
+			// --- On a phone. Obsidian's own classes on the real editor; emulate-mobile gives a status bar of 59 px.
+			const PHONE = ['is-mobile', 'is-phone', 'is-floating-nav', 'auto-full-screen', 'emulate-mobile'];
+			const STATUS_BAR = 59;
+			const reload = async () => {
+				await app.plugins.disablePlugin('selectable-tables');
+				await sleep(400);
+				await app.plugins.enablePlugin('selectable-tables');
+				await sleep(800);
+			};
+			// A phone shows only tabs marked mod-visible, which a desktop's aren't.
+			const tabs = app.workspace.getMostRecentLeaf().containerEl.closest('.workspace-tabs');
+			try {
+				tabs.classList.add('mod-visible');
+				document.body.classList.add(...PHONE);
+				await sleep(500);
+				// A key pressed with the pane hidden would land in the note's text.
+				if (!pane().height) throw new Error('the pane is hidden, so the phone\'s layout can\'t be checked');
+				const phone = await frozenTable('Plants', 500);
+				const header = app.workspace.getMostRecentLeaf().view.containerEl.closest('.workspace-leaf-content').querySelector('.view-header');
+				const rowTop = () => topInPane(rowsOf(phone)[0]);
+				const headerBottom = () => header.getBoundingClientRect().bottom - pane().top;
+				check('relies 17: on a phone a note runs under the floating header, from the top of the pane', getComputedStyle(header).position === 'fixed' && header.getBoundingClientRect().top >= pane().top && parseFloat(getComputedStyle(cm.scrollDOM).paddingTop) >= STATUS_BAR, { position: getComputedStyle(header).position, padding: getComputedStyle(cm.scrollDOM).paddingTop });
+				check('Phone 1 with the header showing, rows pin just below it', Math.abs(rowTop() - (headerBottom() + 12)) <= 1, { row: rowTop(), header: headerBottom() });
+				const held = rowTop();
+				cm.scrollDOM.scrollTop += 300;
+				await frames();
+				check('Phone 1 they hold there as the note scrolls', Math.abs(rowTop() - held) <= 1, { held, row: rowTop() });
+				document.body.classList.add('is-hidden-nav');
+				await sleep(500);
+				check('Phone 1 with the header hidden, rows pin below the status bar', Math.abs(rowTop() - STATUS_BAR) <= 1, rowTop());
+				cm.scrollDOM.scrollTop += 300;
+				await frames();
+				check('Phone 1 they hold there as the note scrolls', Math.abs(rowTop() - STATUS_BAR) <= 1, rowTop());
+				const band = getComputedStyle(rowsOf(phone)[0].cells[1], '::before');
+				check('Phone 2 the band above them is filled, and takes no presses', band.height === `${STATUS_BAR}px` && band.pointerEvents === 'none' && band.backgroundColor !== 'rgba(0, 0, 0, 0)', { height: band.height, events: band.pointerEvents, color: band.backgroundColor });
+				cm.scrollDOM.scrollTop = 0;
+				await frames();
+				const arriving = await frozenTable('Plants', -120);
+				const padded = rowsOf(arriving)[0].cells[1].getBoundingClientRect().top - arriving.el.getBoundingClientRect().top;
+				check('Phone 2 with the table not yet pinned, the table\'s box clips the band, so it can\'t cover the text above', padded < STATUS_BAR && getComputedStyle(arriving.el).overflowY === 'hidden' && getComputedStyle(arriving.el).contain.includes('paint'), { padded, overflow: getComputedStyle(arriving.el).overflowY, contain: getComputedStyle(arriving.el).contain });
+
+				const held2 = await frozenTable('Plants', 700);
+				await selectTable(cm, held2);
+				await press(cm, 'Enter');
+				await keys(cm, held2, ...repeat('ArrowDown', 20), 'ArrowRight', 'ArrowRight');
+				await placeBelow(held2, selectedCell());
+				const climbing = [];
+				for (let i = 0; i < 4; i++) {
+					await press(cm, 'ArrowUp');
+					climbing.push(inView(selectedCell()));
+				}
+				check('Phone 3 a selected cell moving ↑ stays clear of rows pinned below the status bar', at(cm) === '16,2' && climbing.every(Boolean), { at: at(cm), climbing });
+				await keys(cm, held2, ...repeat('ArrowUp', 16));
+				await sleep(200);
+				check('Phone 3 ↑ on the top row takes the table back to where rows pin', at(cm) === '0,2' && Math.abs(topInPane(held2.el) - STATUS_BAR) <= 1, { at: at(cm), top: topInPane(held2.el) });
+				await press(cm, 'Escape');
+				await press(cm, 'Escape');
+			} finally {
+				document.body.classList.remove(...PHONE, 'is-hidden-nav');
+				tabs.classList.remove('mod-visible');
+				await sleep(300);
+				await restore(cm, original);
+			}
+			const notPhone = await frozenTable('Plants', 300);
+			check('Phone off a phone, rows pin at the pane\'s top', Math.abs(topInPane(rowsOf(notPhone)[0])) <= 1, topInPane(rowsOf(notPhone)[0]));
+
+			// --- A device that can't pin rows
+			const supports = CSS.supports;
+			try {
+				CSS.supports = (...args) => (String(args[0]).includes('animation-timeline') ? false : supports.apply(CSS, args));
+				await reload();
+				const scrolled = await frozenTable('Plants', 300);
+				check('No pinning: nothing is marked, so columns don\'t pin without rows', !scrolled.el.classList.contains(FROZEN) && frozenRows(scrolled).length === 0 && getComputedStyle(rowsOf(scrolled)[1].cells[0]).position === 'relative' && !scrolled.el.querySelector('.selectable-tables-tint-cover'), scrolled.el.className);
+				check('No pinning: the table scrolls as usual, with its usual borders', topInPane(rowsOf(scrolled)[0]) < -100 && getComputedStyle(scrolled.el.querySelector('table')).borderCollapse === 'collapse', { row: topInPane(rowsOf(scrolled)[0]) });
+				check('No pinning: the mark still doesn\'t show', rowsOf(scrolled)[0].cells[0].textContent.trim() === 'Name', rowsOf(scrolled)[0].cells[0].textContent);
+				await selectTable(cm, scrolled);
+				await press(cm, 'Enter');
+				await keys(cm, scrolled, 'ArrowDown', 'ArrowRight');
+				check('No pinning: the table\'s keys still work', at(cm) === '1,1', at(cm));
+				await press(cm, 'Escape');
+				await press(cm, 'Escape');
+			} finally {
+				CSS.supports = supports;
+				await reload();
+				await restore(cm, original);
+			}
+			const pinsAgain = await frozenTable('Plants');
+			check('No pinning: on a device that can, it freezes', pinsAgain.el.classList.contains(FROZEN) && frozenRows(pinsAgain).join() === '0,1', pinsAgain.el.className);
+			check('Phone: the note is as it was', cm.state.doc.toString() === original);
 		}
 	} catch (error) {
 		results.push({ name: 'the check script itself', ok: false, detail: String(error && error.stack || error) });

@@ -27,6 +27,16 @@ const TABLE_HEIGHT_VARIABLE = '--selectable-tables-table-height';
 /** How far past the pane's top the rows' animation goes on, as in styles.css. */
 export const ANIMATION_REACH = 4000;
 
+/** How far below the pane's top the rows pin, from styles.css. Not 0 only on a phone. */
+const PIN_TOP_VARIABLE = '--selectable-tables-pin-top';
+
+/**
+ * Whether this device can pin a table's rows: that takes scroll-driven animations, which an iPhone or iPad
+ * has only from iOS 26. All of freezing hangs off what's marked here, so without them nothing is marked, and
+ * a table scrolls as usual rather than pinning its columns and not its rows.
+ */
+export const canFreeze = () => CSS.supports('animation-timeline', 'view()');
+
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
 function setVariable(element: HTMLElement, name: string, value: string) {
@@ -212,7 +222,8 @@ class FrozenTables implements PluginValue {
 				if (!cell || !widget) return null;
 				if (toward === 'left') return getComputedStyle(cell).position === 'sticky' ? { widget, past: 0 } : null;
 				if (!widget.classList.contains(ROWS_CLASS) || !cell.parentElement?.classList.contains(ROW_CLASS)) return null;
-				return { widget, past: scrollDOM.getBoundingClientRect().top - widget.getBoundingClientRect().top };
+				const pinTop = parseFloat(getComputedStyle(widget).getPropertyValue(PIN_TOP_VARIABLE)) || 0;
+				return { widget, past: scrollDOM.getBoundingClientRect().top + pinTop - widget.getBoundingClientRect().top };
 			},
 			write: (found) => {
 				if (found && toward === 'left') found.widget.scrollLeft = 0;

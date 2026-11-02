@@ -17,7 +17,7 @@ const HOLDS_CELL_CLASS = 'selectable-tables-holds-cell';
 export interface Pinned {
 	rows: number;
 	columns: number;
-	/** Down from the pane's top. None while the rows aren't pinned. */
+	/** Down from where they pin. None while the rows aren't pinned. */
 	height: number;
 	/** In from the widget's start, its padding included. None while the columns aren't pinned. */
 	width: number;
@@ -43,7 +43,7 @@ function show(cell: HTMLTableCellElement) {
 	const row = (cell.parentElement as HTMLTableRowElement).rowIndex;
 	const { block, inline } = pinned ? clearance({ row, column: cell.cellIndex }, pinned) : { block: 0, inline: 0 };
 	const { style } = cell;
-	if (block) style.scrollMarginBlockStart = `calc(${block}px + var(--size-4-2))`;
+	if (block) style.scrollMarginBlockStart = `calc(${block}px + var(--size-4-2) + var(--selectable-tables-pin-top))`;
 	if (inline) style.scrollMarginInlineStart = `calc(${inline}px + var(--size-4-2))`;
 	cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 	style.scrollMarginBlockStart = '';

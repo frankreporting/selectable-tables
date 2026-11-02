@@ -27,6 +27,26 @@ const TABLE_HEIGHT_VARIABLE = '--selectable-tables-table-height';
 /** How far past the pane's top the rows' animation goes on, as in styles.css. */
 export const ANIMATION_REACH = 4000;
 
+/** How far below the pane's top the rows pin, from styles.css. Not 0 only on a phone. */
+const PIN_TOP_VARIABLE = '--selectable-tables-pin-top';
+
+/** Obsidian's, on the body of a phone or tablet. */
+const MOBILE_CLASS = 'is-mobile';
+/** On a widget and its rows for a moment, to take their timeline and animation off. */
+const RESTARTING_CLASS = 'selectable-tables-restarting';
+/**
+ * The least time between two restarts. A keyboard moves the pane in steps further apart than this, and each
+ * restarts the rows at once; a pane resized on every frame, as on a tablet, restarts them at most this often.
+ */
+const RESTART_GAP = 120;
+
+/**
+ * Whether this device can pin a table's rows: that takes scroll-driven animations, which an iPhone or iPad
+ * has only from iOS 26. All of freezing hangs off what's marked here, so without them nothing is marked, and
+ * a table scrolls as usual rather than pinning its columns and not its rows.
+ */
+export const canFreeze = () => CSS.supports('animation-timeline', 'view()');
+
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
 function setVariable(element: HTMLElement, name: string, value: string) {
@@ -55,6 +75,11 @@ class DrawnTable {
 	/** What to watch for a change of size. */
 	get watched(): HTMLElement[] {
 		return this.table ? [this.widget, this.table, ...this.rows, ...this.headers] : [];
+	}
+
+	/** The rows pinned now. */
+	get pinned(): HTMLElement[] {
+		return this.widget.classList.contains(ROWS_CLASS) ? this.rows : [];
 	}
 
 	/**
@@ -148,6 +173,9 @@ class FrozenTables implements PluginValue {
 	/** The tables in the editor's drawn range. */
 	private readonly drawn = new Set<DrawnTable>();
 	private sizes: ResizeObserver | null = null;
+	private paneHeight = 0;
+	private restart = 0;
+	private restarted = -Infinity;
 
 	private readonly onWidgets = (records: MutationRecord[]) => {
 		const widgets = new Set<HTMLElement>();
@@ -177,6 +205,36 @@ class FrozenTables implements PluginValue {
 		const widgets = entries.map(({ target }) => target.closest<HTMLElement>(`.${TABLE_CLASS}`));
 		const tables = entries.some(({ target }) => target === this.view.scrollDOM) ? this.drawn : new Set(widgets.map((widget) => widget && this.known.get(widget)));
 		for (const table of tables) table?.measure(paneHeight);
+		if (paneHeight === this.paneHeight) return;
+		const changed = this.paneHeight > 0;
+		this.paneHeight = paneHeight;
+		if (!changed || !this.view.dom.ownerDocument.body.classList.contains(MOBILE_CLASS)) return;
+		// Here, before the pane is drawn at its new size, so iOS never draws a row it has lost.
+		window.clearTimeout(this.restart);
+		if (performance.now() - this.restarted >= RESTART_GAP) this.restartRows();
+		else this.restart = window.setTimeout(this.restartRows, RESTART_GAP);
+	};
+
+	/**
+	 * Starts the rows' animation again, on a new timeline. A keyboard changing an iPhone's pane with the caret
+	 * in one of the table's cells can leave iOS's own copy of the animation no longer following the scroll, so
+	 * it draws the rows where they sit in the table, while the page reads correct; this clears it. It runs on
+	 * every change of height, since it costs about a millisecond and the trigger isn't fully known. The timeline
+	 * has to be back before the animation looks for it, or the rows stay unattached. Reading a style brings
+	 * both up to date without laying the page out.
+	 */
+	private readonly restartRows = () => {
+		this.restarted = performance.now();
+		const tables = [...this.drawn].filter(({ pinned }) => pinned.length);
+		const rows = tables.flatMap(({ pinned }) => pinned);
+		if (!rows.length) return;
+		const settle = () => tables.forEach(({ widget }) => getComputedStyle(widget).getPropertyValue('view-timeline-name'));
+		for (const row of rows) row.classList.add(RESTARTING_CLASS);
+		for (const { widget } of tables) widget.classList.add(RESTARTING_CLASS);
+		settle();
+		for (const { widget } of tables) widget.classList.remove(RESTARTING_CLASS);
+		settle();
+		for (const row of rows) row.classList.remove(RESTARTING_CLASS);
 	};
 
 	private readonly widgets = new MutationObserver(this.onWidgets);
@@ -212,7 +270,8 @@ class FrozenTables implements PluginValue {
 				if (!cell || !widget) return null;
 				if (toward === 'left') return getComputedStyle(cell).position === 'sticky' ? { widget, past: 0 } : null;
 				if (!widget.classList.contains(ROWS_CLASS) || !cell.parentElement?.classList.contains(ROW_CLASS)) return null;
-				return { widget, past: scrollDOM.getBoundingClientRect().top - widget.getBoundingClientRect().top };
+				const pinTop = parseFloat(getComputedStyle(widget).getPropertyValue(PIN_TOP_VARIABLE)) || 0;
+				return { widget, past: scrollDOM.getBoundingClientRect().top + pinTop - widget.getBoundingClientRect().top };
 			},
 			write: (found) => {
 				if (found && toward === 'left') found.widget.scrollLeft = 0;
@@ -233,6 +292,7 @@ class FrozenTables implements PluginValue {
 	}
 
 	destroy() {
+		window.clearTimeout(this.restart);
 		this.widgets.disconnect();
 		this.rebuilds.disconnect();
 		this.sizes?.disconnect();

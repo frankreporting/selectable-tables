@@ -8,7 +8,7 @@ const styles = readFileSync('styles.css', 'utf8');
 
 test('styles.css runs the rows\' animation as far past the pane as the script allows for', () => {
 	assert.ok(styles.includes(`view-timeline-inset: -${ANIMATION_REACH}px 0;`));
-	assert.ok(styles.includes(`calc(var(--table-drag-handle-size) - ${ANIMATION_REACH}px) exit-crossing 100%`));
+	assert.ok(styles.includes(`calc(var(--table-drag-handle-size) - var(--selectable-tables-pin-top) - ${ANIMATION_REACH}px) exit-crossing calc(100% - var(--selectable-tables-pin-top))`));
 });
 
 test('styles.css picks and places every column a table can freeze, and no more', () => {

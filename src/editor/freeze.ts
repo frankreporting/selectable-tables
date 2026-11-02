@@ -1,9 +1,16 @@
 import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { CELL_CLASS, pinnedTables, TABLE_CLASS } from './cells';
-import { Freeze, readFreeze } from './freeze-mark';
+import { Freeze, MAX_FROZEN_COLUMNS, readFreeze } from './freeze-mark';
+import { Paint, readPaint } from './theme-paint';
 
-/** On a table's widget while anything in it is frozen. styles.css gives its cells their own borders then. */
+/** On a table's widget while anything in it is frozen. */
 const FROZEN_CLASS = 'selectable-tables-frozen';
+/**
+ * Also on a frozen table's widget when its theme collapses the table's borders. Collapsed borders belong to
+ * the table and stay behind when cells move, so styles.css gives the cells their own then. A theme with
+ * separate borders already has its cells draw them, so they're left as they are.
+ */
+const OWN_BORDERS_CLASS = 'selectable-tables-own-borders';
 /** On the widget while its frozen rows are pinned. */
 const ROWS_CLASS = 'selectable-tables-frozen-rows';
 /** On each frozen row. They're few, so script can mark them one at a time. */
@@ -53,6 +60,31 @@ function setVariable(element: HTMLElement, name: string, value: string) {
 	if (element.style.getPropertyValue(name) !== value) element.style.setProperty(name, value);
 }
 
+/** The editors open now, so a change of theme reaches them all. */
+const editors = new Set<FrozenTables>();
+
+/** Obsidian's `css-change`: the theme, its colors, or a snippet has changed, so frozen tables read their colors again. */
+export function themeChanged() {
+	for (const editor of editors) editor.repaint();
+}
+
+/** What the theme paints, by where a table sits. */
+type Paints = Map<string, Paint>;
+/** More places than this in one editor means classes that keep changing, so its map starts again. */
+const MOST_PLACES = 32;
+/**
+ * Classes that come and go around a table without changing its colors: focus, a selected table, the moment
+ * after switching light and dark, a phone's header hiding as you scroll. A place leaves them out.
+ */
+const PASSING_CLASSES = new Set(['cm-focused', 'is-focused', 'has-focus', 'no-transition', 'is-hidden-nav', 'selectable-tables-selected']);
+
+/** Where a table sits, for its paint: the classes of everything around it. */
+function placeOf(widget: HTMLElement) {
+	const places: string[] = [];
+	for (let at = widget.parentElement; at; at = at.parentElement) places.push(Array.from(at.classList).filter((name) => !PASSING_CLASSES.has(name)).join(' '));
+	return places.join('\n');
+}
+
 const isWidget = (node: Node): node is HTMLElement => node.nodeType === Node.ELEMENT_NODE && (node as Element).classList.contains(TABLE_CLASS);
 
 /**
@@ -69,8 +101,30 @@ class DrawnTable {
 	/** The header cells of the frozen columns. */
 	private headers: HTMLTableCellElement[] = [];
 	private cover: HTMLElement | null = null;
+	/** What the theme paints behind the cells, read before they were marked, and which of the editor's themes it was read under. */
+	private paint: Paint | null = null;
+	private theme = -1;
 
-	constructor(readonly widget: HTMLElement) {}
+	constructor(readonly widget: HTMLElement) {
+		if (widget.classList.contains(FROZEN_CLASS)) this.scrub();
+	}
+
+	/**
+	 * Takes off marks another copy of the plugin left: one turned off, or updated, while this table was out
+	 * of the editor's drawn range, which kept its widget. Read from what's there, since this copy never knew
+	 * the table, and before anything reads its colors.
+	 */
+	private scrub() {
+		const { widget } = this;
+		widget.classList.remove(FROZEN_CLASS, OWN_BORDERS_CLASS, ROWS_CLASS, COLUMNS_CLASS, RESTARTING_CLASS, ...Array.from({ length: MAX_FROZEN_COLUMNS }, (_, index) => columnsClass(index + 1)));
+		for (const name of Array.from(widget.style)) if (name.startsWith('--selectable-tables-')) widget.style.removeProperty(name);
+		widget.querySelectorAll(`.${COVER_CLASS}`).forEach((cover) => cover.remove());
+		widget.querySelectorAll<HTMLElement>(`.${ROW_CLASS}`).forEach((row) => {
+			row.classList.remove(ROW_CLASS, RESTARTING_CLASS);
+			row.style.removeProperty(TRAVEL_VARIABLE);
+			row.style.removeProperty(PIN_END_VARIABLE);
+		});
+	}
 
 	/** What to watch for a change of size. */
 	get watched(): HTMLElement[] {
@@ -83,24 +137,57 @@ class DrawnTable {
 	}
 
 	/**
+	 * Takes off what's marked if the table, its freeze or the theme has changed since, and says whether
+	 * there's anything to mark. `read` and `mark` follow. They're apart so that a batch of tables is all read
+	 * before any is marked: each mark changes styles, which the next read would have to work out again.
+	 */
+	unmark(freeze: Freeze, theme: number): boolean {
+		const table = this.widget.querySelector('table');
+		if (table === this.table && freeze.rows === this.freeze.rows && freeze.columns === this.freeze.columns && this.theme === theme) return false;
+		this.clear();
+		this.freeze = freeze;
+		if (!table || (!freeze.rows && !freeze.columns)) return false;
+		this.table = table;
+		return true;
+	}
+
+	/**
+	 * Finds what the theme paints behind the cells, read from the first table drawn in the same place, or from
+	 * this one with nothing marked: styles.css paints frozen cells over the theme's own colors.
+	 */
+	read(paints: Paints, theme: number) {
+		const { widget, table } = this;
+		if (!table) return;
+		const place = placeOf(widget);
+		let paint = paints.get(place);
+		if (!paint) {
+			paint = readPaint(widget, table);
+			if (paint.typical) {
+				if (paints.size >= MOST_PLACES) paints.clear();
+				paints.set(place, paint);
+			}
+		}
+		this.paint = paint;
+		this.theme = theme;
+	}
+
+	/**
 	 * Marks the frozen rows and columns of what's drawn now, pinned from the start: taking that up after
 	 * the first layout would lay a long table out twice. `measure` unpins whatever turns out not to fit.
 	 */
-	mark(freeze: Freeze) {
-		const table = this.widget.querySelector('table');
-		if (table === this.table && freeze.rows === this.freeze.rows && freeze.columns === this.freeze.columns) return;
-		this.clear();
-		this.freeze = freeze;
-		if (!table || (!freeze.rows && !freeze.columns)) return;
+	mark() {
+		const { widget, table, freeze, paint } = this;
+		if (!table || !paint) return;
 		const rows = Array.from(table.rows).slice(0, freeze.rows);
 		const headers = Array.from(table.rows[0]?.cells ?? []).slice(0, freeze.columns);
-		this.table = table;
 		this.rows = rows;
 		this.headers = headers;
-		this.widget.classList.add(FROZEN_CLASS);
-		if (rows.length) this.widget.classList.add(ROWS_CLASS);
+		widget.classList.add(FROZEN_CLASS);
+		if (paint.collapsed) widget.classList.add(OWN_BORDERS_CLASS);
+		for (const [name, value] of paint.variables) setVariable(widget, name, value);
+		if (rows.length) widget.classList.add(ROWS_CLASS);
 		if (headers.length) {
-			this.widget.classList.add(COLUMNS_CLASS, columnsClass(headers.length));
+			widget.classList.add(COLUMNS_CLASS, columnsClass(headers.length));
 			this.cover = table.parentElement?.createDiv({ cls: COVER_CLASS, prepend: true }) ?? null;
 		}
 		for (const row of rows) row.classList.add(ROW_CLASS);
@@ -145,20 +232,22 @@ class DrawnTable {
 
 	/** Takes everything off. */
 	clear() {
-		const { widget, rows, headers } = this;
+		const { widget, rows, headers, paint } = this;
 		for (const row of rows) {
 			row.classList.remove(ROW_CLASS);
 			row.style.removeProperty(TRAVEL_VARIABLE);
 			row.style.removeProperty(PIN_END_VARIABLE);
 		}
+		for (const [name] of paint?.variables ?? []) widget.style.removeProperty(name);
 		headers.forEach((_, index) => widget.style.removeProperty(columnVariable(index + 1)));
 		this.cover?.remove();
 		this.cover = null;
-		widget.classList.remove(FROZEN_CLASS, ROWS_CLASS, COLUMNS_CLASS, columnsClass(headers.length));
+		widget.classList.remove(FROZEN_CLASS, OWN_BORDERS_CLASS, ROWS_CLASS, COLUMNS_CLASS, columnsClass(headers.length));
 		pinnedTables.delete(widget);
 		this.table = null;
 		this.rows = [];
 		this.headers = [];
+		this.paint = null;
 		this.freeze = { rows: 0, columns: 0 };
 	}
 }
@@ -175,6 +264,17 @@ class FrozenTables implements PluginValue {
 	private sizes: ResizeObserver | null = null;
 	private paneHeight = 0;
 	private restart = 0;
+	/**
+	 * Counts this editor's changes of theme: a table is read again when it's next marked under one it wasn't
+	 * read under, which `repaint` does at once for the tables on screen.
+	 */
+	private theme = 0;
+	/**
+	 * What the theme paints, by place. Reading a table that's just been drawn works out the styles of all of
+	 * it, and marking it has them worked out again, which costs as much as drawing it. Tables drawn in the same
+	 * place are painted alike, so only the first is read. Kept for each editor: a canvas card's colors are its own.
+	 */
+	private readonly paints: Paints = new Map();
 	private restarted = -Infinity;
 
 	private readonly onWidgets = (records: MutationRecord[]) => {
@@ -186,18 +286,18 @@ class FrozenTables implements PluginValue {
 			addedNodes.forEach(collect);
 			removedNodes.forEach(collect);
 		}
+		const added: DrawnTable[] = [];
 		for (const widget of widgets) {
-			if (widget.parentElement === this.view.contentDOM) this.add(widget);
-			else this.remove(widget);
+			if (widget.parentElement !== this.view.contentDOM) this.remove(widget);
+			else added.push(...this.add(widget));
 		}
+		this.refresh(added);
 	};
 
 	/** Obsidian empties the widget and builds the table anew, so the marks on its rows have gone. */
 	private readonly onRebuilt = (records: MutationRecord[]) => {
-		for (const widget of new Set(records.map(({ target }) => target))) {
-			const table = this.known.get(widget as HTMLElement);
-			if (table && this.drawn.has(table)) this.refresh(table);
-		}
+		const tables = new Set(records.map(({ target }) => this.known.get(target as HTMLElement)));
+		this.refresh([...this.drawn].filter((table) => tables.has(table)));
 	};
 
 	private readonly onResized = (entries: ResizeObserverEntry[]) => {
@@ -244,16 +344,36 @@ class FrozenTables implements PluginValue {
 	private readonly reread = {
 		key: 'rereadFreezes',
 		read: () => undefined,
-		write: () => this.drawn.forEach((table) => this.refresh(table)),
+		write: () => this.refresh([...this.drawn]),
 	};
 
 	constructor(private readonly view: EditorView) {
+		editors.add(this);
 		this.widgets.observe(view.contentDOM, { childList: true });
 		// When the plugin is turned on, the editor already holds its tables.
 		view.requestMeasure({
 			read: () => view.contentDOM.querySelectorAll<HTMLElement>(`:scope > .${TABLE_CLASS}`),
-			write: (widgets) => widgets.forEach((widget) => this.add(widget)),
+			write: (widgets) => this.refresh(Array.from(widgets).flatMap((widget) => this.add(widget))),
 		});
+	}
+
+	/**
+	 * After a change of theme, reads and marks the frozen tables on screen again, on the editor's next frame.
+	 * The rest wait until they're drawn. A popout window takes on the new look a moment after the event, and
+	 * a font size slider sends one on every step, so this waits for the frame, and does it once.
+	 */
+	private readonly repainting = {
+		key: 'repaintFrozen',
+		read: () => undefined,
+		write: () => {
+			this.theme++;
+			this.paints.clear();
+			this.refresh([...this.drawn]);
+		},
+	};
+
+	repaint() {
+		this.view.requestMeasure(this.repainting);
 	}
 
 	/**
@@ -292,6 +412,7 @@ class FrozenTables implements PluginValue {
 	}
 
 	destroy() {
+		editors.delete(this);
 		window.clearTimeout(this.restart);
 		this.widgets.disconnect();
 		this.rebuilds.disconnect();
@@ -300,13 +421,14 @@ class FrozenTables implements PluginValue {
 		this.drawn.clear();
 	}
 
-	private add(widget: HTMLElement) {
+	/** Starts keeping a table that's come into the drawn range, and gives it back to be refreshed. */
+	private add(widget: HTMLElement): DrawnTable[] {
 		const table = this.known.get(widget) ?? new DrawnTable(widget);
-		if (this.drawn.has(table)) return;
+		if (this.drawn.has(table)) return [];
 		this.known.set(widget, table);
 		this.drawn.add(table);
 		this.rebuilds.observe(widget, { childList: true });
-		this.refresh(table);
+		return [table];
 	}
 
 	/** Out of the drawn range. What's marked stays, so the table comes back ready. */
@@ -316,13 +438,22 @@ class FrozenTables implements PluginValue {
 		this.unwatch(table);
 	}
 
-	/** Reads the table's mark, marks what's drawn, and watches its size. Watching starts with one measure. */
-	private refresh(table: DrawnTable) {
+	/**
+	 * Reads each table's mark, marks what's drawn, and watches its size. Watching starts with one measure.
+	 * Every table that needs it is read before any is marked, so the page's styles are worked out once.
+	 */
+	private refresh(drawn: DrawnTable[]) {
 		const { view } = this;
-		table.from = view.posAtDOM(table.widget);
-		this.unwatch(table);
-		table.mark(readFreeze(view.state.doc.lineAt(table.from).text));
-		if (table.watched.length) {
+		const tables = drawn.filter(({ widget }) => widget.isConnected);
+		const marking = tables.filter((table) => {
+			table.from = view.posAtDOM(table.widget);
+			this.unwatch(table);
+			return table.unmark(readFreeze(view.state.doc.lineAt(table.from).text), this.theme);
+		});
+		for (const table of marking) table.read(this.paints, this.theme);
+		for (const table of marking) table.mark();
+		for (const table of tables) {
+			if (!table.watched.length) continue;
 			this.sizes ??= new (table.widget.ownerDocument.defaultView ?? window).ResizeObserver(this.onResized);
 			this.sizes.observe(view.scrollDOM);
 			for (const element of table.watched) this.sizes.observe(element);

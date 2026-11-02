@@ -89,45 +89,49 @@
 }
 
 /*
- * Frozen rows and columns. Collapsed borders belong to the table and stay behind when cells move, so a
- * frozen table's cells draw their own, with Obsidian's variables, to look the same.
+ * Frozen rows and columns. Collapsed borders belong to the table and stay behind when cells move, so when a
+ * theme collapses them, freeze.ts marks the table and its cells draw their own, with Obsidian's variables, to
+ * look the same. A theme with separate borders already has its cells draw them, and they're left alone.
  */
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen table {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own-borders table {
 	border-collapse: separate;
 	border-spacing: 0;
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen :is(th, td) {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own-borders :is(th, td) {
 	border-block-start-width: 0;
 	border-inline-start-width: 0;
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen th {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own-borders th {
 	border-block-start-width: var(--table-header-border-width);
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen :is(th, td):first-child {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own-borders :is(th, td):first-child {
 	border-inline-start-width: var(--table-column-first-border-width);
 }
 
 /*
- * Frozen cells need a solid background, since a table's is transparent by default and cells pass under
- * them. The colors a theme gives rows and columns are read here and laid over it.
+ * Frozen cells need to be solid, since cells pass under them, so each is painted with what shows behind it
+ * unfrozen, which freeze.ts reads from the theme: the note's color, and the cell's, its row's, its header's or
+ * body's and the table's laid over it, as layers. It reads them for the header's odd and even cells, and the
+ * body's odd and even rows', and these hand them to the rows that have frozen cells.
  */
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen thead tr {
-	--selectable-tables-row-color: var(--table-header-background);
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen thead > tr {
+	--selectable-tables-odd-cell: var(--selectable-tables-head-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-head-even-cell);
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen tbody tr {
-	--selectable-tables-row-color: var(--table-background);
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns tbody > tr:nth-child(odd),
+.markdown-source-view.mod-cm6 .cm-table-widget tbody > tr.selectable-tables-frozen-row:nth-child(odd) {
+	--selectable-tables-odd-cell: var(--selectable-tables-odd-row-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-odd-row-even-cell);
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen tbody tr:nth-child(odd) {
-	--selectable-tables-row-color: var(--table-row-alt-background);
-}
-
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen :is(th, td):nth-child(even) {
-	--selectable-tables-column-color: var(--table-column-alt-background);
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns tbody > tr:nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget tbody > tr.selectable-tables-frozen-row:nth-child(even) {
+	--selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget .selectable-tables-frozen-row > :is(th, td),
@@ -140,8 +144,20 @@
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-7 :is(th, td):nth-child(-n + 7),
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-8 :is(th, td):nth-child(-n + 8),
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-9 :is(th, td):nth-child(-n + 9) {
-	background-color: var(--background-primary);
-	background-image: linear-gradient(var(--selectable-tables-column-color, transparent) 0 0), linear-gradient(var(--selectable-tables-row-color, transparent) 0 0);
+	background-color: var(--selectable-tables-page, var(--background-primary));
+	background-image: var(--selectable-tables-odd-cell, none);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget .selectable-tables-frozen-row > :is(th, td):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-2 :is(th, td):nth-child(-n + 2):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-3 :is(th, td):nth-child(-n + 3):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-4 :is(th, td):nth-child(-n + 4):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-5 :is(th, td):nth-child(-n + 5):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-6 :is(th, td):nth-child(-n + 6):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-7 :is(th, td):nth-child(-n + 7):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-8 :is(th, td):nth-child(-n + 8):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns-9 :is(th, td):nth-child(-n + 9):nth-child(even) {
+	background-image: var(--selectable-tables-even-cell, none);
 }
 
 /*
@@ -164,11 +180,16 @@
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns :is(th, td):nth-child(1) {
 	inset-inline-start: 0;
-	box-shadow: calc(-1 * var(--table-drag-handle-size)) 0 0 var(--background-primary);
+	box-shadow: var(--selectable-tables-strip, calc(-1 * var(--table-drag-handle-size)) 0 0 var(--background-primary));
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-columns:dir(rtl) :is(th, td):nth-child(1) {
-	box-shadow: var(--table-drag-handle-size) 0 0 var(--background-primary);
+/* The shadow's colors are what's behind the widget, as freeze.ts reads them; this is which side it falls on. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen {
+	--selectable-tables-strip-offset: calc(-1 * var(--table-drag-handle-size));
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen:dir(rtl) {
+	--selectable-tables-strip-offset: var(--table-drag-handle-size);
 }
 
 /* A column's place is set only while that column is frozen, so these do nothing on other cells. */
@@ -260,7 +281,8 @@
 	bottom: calc(100% + var(--table-header-border-width));
 	inset-inline: -1px;
 	height: var(--selectable-tables-pin-top);
-	background-color: var(--background-primary);
+	background-color: var(--selectable-tables-page, var(--background-primary));
+	background-image: var(--selectable-tables-behind, none);
 	pointer-events: none;
 }
 
@@ -313,6 +335,7 @@
 	inset-inline-start: calc(-1 * var(--table-drag-handle-size));
 	width: calc(var(--table-drag-handle-size) - var(--table-selection-border-width));
 	height: calc(var(--selectable-tables-table-height) + 2 * var(--table-selection-border-width));
-	background-color: var(--background-primary);
+	background-color: var(--selectable-tables-page, var(--background-primary));
+	background-image: var(--selectable-tables-behind, none);
 	pointer-events: none;
 }

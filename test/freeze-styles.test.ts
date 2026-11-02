@@ -22,3 +22,24 @@ test('styles.css picks and places every column a table can freeze, and no more',
 	}
 	assert.ok(!styles.includes(`--selectable-tables-column-${MAX_FROZEN_COLUMNS + 1}`));
 });
+
+test('styles.css paints every frozen cell, odd and even, whatever the count of frozen columns', () => {
+	const rule = (selectors: string) => styles.split('}').find((block) => block.includes(selectors));
+	const odd = rule('.selectable-tables-frozen-row > :is(th, td),\n') ?? '';
+	const even = rule('.selectable-tables-frozen-row > :is(th, td):nth-child(even),\n') ?? '';
+	assert.ok(odd.includes('background-color: var(--selectable-tables-page') && odd.includes('background-image: var(--selectable-tables-odd-cell'));
+	assert.ok(even.includes('background-image: var(--selectable-tables-even-cell'));
+	for (let count = 1; count <= MAX_FROZEN_COLUMNS; count++) {
+		assert.ok(odd.includes(`frozen-columns-${count} :is(th, td):nth-child(-n + ${count}),`) || odd.includes(`frozen-columns-${count} :is(th, td):nth-child(-n + ${count}) {`), `odd ${count}`);
+		// A single frozen column is odd.
+		if (count > 1) assert.ok(even.includes(`frozen-columns-${count} :is(th, td):nth-child(-n + ${count}):nth-child(even)`), `even ${count}`);
+	}
+});
+
+test('styles.css changes a frozen table\'s borders only when freeze.ts finds the theme collapses them', () => {
+	const borders = styles.match(/border-(collapse|block-start-width|inline-start-width): [^;]+;/g) ?? [];
+	assert.ok(borders.length >= 4);
+	for (const block of styles.split('}').filter((rules) => /border-(collapse|block-start-width|inline-start-width):/.test(rules))) {
+		assert.ok(block.includes('.selectable-tables-own-borders'), block);
+	}
+});

@@ -81,6 +81,7 @@ The comment doesn't show, and it stays with the table's text, so it copies, sync
 - A table can freeze up to 9 columns.
 - Rows taller than half the pane, or columns as wide as the table, stop pinning until there's room, so there's always somewhere to scroll.
 - A cell you select, open or type in snaps back into view if it was partially hidden by a frozen cell.
+- A frozen table keeps your theme's look: its lines, and its colors, striped rows included. When you change the theme, or switch between light and dark, frozen tables change with it.
 
 ### Known issues:
 

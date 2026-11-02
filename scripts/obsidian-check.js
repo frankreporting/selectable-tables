@@ -1574,6 +1574,66 @@
 			check('Frozen turning it on again finds the table', on.el.classList.contains(FROZEN) && frozenRows(on).join() === '0,1', on.el.className);
 			check('Frozen: the note is as it was', cm.state.doc.toString() === original);
 
+			// --- A theme's own borders and colors. An invented theme in the manner of one that draws each cell's top
+			// and start lines with separate borders, paints the table's body, and stripes the body's odd rows on the row.
+			{
+				const BODY = 'rgb(236, 238, 230)', STRIPE = 'rgba(255, 255, 255, 0.5)', COLUMN = 'rgba(0, 0, 255, 0.06)', OWN = 'selectable-tables-own-borders';
+				const style = getComputedStyle;
+				const layersOf = (cell) => style(cell).backgroundImage;
+				const pageOf = (t) => style(t.el).getPropertyValue('--selectable-tables-page').trim();
+				// What 0.2.0 painted frozen cells with, worked out on an element in the note.
+				const primary = () => {
+					const probe = document.body.appendChild(document.createElement('div'));
+					probe.style.backgroundColor = 'var(--background-primary)';
+					const color = style(probe).backgroundColor;
+					probe.remove();
+					return color;
+				};
+				const plainLook = await frozenTable('Plants');
+				// Rows 10 and 11 are the body's 10th and 11th: even, then odd.
+				const [even, odd] = [rowsOf(plainLook)[10].cells[0], rowsOf(plainLook)[11].cells[0]];
+				check('Theme 1 in the default theme, frozen cells are the note\'s color with nothing over it, and the table draws its own borders', plainLook.el.classList.contains(OWN) && layersOf(even) === 'none' && layersOf(odd) === 'none' && style(even).backgroundColor === primary() && pageOf(plainLook) === primary(), { classes: plainLook.el.className, even: layersOf(even), odd: layersOf(odd), color: style(even).backgroundColor, page: pageOf(plainLook), primary: primary() });
+				check('Theme 1 the first column\'s shadow over the strip beside it is the note\'s color too', style(even).boxShadow.startsWith(`${primary()} -16px`), style(even).boxShadow);
+				const theme = document.createElement('style');
+				theme.textContent = `
+					body .markdown-rendered table { border-collapse: separate; border-spacing: 0; }
+					body .markdown-rendered :is(th, td) { border: 0 solid var(--table-border-color); border-top-width: 1px; border-inline-start-width: 1px; }
+					body .markdown-rendered table > tbody { background-color: ${BODY}; }
+					body .markdown-rendered tbody > tr:nth-child(odd) { background-color: ${STRIPE}; }
+					body .markdown-rendered tbody td:nth-child(even) { background-color: ${COLUMN}; }`;
+				document.head.append(theme);
+				app.workspace.trigger('css-change');
+				await frames();
+				const themed = await frozenTable('Plants');
+				const [evenThemed, oddThemed] = [rowsOf(themed)[10].cells[0], rowsOf(themed)[11].cells[0]];
+				check('Theme 2 a theme with separate borders keeps its own lines on frozen cells', !themed.el.classList.contains(OWN) && style(evenThemed).borderTopWidth === '1px' && style(evenThemed).borderLeftWidth === '1px' && style(rowsOf(themed)[0].cells[1]).borderLeftWidth === '1px', { classes: themed.el.className, top: style(evenThemed).borderTopWidth, left: style(evenThemed).borderLeftWidth });
+				check('Theme 3 a frozen cell has the body\'s color behind it, and an odd row\'s stripe over that', layersOf(evenThemed).includes(BODY) && !layersOf(evenThemed).includes(STRIPE) && layersOf(oddThemed).indexOf(STRIPE) > -1 && layersOf(oddThemed).indexOf(STRIPE) < layersOf(oddThemed).indexOf(BODY), { even: layersOf(evenThemed), odd: layersOf(oddThemed) });
+				check('Theme 3 the header, outside the body, doesn\'t take its color, and a frozen body row does', !layersOf(rowsOf(themed)[0].cells[2]).includes(BODY) && layersOf(rowsOf(themed)[1].cells[2]).includes(STRIPE), { header: layersOf(rowsOf(themed)[0].cells[2]), row: layersOf(rowsOf(themed)[1].cells[2]) });
+				const [plainCell, stripedCell] = [layersOf(rowsOf(themed)[1].cells[2]), layersOf(rowsOf(themed)[1].cells[1])];
+				check('Theme 3 an even column\'s own color lies over its row\'s, and an odd column has none', !plainCell.includes(COLUMN) && stripedCell.indexOf(COLUMN) > -1 && stripedCell.indexOf(COLUMN) < stripedCell.indexOf(STRIPE), { odd: plainCell, even: stripedCell });
+				theme.remove();
+				app.workspace.trigger('css-change');
+				await frames();
+				const back = await frozenTable('Plants');
+				check('Theme 4 when the theme changes back, so do frozen tables', back.el.classList.contains(OWN) && layersOf(rowsOf(back)[11].cells[0]) === 'none' && style(rowsOf(back)[10].cells[0]).borderTopWidth === '0px', { classes: back.el.className, odd: layersOf(rowsOf(back)[11].cells[0]) });
+
+				// Light and dark: Obsidian toggles the body's classes, then sends css-change.
+				const scheme = app.vault.getConfig('theme');
+				let changed = 0;
+				const listening = app.workspace.on('css-change', () => changed++);
+				const before = style(rowsOf(back)[0].cells[0]).backgroundColor;
+				app.changeTheme(document.body.classList.contains('theme-dark') ? 'moonstone' : 'obsidian');
+				await sleep(400);
+				const flipped = await frozenTable('Plants');
+				const after = style(rowsOf(flipped)[0].cells[0]).backgroundColor;
+				check('relies 19: switching between light and dark sends css-change', changed > 0, changed);
+				check('Theme 5 frozen cells follow light and dark', after !== before && after === primary(), { before, after, primary: primary() });
+				app.workspace.offref(listening);
+				app.changeTheme(scheme);
+				await sleep(400);
+				check('Theme: the note is as it was', cm.state.doc.toString() === original);
+			}
+
 			// --- On a phone. Obsidian's own classes on the real editor; emulate-mobile gives a status bar of 59 px.
 			const PHONE = ['is-mobile', 'is-phone', 'is-floating-nav', 'auto-full-screen', 'emulate-mobile'];
 			const STATUS_BAR = 59;

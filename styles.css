@@ -264,6 +264,15 @@
 	pointer-events: none;
 }
 
+/* For a moment, while `restartRows` in freeze.ts starts the rows' animation again on a new timeline. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows.selectable-tables-restarting {
+	view-timeline-name: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows .selectable-tables-frozen-row.selectable-tables-restarting {
+	animation-name: none;
+}
+
 @keyframes selectable-tables-pin {
 	from {
 		transform: translateY(0);

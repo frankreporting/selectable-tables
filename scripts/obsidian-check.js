@@ -1607,6 +1607,19 @@
 				cm.scrollDOM.scrollTop += 300;
 				await frames();
 				check('Phone 1 they hold there as the note scrolls', Math.abs(rowTop() - STATUS_BAR) <= 1, rowTop());
+				// The keyboard shrinks the pane, and the rows start their animation again then, still pinned.
+				const running = rowsOf(phone)[0].getAnimations()[0];
+				const fullHeight = pane().height;
+				document.body.style.setProperty('--keyboard-height', '300px');
+				await sleep(300);
+				const shrunk = pane().height;
+				const restarted = rowsOf(phone)[0].getAnimations()[0];
+				cm.scrollDOM.scrollTop += 200;
+				await frames();
+				check('relies 18: on a phone the keyboard shrinks the pane by --keyboard-height', fullHeight - shrunk >= 250, { fullHeight, shrunk });
+				check('Phone 1 a keyboard moving restarts the rows, and they stay pinned', restarted !== running && restarted?.animationName === 'selectable-tables-pin' && !document.querySelector('.selectable-tables-restarting') && Math.abs(rowTop() - STATUS_BAR) <= 1, { restarted: restarted !== running, name: restarted?.animationName, row: rowTop() });
+				document.body.style.removeProperty('--keyboard-height');
+				await sleep(300);
 				const band = getComputedStyle(rowsOf(phone)[0].cells[1], '::before');
 				check('Phone 2 the band above them is filled, and takes no presses', band.height === `${STATUS_BAR}px` && band.pointerEvents === 'none' && band.backgroundColor !== 'rgba(0, 0, 0, 0)', { height: band.height, events: band.pointerEvents, color: band.backgroundColor });
 				cm.scrollDOM.scrollTop = 0;
@@ -1639,6 +1652,14 @@
 			}
 			const notPhone = await frozenTable('Plants', 300);
 			check('Phone off a phone, rows pin at the pane\'s top', Math.abs(topInPane(rowsOf(notPhone)[0])) <= 1, topInPane(rowsOf(notPhone)[0]));
+			const desktopRunning = rowsOf(notPhone)[0].getAnimations()[0];
+			const container = document.querySelector('.app-container');
+			container.style.maxHeight = 'calc(100vh - 300px)';
+			await sleep(300);
+			const desktopAfter = rowsOf(notPhone)[0].getAnimations()[0];
+			container.style.removeProperty('max-height');
+			await sleep(300);
+			check('Phone off a phone, a shorter pane doesn\'t restart the rows', desktopAfter === desktopRunning, { same: desktopAfter === desktopRunning });
 
 			// --- A device that can't pin rows
 			const supports = CSS.supports;

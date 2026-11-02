@@ -3,6 +3,7 @@ import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/vie
 import { Cells, Grid, selectedTable } from './decide';
 import { viewLayout } from './layout';
 import type { Cell, Span } from './table-text';
+import { holdWidth } from './width-copy';
 
 /** On Obsidian's table widget, which holds the table element. */
 export const TABLE_CLASS = 'cm-table-widget';
@@ -193,12 +194,14 @@ class CellSelection implements PluginValue, Cells {
 	};
 
 	/**
-	 * The same for anything inside the content taking the focus, such as a cell's editor. Obsidian scrolls to
-	 * a cell as it opens, right after this, and it takes a cell under a pinned row for one that's on screen.
+	 * The same for anything inside the content taking the focus, such as a cell's editor. That's also when a
+	 * cell that has just opened gets the copy that holds its column's width. Obsidian scrolls to a cell as it
+	 * opens, right after this, and it takes a cell under a pinned row for one that's on screen.
 	 */
 	private readonly onFocus = (event: FocusEvent) => {
 		const target = event.target as HTMLElement;
 		if (target === this.view.contentDOM) return;
+		holdWidth(target);
 		this.onLeave();
 		const cell = frozenCell(target);
 		if (cell) showAfterScroll(this.view, cell);

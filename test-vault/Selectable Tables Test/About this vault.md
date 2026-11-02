@@ -10,6 +10,7 @@ Invented notes for testing Selectable Tables by hand. Each note matches a sectio
 - [[Markdown in cells]]: tables whose first cells hold links, bold, code and tags, which cost the most to open; for the speed numbers.
 - [[Cell moves]]: moving between cells: a table with Markdown in its cells, uneven rows, a wide table and a tall one.
 - [[Frozen tables]]: frozen rows and columns, on tall, wide tables with and without a mark.
+- [[Pictures in cells]]: a picture and a player in cells, to check an open cell keeps its column's width.
 - [[Long note]]: only for the speed numbers.
 
 Run `npm run test-vault` in the repo to build the plugin and copy it in.

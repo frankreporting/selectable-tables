@@ -1,6 +1,6 @@
 # Selectable Tables
 
-An Obsidian plugin that augments tables in Live Preview mode. Treats a table as a single block, the same way Obsidian treats an image. This unlocks the ability to use arrow keys to select and navigate tables and cells without touching or viewing the raw Markdown. You hit `Enter` to drop into the cell for editing, which is also similar to hitting `Enter` on an image to get to its Markdown link. This also brings table editing a little closer to how it works in apps like Notion.
+An Obsidian plugin that enhances how you interact with Markdown tables. Treats tables as selectable blocks, the same way Obsidian treats an image. Now you can use arrow keys to select and navigate tables and cells without touching or viewing the raw Markdown, which gives you smoother note and table nav. You hit `Enter` to drop into a cell for editing. The plugin also adds the ability to freeze rows and columns. For now, all of this works only in Live Preview.
 
 ![Demo with the keys shown on screen: holding ↓ passes the tables, → selects one, the arrows and jump keys move between cells without opening them, and Enter opens a cell](docs/demo.gif)
 
@@ -66,26 +66,26 @@ With an input method (IME), starting to compose on a selected table or cell move
 
 ## Freeze rows and columns
 
-A long or wide table can keep its first rows and columns in view as you scroll, like freeze panes in a spreadsheet. Each table scrolls on its own, and any number of tables in a note can freeze. This works in Live Preview, on the desktop, on phones and on tablets. On a phone the rows stay clear of the status bar and the header, and move with the header as it hides and comes back. A device too old to pin rows, such as an iPhone or iPad before iOS 26, leaves the table to scroll as usual.
+A long or wide table can keep the initial rows and columns in view as you scroll, just like in a spreadsheet. Any number of tables in a note can freeze. This works in Live Preview, on the desktop, on phones and on tablets. **Note:** A device too old to pin rows, such as an iPhone or iPad before iOS 26, leaves the table to scroll as usual.
 
-One limit on an iPhone: as the keyboard opens or closes with the caret in a frozen table, its frozen rows can flicker for a moment, and the caret can drift inside its cell until you type.
-
-For now you set it by hand. Add a comment to any cell of the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column:
+For now you freeze rows and columns by adding a comment to any cell of the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column:
 
 ```markdown
 | %%freeze 2 1%% Name | Bed | Sown |
 | ------------------- | --- | ---- |
 ```
 
-The comment doesn't show, and it stays with the table's text, so it copies, syncs and moves with the table. Apps that don't know Obsidian's `%%` comments, such as GitHub, show it as plain text.
+The comment doesn't show, and it stays with the table's text, so it copies, syncs and moves with the table.
 
 - `%%freeze 0 0%%`, or no comment, freezes nothing. Deleting the column that holds the comment ends the freeze.
 - A table can freeze up to 9 columns.
 - Rows taller than half the pane, or columns as wide as the table, stop pinning until there's room, so there's always somewhere to scroll.
-- With a cell selected, moving up into a frozen row or left into a frozen column takes the table back to that end, so the first rows and columns after them show. Moving along a frozen row or column leaves the view where it is.
-- A cell you select, open or type in stays in view: the table scrolls it out from under the frozen rows and columns.
+- A cell you select, open or type in snaps back into view if it was partially hidden by a frozen cell.
 
-One thing doesn't work yet with a frozen table: a drag across cells selects the wrong cells.
+### Known issues:
+
+- On iPhone, as the keyboard opens or closes with the caret in a frozen table, its frozen rows can flicker for a moment, and the caret can drift inside its cell until you type.
+- Dragging to select cells doesn't work yet with a frozen table and can result in the wrong cells selected.
 
 ## Roadmap
 
@@ -93,7 +93,7 @@ What's planned, broadly. The order and the details may change.
 
 **Next:**
 
-- **Finish freezing rows and columns:** make drags work, and set them from a command or the right-click menu, in Reading view too. A wide table's sideways scrollbar can stay at the bottom of the pane as well.
+- **Finish freezing rows and columns:** make drags work, and set them from a command or the right-click menu, in Reading view too. Make it possible to keep a wide table's sideways scrollbar in view even if the bottom of the table is below the viewport.
 
 **After that:**
 
@@ -103,7 +103,7 @@ What's planned, broadly. The order and the details may change.
 
 **Still being worked out:**
 
-- The arrow keys stay in the table while a cell is open, until Escape.
+- The arrow keys stay in the table while a cell is open, until Escape. Currently you can move through cells freely once you're in "edit mode," and there's nothing stopping you from arrowing out of the table and then having to re-select the table and hit `Enter` again to get back in. 
 - Bold, italic and other formatting act on a selected cell.
 - Vim's j and k pass a table in one press, like the arrows.
 - A search result in a table selects its cell instead of opening it.

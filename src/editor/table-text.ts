@@ -91,6 +91,54 @@ function padded(text: string, width: number, alignment: Alignment): string {
 	return ' '.repeat(before) + text + ' '.repeat(space - before);
 }
 
+/** A delimiter row's cell as Obsidian's table editor writes it: dashes across the column, and colons for its alignment. */
+function delimiter(width: number, alignment: Alignment): string {
+	if (alignment === 'left') return ` :${'-'.repeat(width - 3)} `;
+	if (alignment === 'center') return ` :${'-'.repeat(width - 4)}: `;
+	if (alignment === 'right') return ` ${'-'.repeat(width - 3)}: `;
+	return ` ${'-'.repeat(width - 2)} `;
+}
+
+/** A table's lines, from its first to its last. */
+function linesOf(doc: Text, table: Span): string[] {
+	const lines: string[] = [];
+	for (let n = doc.lineAt(table.from).number; n <= doc.lineAt(table.to).number; n++) lines.push(doc.line(n).text);
+	return lines;
+}
+
+/** A table's cells as Obsidian's table editor holds them, and each column's alignment. */
+interface Shape {
+	rows: string[][];
+	alignments: Alignment[];
+}
+
+/**
+ * A table's cells, or null for a table Obsidian's table editor wouldn't write: a row with more or fewer
+ * cells than the delimiter, or a row of only dashes, which its parser drops.
+ */
+function shapeOf(lines: string[]): Shape | null {
+	const cellsOf = (line: string) => segmentsIn(line).map(({ from, to }) => line.slice(from, to));
+	const alignments = cellsOf(lines[1] ?? '').map(alignmentOf);
+	const rows = lines.filter((_, index) => index !== 1).map((line) => cellsOf(line).map((cell) => cell.trim()));
+	if (rows.some((row) => row.length !== alignments.length || row.every((cell) => dashCell.test(cell)))) return null;
+	return { rows, alignments };
+}
+
+/** Each column's width as Obsidian's table editor writes it: its longest text, padded. */
+function widthsOf({ rows, alignments }: Shape): number[] {
+	return alignments.map((_, column) => Math.max(MIN_COLUMN_WIDTH, ...rows.map((row) => (row[column]?.length ?? 0) + CELL_PADDING)));
+}
+
+/** A table's lines as Obsidian's table editor writes them, the delimiter included. */
+function written(shape: Shape): string[] {
+	const { rows, alignments } = shape;
+	const widths = widthsOf(shape);
+	const row = (cells: string[]) => `|${cells.join('|')}|`;
+	const lines = rows.map((cells) => row(cells.map((text, column) => padded(text, widths[column] ?? 0, alignments[column] ?? null))));
+	lines.splice(1, 0, row(alignments.map((alignment, column) => delimiter(widths[column] ?? 0, alignment))));
+	return lines;
+}
+
 /**
  * Whether the table's rows are exactly what Obsidian's table editor writes for their cells. Only then is
  * a caret safe in a cell. Obsidian repairs a malformed table when a press opens a cell, but not for a
@@ -99,16 +147,38 @@ function padded(text: string, width: number, alignment: Alignment): string {
  * ignores them too and rewrites that line whole.
  */
 export function writtenByObsidian(doc: Text, table: Span): boolean {
-	const lines: string[] = [];
-	for (let n = doc.lineAt(table.from).number; n <= doc.lineAt(table.to).number; n++) lines.push(doc.line(n).text);
-	const cellsOf = (line: string) => segmentsIn(line).map(({ from, to }) => line.slice(from, to));
-	const alignments = cellsOf(lines[1] ?? '').map(alignmentOf);
-	const body = lines.filter((_, index) => index !== 1);
-	const rows = body.map((line) => cellsOf(line).map((cell) => cell.trim()));
-	if (rows.some((row) => row.length !== alignments.length || row.every((cell) => dashCell.test(cell)))) return false;
-	const widths = alignments.map((_, column) => Math.max(MIN_COLUMN_WIDTH, ...rows.map((row) => (row[column]?.length ?? 0) + CELL_PADDING)));
-	const written = rows.map((row) => `|${row.map((text, column) => padded(text, widths[column] ?? 0, alignments[column] ?? null)).join('|')}|`);
-	return written.join('\n') === body.join('\n');
+	const lines = linesOf(doc, table);
+	const shape = shapeOf(lines);
+	return shape !== null && written(shape).every((line, index) => index === 1 || line === lines[index]);
+}
+
+/**
+ * A table's lines with a new header row, written again as Obsidian's table editor writes them, so that a
+ * table it wrote stays that way when a cell's new text changes its column's width. Null for a table it
+ * didn't write, which keeps its own spacing, or a header with another number of cells.
+ */
+export function rewrittenWith(doc: Text, table: Span, header: string): string[] | null {
+	if (!writtenByObsidian(doc, table)) return null;
+	const lines = linesOf(doc, table);
+	const before = shapeOf(lines);
+	lines[0] = header;
+	const after = shapeOf(lines);
+	if (!before || !after) return null;
+	const rewritten = written(after);
+	// Obsidian ignores the delimiter's dashes, so it stays as it is until a column's width changes.
+	const widths = widthsOf(before);
+	if (widthsOf(after).every((width, column) => width === widths[column])) rewritten[1] = lines[1] ?? '';
+	return rewritten;
+}
+
+/** A row's cells, without their padding. */
+export function rowCells(text: string): string[] {
+	return segmentsIn(text).map(({ from, to }) => text.slice(from, to).trim());
+}
+
+/** Whether a row holds only dashes, which Obsidian's table parser drops rather than read as a row. */
+export function onlyDashes(text: string): boolean {
+	return rowCells(text).every((cell) => dashCell.test(cell));
 }
 
 /**

@@ -1,6 +1,6 @@
 import { EditorSelection, EditorState, Extension, Prec, SelectionRange, TransactionSpec } from '@codemirror/state';
-import { EditorView, KeyBinding, keymap } from '@codemirror/view';
-import { editorEditorField, editorLivePreviewField, Notice, Platform } from 'obsidian';
+import { EditorView, KeyBinding, keymap, ViewPlugin } from '@codemirror/view';
+import { type Editor, editorEditorField, editorInfoField, editorLivePreviewField, Notice, Platform } from 'obsidian';
 import { cellFollowsCaret, cellSelected, cellSelection, TABLE_CLASS } from './cells';
 import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText } from './decide';
 import { canFreeze, frozenTables } from './freeze';
@@ -144,7 +144,7 @@ function onArrow(direction: Direction, shift: boolean) {
 }
 
 /** A selection of exactly a table, from the side the keys can later go back to. */
-function wholeTable({ from, to }: Span, fromAbove: boolean): SelectionRange {
+export function wholeTable({ from, to }: Span, fromAbove: boolean): SelectionRange {
 	return fromAbove ? EditorSelection.range(from, to) : EditorSelection.range(to, from);
 }
 
@@ -153,7 +153,7 @@ function wholeTable({ from, to }: Span, fromAbove: boolean): SelectionRange {
  * A table whose cell Enter opened keeps the side it was selected from. Gives the note's editor, or null
  * when this isn't a cell's editor.
  */
-function escapeCell(view: EditorView): EditorView | null {
+export function escapeCell(view: EditorView): EditorView | null {
 	const widget = cellWidget(view);
 	const outer = widget?.parentElement?.closest<HTMLElement>('.cm-editor');
 	const main = outer ? EditorView.findFromDOM(outer) : null;
@@ -344,7 +344,27 @@ const keepCellsClosed = EditorState.transactionFilter.of((tr) => {
 	return action.type === 'select' ? selecting(action.table, action.fromAbove) : [];
 });
 
+/** The editors open now, so a command can find the one behind the editor Obsidian gives it. */
+const views = new Set<EditorView>();
+
+const knownViews = ViewPlugin.define((view) => {
+	views.add(view);
+	return { destroy: () => views.delete(view) };
+});
+
+/**
+ * The note's editor in Live Preview behind an editor Obsidian gives a command. Obsidian gives the note's
+ * editor even while one of its cells is open, and a cell's editor carries the note's info too, so it's
+ * left out.
+ */
+export function noteView(editor: Editor): EditorView | null {
+	for (const view of views) {
+		if (view.state.field(editorInfoField, false)?.editor === editor && view.state.field(editorLivePreviewField, false) === true && !cellWidget(view)) return view;
+	}
+	return null;
+}
+
 /** The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. */
 export function selectableTables(): Extension {
-	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, keepCellsClosed, markSelectedTable, cellSelection, cellFollowsCaret, canFreeze() ? frozenTables : [], EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
+	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, keepCellsClosed, markSelectedTable, cellSelection, cellFollowsCaret, knownViews, canFreeze() ? frozenTables : [], EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
 }

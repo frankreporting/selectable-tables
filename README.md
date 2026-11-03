@@ -56,7 +56,7 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | Tab, Shift+Tab | The next or previous cell, wrapping between rows. It stops on the last and first cells, and adds no rows. |
 | Enter | Opens the cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. On a table Obsidian didn't write, such as a hand-typed one, the frame turns red and nothing opens. Click a cell to edit it: that usually tidies the table, and Enter works from then on. |
 | Escape | Back to the selected table. |
-| Copy | Copies the cell's Markdown, the way the cell's editor shows it. |
+| Copy | Copies the cell's Markdown, the way the cell's editor shows it, without a freeze comment. |
 | Typing | Starts a new paragraph below the table, as on a selected table. |
 | Backspace, Delete, Cut, Paste, Option with an arrow, Shift with an arrow or any of the keys above | Nothing happens. Editor commands leave the table alone too. |
 
@@ -70,14 +70,23 @@ Typing with an input method (IME), or an accent such as Option+E, works the same
 
 A long or wide table can keep the initial rows and columns in view as you scroll, just like in a spreadsheet. Any number of tables in a note can freeze. This works in Live Preview, on the desktop, on phones and on tablets. **Note:** A device too old to pin rows, such as an iPhone or iPad before iOS 26, leaves the table to scroll as usual.
 
-For now you freeze rows and columns by adding a comment to any cell of the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column:
+To freeze, select or open a cell, then run one of these from the command palette (Cmd+P):
+
+- **Freeze rows up to here:** the cell's row and every row above it.
+- **Freeze columns up to here:** the cell's column and every column to its left.
+- **Freeze rows and columns up to here:** both at once. On a table's first cell, that freezes the header row and the first column.
+- **Unfreeze table.**
+
+The cell stays selected, and Undo takes the change back. To give a command its own keys, look it up in **Settings → Hotkeys**.
+
+A freeze is saved as a comment in the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column. The commands put it in the first cell, unless the row already has one:
 
 ```markdown
 | %%freeze 2 1%% Name | Bed | Sown |
 | ------------------- | --- | ---- |
 ```
 
-The comment doesn't show, and it stays with the table's text, so it copies, syncs and moves with the table.
+The comment doesn't show, and it stays with the table's text, so it copies, syncs and moves with the table. Copying the cell that holds it leaves it out. You can also type it yourself, in any cell of the header row.
 
 - `%%freeze 0 0%%`, or no comment, freezes nothing. Deleting the column that holds the comment ends the freeze.
 - A table can freeze up to 9 columns.
@@ -96,7 +105,7 @@ What's planned, broadly. The order and the details may change.
 
 **Next:**
 
-- **Finish freezing rows and columns:** make drags work, and set them from a command or the right-click menu, in Reading view too. Make it possible to keep a wide table's sideways scrollbar in view even if the bottom of the table is below the viewport.
+- **Finish freezing rows and columns:** make drags work, add the commands to the right-click menu, and freeze in Reading view too. Make it possible to keep a wide table's sideways scrollbar in view even if the bottom of the table is below the viewport.
 
 **After that:**
 

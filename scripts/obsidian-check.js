@@ -1721,6 +1721,130 @@
 			await restore(cm, original);
 			await sleep(300);
 
+			// --- Freezing from a command
+			{
+				const ids = ['freeze-rows', 'freeze-columns', 'freeze-rows-and-columns', 'unfreeze-table'];
+				const commandOf = (id) => app.commands.commands[`selectable-tables:${id}`];
+				const offered = (id) => commandOf(id)?.checkCallback?.(true) === true;
+				const run = async (id) => {
+					const ran = app.commands.executeCommandById(`selectable-tables:${id}`);
+					await sleep(300);
+					return ran;
+				};
+				const header = (t) => cm.state.doc.lineAt(t.from).text;
+				// Through the command palette, as Brian runs it: the palette takes the focus, and gives it back.
+				async function fromPalette(name) {
+					app.commands.executeCommandById('command-palette:open');
+					await sleep(300);
+					const input = document.querySelector('.prompt-input');
+					input.value = name;
+					input.dispatchEvent(new Event('input'));
+					await sleep(300);
+					const chosen = document.querySelector('.prompt .suggestion-item.is-selected')?.textContent ?? '';
+					await press(input, 'Enter');
+					await sleep(300);
+					return chosen;
+				}
+				// The third row and second column, as the test plan has it.
+				async function selectThirdRow(t) {
+					await selectTable(cm, t);
+					await press(cm, 'Enter');
+					await press(cm, 'ArrowDown');
+					await press(cm, 'ArrowDown');
+					await press(cm, 'ArrowRight');
+				}
+				check('Command the four commands are registered', ids.every(commandOf), ids.filter((id) => !commandOf(id)));
+
+				let shed = await frozenTable('Sheds');
+				await caretOnLine(cm, shed.first - 1);
+				check('Command 5 none is offered with the caret on a text line', !ids.some(offered), ids.filter(offered));
+				await selectTable(cm, shed);
+				check('Command none is offered on a selected table', !ids.some(offered), ids.filter(offered));
+				await press(cm, 'Enter');
+				check('Command on the first cell, every freeze is offered, but not Unfreeze on a table with no mark', offered('freeze-rows') && offered('freeze-columns') && offered('freeze-rows-and-columns') && !offered('unfreeze-table'), ids.filter(offered));
+				await press(cm, 'Escape');
+				await press(cm, 'Escape');
+
+				shed = await frozenTable('Sheds');
+				await selectThirdRow(shed);
+				check('Command on the third row and second column', at(cm) === '2,1', at(cm));
+				const chosen = await fromPalette('Freeze rows up to here');
+				shed = await frozenTable('Sheds');
+				check('Command 1 the palette runs Freeze rows up to here', chosen.includes('Freeze rows up to here'), chosen);
+				check('Command 1 Freeze rows up to here freezes rows 1 to 3', header(shed).includes('%%freeze 3 0%%') && frozenRows(shed).join() === '0,1,2', { header: header(shed), rows: frozenRows(shed) });
+				check('Command 1 the cell is still selected, over the whole table, and the note has the keyboard', at(cm) === '2,1' && selectsWhole(cm, shed) && cm.hasFocus && !openCell(cm), { at: at(cm), sel: sel(cm), focus: cm.hasFocus });
+				const frozenText = cm.state.doc.toString();
+				await press(cm, 'ArrowDown');
+				check('Command 1 the arrows still move the cell, and change nothing', at(cm) === '3,1' && cm.state.doc.toString() === frozenText, at(cm));
+				await press(cm, 'ArrowUp');
+
+				await press(cm, 'z', { metaKey: true });
+				await sleep(300);
+				shed = await frozenTable('Sheds');
+				check('Command 2 Undo takes the freeze back, and the text is as it was', cm.state.doc.toString() === original && frozenRows(shed).length === 0 && !shed.el.classList.contains(FROZEN), header(shed));
+				check('Command 2 the cell stays selected after Undo', at(cm) === '2,1' && selectsWhole(cm, shed), at(cm));
+				// Redo through Obsidian's editor: a Shift+Cmd+Z sent to one element doesn't reach it, even on a text line.
+				app.workspace.activeEditor.editor.redo();
+				await sleep(300);
+				const redone = cm.state.doc.toString() === frozenText;
+				check('Command 2 Redo puts it back', redone, cm.state.doc.lineAt(shed.from).text);
+				if (redone) await press(cm, 'z', { metaKey: true });
+				await sleep(300);
+				check('Command 2 and Undo again takes it back', cm.state.doc.toString() === original);
+
+				await run('freeze-rows-and-columns');
+				shed = await frozenTable('Sheds');
+				check('Command 3 Freeze rows and columns up to here freezes rows 1 to 3 and columns 1 and 2', header(shed).includes('%%freeze 3 2%%') && frozenRows(shed).join() === '0,1,2' && shed.el.classList.contains(`${FROZEN}-columns-2`), { header: header(shed), rows: frozenRows(shed), classes: shed.el.className });
+				check('Command 3 Unfreeze is offered once there\'s a mark', offered('unfreeze-table'), ids.filter(offered));
+				await press(cm, 'Enter');
+				check('Command 3 Enter still opens a cell', openAt(cm) === '2,1', openAt(cm));
+
+				check('relies 20: with a cell open, an editor command gets the note\'s editor', app.workspace.activeEditor?.editor?.cm === cm, app.workspace.activeEditor?.getViewType?.());
+				check('Command the commands are offered with a cell open', ids.every(offered), ids.filter(offered));
+				// One cell right, so that freezing its column changes the mark.
+				await press(cellEditor(cm), 'Escape');
+				await press(cm, 'ArrowRight');
+				await press(cm, 'Enter');
+				check('Command the third row\'s third cell is open', openAt(cm) === '2,2', openAt(cm));
+				await fromPalette('Freeze columns up to here');
+				shed = await frozenTable('Sheds');
+				check('Command from an open cell, the cell closes and stays selected, and the table freezes', !openCell(cm) && at(cm) === '2,2' && header(shed).includes('%%freeze 3 3%%') && shed.el.classList.contains(`${FROZEN}-columns-3`), { open: openAt(cm), at: at(cm), header: header(shed) });
+				check('Command from an open cell, the note has the keyboard after', cm.hasFocus && selectsWhole(cm, shed), { focus: cm.hasFocus, sel: sel(cm) });
+
+				await press(cm, 'ArrowUp');
+				await press(cm, 'ArrowUp');
+				await press(cm, 'ArrowLeft');
+				await press(cm, 'ArrowLeft');
+				const copiedHeader = clipboard(cm, 'copy');
+				check('Command 6 Copy on the first header cell gives its text without the mark', at(cm) === '0,0' && copiedHeader.taken && copiedHeader.text === 'Name', { at: at(cm), copiedHeader });
+
+				await run('unfreeze-table');
+				shed = await frozenTable('Sheds');
+				check('Command 4 Unfreeze table leaves no mark, and the table\'s text as it was', cm.state.doc.toString() === original && !shed.el.classList.contains(FROZEN) && frozenRows(shed).length === 0, header(shed));
+				check('Command 4 Unfreeze is no longer offered, and the cell stays selected', !offered('unfreeze-table') && at(cm) === '0,0', { offered: ids.filter(offered), at: at(cm) });
+				await press(cm, 'Escape');
+				await press(cm, 'Escape');
+				check('Command: the note is as it was', cm.state.doc.toString() === original);
+
+				// A table Obsidian didn't write keeps its spacing.
+				cm = await open('Cell moves');
+				const cellNote = cm.state.doc.toString();
+				const odd = await tableUnder(cm, 'Uneven rows');
+				await selectTable(cm, odd);
+				await press(cm, 'Enter');
+				await run('freeze-rows');
+				const lines = cellNote.split('\n');
+				const changed = cm.state.doc.toString().split('\n').filter((line, index) => line !== lines[index]);
+				check('Command on a table Obsidian didn\'t write, only its header row changes', changed.length === 1 && changed[0] === '| %%freeze 1 0%% Shelf | Pots | Soil |', changed);
+				await press(cm, 'z', { metaKey: true });
+				await sleep(300);
+				check('Command and Undo takes that back too', cm.state.doc.toString() === cellNote);
+				await press(cm, 'Escape');
+				await press(cm, 'Escape');
+				await restore(cm, cellNote);
+				cm = await open('Frozen tables');
+			}
+
 			const back = await frozenTable('Plants', 300);
 			cm.scrollDOM.scrollTop = cm.scrollDOM.scrollHeight;
 			await sleep(400);

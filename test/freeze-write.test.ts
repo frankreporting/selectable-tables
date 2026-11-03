@@ -19,10 +19,14 @@ test('columns up to here freeze the cell\'s column and every column left of it, 
 	assert.deepEqual(freezeAt('columns', nothing, cell(0, 0)), { freeze: freeze(0, 1), clamped: false });
 });
 
-test('at this cell freezes what\'s above it and to its left, as in a spreadsheet', () => {
-	assert.deepEqual(freezeAt('cell', freeze(5, 5), cell(2, 1)), { freeze: freeze(2, 1), clamped: false });
-	assert.deepEqual(freezeAt('cell', nothing, cell(0, 3)), { freeze: freeze(0, 3), clamped: false });
-	assert.deepEqual(freezeAt('cell', nothing, cell(4, 0)), { freeze: freeze(4, 0), clamped: false });
+test('rows and columns up to here freeze the cell\'s row and column and everything above and left of them', () => {
+	assert.deepEqual(freezeAt('both', freeze(5, 5), cell(2, 1)), { freeze: freeze(3, 2), clamped: false });
+	assert.deepEqual(freezeAt('both', nothing, cell(0, 3)), { freeze: freeze(1, 4), clamped: false });
+	assert.deepEqual(freezeAt('both', nothing, cell(4, 0)), { freeze: freeze(5, 1), clamped: false });
+});
+
+test('on a table\'s first cell, rows and columns up to here freeze its header row and first column', () => {
+	assert.deepEqual(freezeAt('both', nothing, cell(0, 0)), { freeze: freeze(1, 1), clamped: false });
 });
 
 test('unfreezing freezes nothing, wherever the cell is', () => {
@@ -32,7 +36,7 @@ test('unfreezing freezes nothing, wherever the cell is', () => {
 test('columns past the limit stop at it, and say so', () => {
 	assert.deepEqual(freezeAt('columns', nothing, cell(1, 12)), { freeze: freeze(0, MAX_FROZEN_COLUMNS), clamped: true });
 	assert.deepEqual(freezeAt('columns', nothing, cell(1, MAX_FROZEN_COLUMNS - 1)), { freeze: freeze(0, MAX_FROZEN_COLUMNS), clamped: false });
-	assert.deepEqual(freezeAt('cell', nothing, cell(1, MAX_FROZEN_COLUMNS + 1)), { freeze: freeze(1, MAX_FROZEN_COLUMNS), clamped: true });
+	assert.deepEqual(freezeAt('both', nothing, cell(1, MAX_FROZEN_COLUMNS)), { freeze: freeze(2, MAX_FROZEN_COLUMNS), clamped: true });
 	assert.deepEqual(freezeAt('rows', freeze(0, MAX_FROZEN_COLUMNS), cell(1, 20)), { freeze: freeze(2, MAX_FROZEN_COLUMNS), clamped: false });
 });
 

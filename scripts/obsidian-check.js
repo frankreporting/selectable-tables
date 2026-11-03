@@ -1723,7 +1723,7 @@
 
 			// --- Freezing from a command
 			{
-				const ids = ['freeze-rows', 'freeze-columns', 'freeze-at-cell', 'unfreeze-table'];
+				const ids = ['freeze-rows', 'freeze-columns', 'freeze-rows-and-columns', 'unfreeze-table'];
 				const commandOf = (id) => app.commands.commands[`selectable-tables:${id}`];
 				const offered = (id) => commandOf(id)?.checkCallback?.(true) === true;
 				const run = async (id) => {
@@ -1761,7 +1761,7 @@
 				await selectTable(cm, shed);
 				check('Command none is offered on a selected table', !ids.some(offered), ids.filter(offered));
 				await press(cm, 'Enter');
-				check('Command on the first cell, Freeze at this cell isn\'t offered, nor Unfreeze on a table with no mark', offered('freeze-rows') && offered('freeze-columns') && !offered('freeze-at-cell') && !offered('unfreeze-table'), ids.filter(offered));
+				check('Command on the first cell, every freeze is offered, but not Unfreeze on a table with no mark', offered('freeze-rows') && offered('freeze-columns') && offered('freeze-rows-and-columns') && !offered('unfreeze-table'), ids.filter(offered));
 				await press(cm, 'Escape');
 				await press(cm, 'Escape');
 
@@ -1792,22 +1792,28 @@
 				await sleep(300);
 				check('Command 2 and Undo again takes it back', cm.state.doc.toString() === original);
 
-				await run('freeze-at-cell');
+				await run('freeze-rows-and-columns');
 				shed = await frozenTable('Sheds');
-				check('Command 3 Freeze at this cell freezes what\'s above it and to its left', header(shed).includes('%%freeze 2 1%%') && frozenRows(shed).join() === '0,1' && shed.el.classList.contains(`${FROZEN}-columns-1`), { header: header(shed), rows: frozenRows(shed), classes: shed.el.className });
+				check('Command 3 Freeze rows and columns up to here freezes rows 1 to 3 and columns 1 and 2', header(shed).includes('%%freeze 3 2%%') && frozenRows(shed).join() === '0,1,2' && shed.el.classList.contains(`${FROZEN}-columns-2`), { header: header(shed), rows: frozenRows(shed), classes: shed.el.className });
 				check('Command 3 Unfreeze is offered once there\'s a mark', offered('unfreeze-table'), ids.filter(offered));
 				await press(cm, 'Enter');
 				check('Command 3 Enter still opens a cell', openAt(cm) === '2,1', openAt(cm));
 
 				check('relies 20: with a cell open, an editor command gets the note\'s editor', app.workspace.activeEditor?.editor?.cm === cm, app.workspace.activeEditor?.getViewType?.());
 				check('Command the commands are offered with a cell open', ids.every(offered), ids.filter(offered));
+				// One cell right, so that freezing its column changes the mark.
+				await press(cellEditor(cm), 'Escape');
+				await press(cm, 'ArrowRight');
+				await press(cm, 'Enter');
+				check('Command the third row\'s third cell is open', openAt(cm) === '2,2', openAt(cm));
 				await fromPalette('Freeze columns up to here');
 				shed = await frozenTable('Sheds');
-				check('Command from an open cell, the cell closes and stays selected, and the table freezes', !openCell(cm) && at(cm) === '2,1' && header(shed).includes('%%freeze 2 2%%') && shed.el.classList.contains(`${FROZEN}-columns-2`), { open: openAt(cm), at: at(cm), header: header(shed) });
+				check('Command from an open cell, the cell closes and stays selected, and the table freezes', !openCell(cm) && at(cm) === '2,2' && header(shed).includes('%%freeze 3 3%%') && shed.el.classList.contains(`${FROZEN}-columns-3`), { open: openAt(cm), at: at(cm), header: header(shed) });
 				check('Command from an open cell, the note has the keyboard after', cm.hasFocus && selectsWhole(cm, shed), { focus: cm.hasFocus, sel: sel(cm) });
 
 				await press(cm, 'ArrowUp');
 				await press(cm, 'ArrowUp');
+				await press(cm, 'ArrowLeft');
 				await press(cm, 'ArrowLeft');
 				const copiedHeader = clipboard(cm, 'copy');
 				check('Command 6 Copy on the first header cell gives its text without the mark', at(cm) === '0,0' && copiedHeader.taken && copiedHeader.text === 'Name', { at: at(cm), copiedHeader });

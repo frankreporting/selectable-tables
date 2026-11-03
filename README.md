@@ -74,7 +74,7 @@ To freeze, select or open a cell, then run one of these from the command palette
 
 - **Freeze rows up to here:** the cell's row and every row above it.
 - **Freeze columns up to here:** the cell's column and every column to its left.
-- **Freeze at this cell:** every row above the cell and every column to its left, as in a spreadsheet.
+- **Freeze rows and columns up to here:** both at once. On a table's first cell, that freezes the header row and the first column.
 - **Unfreeze table.**
 
 The cell stays selected, and Undo takes the change back. To give a command its own keys, look it up in **Settings → Hotkeys**.

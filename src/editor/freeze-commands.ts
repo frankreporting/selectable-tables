@@ -38,11 +38,9 @@ function targetOf(editor: Editor): Target | null {
 	return { view, table: span, cell: { row: row.rowIndex, column: cell.cellIndex }, open: EditorView.findFromDOM(open) };
 }
 
-/** Whether a command does anything here: Unfreeze needs a mark, and nothing lies above or left of a table's first cell. */
-function offered(command: FreezeCommand, { view, table, cell }: Target): boolean {
-	if (command === 'none') return hasMark(view.state.doc.lineAt(table.from).text);
-	if (command === 'cell') return cell.row > 0 || cell.column > 0;
-	return true;
+/** Whether a command does anything here: Unfreeze needs a mark. */
+function offered(command: FreezeCommand, { view, table }: Target): boolean {
+	return command !== 'none' || hasMark(view.state.doc.lineAt(table.from).text);
 }
 
 /**
@@ -88,7 +86,7 @@ export function freezeCommands(): Command[] {
 	return [
 		freezeCommand('freeze-rows', 'Freeze rows up to here', 'rows'),
 		freezeCommand('freeze-columns', 'Freeze columns up to here', 'columns'),
-		freezeCommand('freeze-at-cell', 'Freeze at this cell', 'cell'),
+		freezeCommand('freeze-rows-and-columns', 'Freeze rows and columns up to here', 'both'),
 		freezeCommand('unfreeze-table', 'Unfreeze table', 'none'),
 	];
 }

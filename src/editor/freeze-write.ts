@@ -2,18 +2,19 @@ import type { Text } from '@codemirror/state';
 import { Freeze, hasMark, MAX_FROZEN_COLUMNS, readFreeze, withFreeze, withoutMark } from './freeze-mark';
 import { Cell, onlyDashes, rewrittenWith, rowCells, Span, writtenByObsidian } from './table-text';
 
-/** The commands: freeze rows up to a cell, columns up to it, everything above it and to its left, or nothing. */
-export type FreezeCommand = 'rows' | 'columns' | 'cell' | 'none';
+/** The commands: freeze rows up to a cell, columns up to it, both, or nothing. */
+export type FreezeCommand = 'rows' | 'columns' | 'both' | 'none';
 
 /**
- * What a command freezes from a cell, given what's frozen now. Rows up to the cell's keep the frozen columns,
- * and columns up to it keep the rows. At the cell, as in a spreadsheet, the cell itself isn't frozen.
- * `clamped` says the columns asked for were more than a table can freeze.
+ * What a command freezes from a cell, given what's frozen now. Each takes the cell's own row or column in:
+ * rows up to the cell's keep the frozen columns, columns up to it keep the rows, and both set both, so on a
+ * table's first cell they freeze its header row and first column. `clamped` says the columns asked for were
+ * more than a table can freeze.
  */
 export function freezeAt(command: FreezeCommand, now: Freeze, { row, column }: Cell): { freeze: Freeze; clamped: boolean } {
-	const columns = command === 'columns' ? column + 1 : command === 'cell' ? column : now.columns;
+	const columns = command === 'columns' || command === 'both' ? column + 1 : now.columns;
 	const freeze = {
-		rows: command === 'rows' ? row + 1 : command === 'cell' ? row : command === 'none' ? 0 : now.rows,
+		rows: command === 'rows' || command === 'both' ? row + 1 : command === 'none' ? 0 : now.rows,
 		columns: command === 'none' ? 0 : Math.min(columns, MAX_FROZEN_COLUMNS),
 	};
 	return { freeze, clamped: command !== 'none' && columns > MAX_FROZEN_COLUMNS };

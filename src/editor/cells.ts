@@ -144,6 +144,11 @@ class CellSelection implements PluginValue, Cells {
 		this.deselect();
 	}
 
+	/** Typing on the selected cell: the caret is about to leave the table, and the cell goes first. */
+	leave() {
+		this.forget();
+	}
+
 	/** Enter can't open the selected cell. It says so until the selection moves on. */
 	refuse() {
 		this.cell?.classList.add(REFUSED_CLASS);

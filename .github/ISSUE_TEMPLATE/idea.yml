@@ -1,0 +1,21 @@
+name: Idea
+description: Something Selectable Tables could do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. The README's Roadmap lists what's already planned.
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like to do?
+      description: The task you have in mind, and what gets in the way today.
+      placeholder: I'd like to move a row up or down from a selected cell, without opening the cells.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How might it work?
+      description: Keys, commands or menus you'd expect. Optional.

@@ -1826,6 +1826,133 @@
 				await press(cm, 'Escape');
 				check('Command: the note is as it was', cm.state.doc.toString() === original);
 
+				// --- The selected cell stays in view when Unfreeze or Undo unpins its row or column
+				{
+					let sheds = shed;
+					// How much of the selected cell is hidden, at its top, bottom, left and right: by the pane, its
+					// table's box, or the rows and columns pinned over it. `gap` is its distance from the top and left
+					// it can show at, past its own scroll margin, which a scroll that goes just far enough leaves at 0.
+					const shown = () => {
+						const cell = cm.contentDOM.querySelector('.selectable-tables-cell');
+						if (!cell) return { inView: false, at: at(cm) };
+						const widget = cell.closest('.cm-table-widget');
+						const r = cell.getBoundingClientRect(), p = pane(), w = widget.getBoundingClientRect();
+						const pinned = widget.classList.contains(`${FROZEN}-rows`) ? Array.from(widget.querySelectorAll(`tr.${ROW}`)) : [];
+						const top = pinned.length && !pinned.includes(cell.parentElement) ? Math.max(...pinned.map((row) => row.getBoundingClientRect().bottom)) : p.top;
+						const sticky = (c) => getComputedStyle(c).position === 'sticky';
+						const before = sticky(cell) ? [] : Array.from(cell.parentElement.cells).filter((c) => c.cellIndex < cell.cellIndex && sticky(c));
+						const left = Math.max(p.left, before.length ? Math.max(...before.map((c) => c.getBoundingClientRect().right)) : w.left);
+						const hidden = [top - r.top, r.bottom - p.bottom, left - r.left, r.right - Math.min(p.right, w.right)].map((px) => Math.max(0, Math.round(px)));
+						const margin = getComputedStyle(cell);
+						const gap = [r.top - top - parseFloat(margin.scrollMarginTop), r.left - left - parseFloat(margin.scrollMarginLeft)].map(Math.round);
+						return { inView: hidden.every((px) => px < 2), hidden, gap, at: at(cm) };
+					};
+					const scroll = () => ({ top: Math.round(cm.scrollDOM.scrollTop), left: Math.round(sheds.el.scrollLeft) });
+					const still = (before) => Math.abs(scroll().top - before.top) < 2 && Math.abs(scroll().left - before.left) < 2;
+					const flush = (gap) => Math.abs(gap) < 2;
+					// Puts a row's place in the table at the pane's top, where it would be with nothing pinned.
+					async function toRow(row) {
+						const table = sheds.el.querySelector('table');
+						const above = Array.from(table.rows).slice(0, row).reduce((sum, r) => sum + r.offsetHeight, 0);
+						cm.scrollDOM.scrollTop += table.getBoundingClientRect().top + above - pane().top;
+						await frames();
+						await sleep(150);
+					}
+					async function sideways(px) {
+						sheds.el.scrollLeft = px;
+						await frames();
+						await sleep(150);
+					}
+					const undo = async () => {
+						await press(cm, 'z', { metaKey: true });
+						await sleep(300);
+					};
+					// Shed 3's Sown cell, with Sheds' header row just above the pane.
+					async function selectSown() {
+						await restore(cm, original);
+						await selectThirdRow(await frozenTable('Sheds'));
+						await press(cm, 'ArrowDown');
+						await press(cm, 'ArrowRight');
+						sheds = await frozenTable('Sheds', 40);
+					}
+
+					await selectSown();
+					check('Keep on Shed 3\'s Sown cell, with the header row out of view', at(cm) === '3,2' && shown().inView, shown());
+					let before = scroll();
+					await run('freeze-rows');
+					check('Keep 1 Freeze rows up to here pins the cell\'s row, and the note doesn\'t move', frozenRows(sheds).join() === '0,1,2,3' && shown().inView && still(before), { rows: frozenRows(sheds), shown: shown(), before, after: scroll() });
+					await toRow(20);
+					check('Keep 2 scrolled down to Shed 20, the pinned cell is in view', shown().inView, shown());
+					await run('unfreeze-table');
+					let unpinned = shown();
+					check('Keep 2 Unfreeze table scrolls the note back just far enough to show the cell', !sheds.el.classList.contains(FROZEN) && unpinned.inView && flush(unpinned.gap[0]), unpinned);
+
+					await run('freeze-rows');
+					await toRow(20);
+					await undo();
+					unpinned = shown();
+					check('Keep 3 Undo of a freeze, scrolled down, takes it back and shows the cell', !sheds.el.classList.contains(FROZEN) && cm.state.doc.toString() === original && unpinned.inView && flush(unpinned.gap[0]), unpinned);
+					await toRow(20);
+					app.workspace.activeEditor.editor.redo();
+					await sleep(300);
+					check('Keep 3 Redo pins the cell\'s row again, in view', frozenRows(sheds).join() === '0,1,2,3' && shown().inView, shown());
+					// Down to Shed 10, below the frozen rows, and unfrozen: Undo pins the rows again over where it sits.
+					for (let i = 0; i < 7; i++) await press(cm, 'ArrowDown');
+					await run('unfreeze-table');
+					await toRow(10);
+					await undo();
+					const covered = shown();
+					check('Keep 3 Undo of Unfreeze shows the cell below the rows it pins again', covered.at === '10,2' && frozenRows(sheds).join() === '0,1,2,3' && covered.inView, { rows: frozenRows(sheds), covered });
+
+					await press(cm, 'Escape');
+					await selectSown();
+					await sideways(260);
+					check('Keep 4 scrolled sideways, Name is out of view and the cell in view', sheds.el.querySelector('table').rows[3].cells[0].getBoundingClientRect().right < sheds.el.getBoundingClientRect().left && shown().inView, shown());
+					before = scroll();
+					await run('freeze-columns');
+					check('Keep 4 Freeze columns up to here pins Name, Bed and Sown, and nothing moves', sheds.el.classList.contains(`${FROZEN}-columns-3`) && shown().inView && still(before), { shown: shown(), before, after: scroll() });
+					await sideways(700);
+					await run('unfreeze-table');
+					unpinned = shown();
+					check('Keep 4 Unfreeze table scrolls the table back just far enough to show the cell', unpinned.inView && flush(unpinned.gap[1]) && scroll().left > 0, { unpinned, left: scroll().left });
+
+					await sideways(260);
+					before = scroll();
+					await run('freeze-rows-and-columns');
+					check('Keep 5 Freeze rows and columns up to here leaves the cell in view, and nothing moves', header(sheds).includes('%%freeze 4 3%%') && shown().inView && still(before), { header: header(sheds), shown: shown(), before, after: scroll() });
+					await toRow(20);
+					await sideways(700);
+					check('Keep 5 scrolled down and sideways, the cell is in view at the inside corner', shown().inView, shown());
+					await run('unfreeze-table');
+					unpinned = shown();
+					check('Keep 5 Unfreeze table scrolls the note and the table just far enough to show the cell', unpinned.inView && flush(unpinned.gap[0]) && flush(unpinned.gap[1]), unpinned);
+
+					await press(cm, 'Escape');
+					await selectSown();
+					sheds = await frozenTable('Sheds', -60);
+					before = scroll();
+					await run('freeze-rows');
+					check('Keep 6 with the header in view, Freeze rows up to here doesn\'t move the note', shown().inView && still(before), { shown: shown(), before, after: scroll() });
+					await run('unfreeze-table');
+					check('Keep 6 nor does Unfreeze table', shown().inView && still(before), { shown: shown(), before, after: scroll() });
+
+					// A freeze taken out by Sync arrives as a reload, which mustn't move the note.
+					await run('freeze-rows');
+					await toRow(20);
+					before = scroll();
+					const line = cm.state.doc.lineAt(sheds.from);
+					const mark = line.text.indexOf('%%freeze 4 0%% ');
+					cm.dispatch({ changes: { from: line.from + mark, to: line.from + mark + '%%freeze 4 0%% '.length }, userEvent: 'set' });
+					await frames();
+					await sleep(300);
+					check('Keep a freeze taken out by Sync leaves the note where it is', mark > 0 && !sheds.el.classList.contains(FROZEN) && at(cm) === '3,2' && still(before), { mark, at: at(cm), before, after: scroll() });
+
+					await press(cm, 'Escape');
+					await press(cm, 'Escape');
+					await restore(cm, original);
+					check('Keep: the note is as it was', cm.state.doc.toString() === original);
+				}
+
 				// A table Obsidian didn't write keeps its spacing.
 				cm = await open('Cell moves');
 				const cellNote = cm.state.doc.toString();

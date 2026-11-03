@@ -1,5 +1,6 @@
 import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/view';
-import { CELL_CLASS, pinnedTables, TABLE_CLASS } from './cells';
+import { CELL_CLASS, cellSelection, pinnedTables, TABLE_CLASS } from './cells';
+import { showsCellAfter } from './decide';
 import { Freeze, MAX_FROZEN_COLUMNS, readFreeze } from './freeze-mark';
 import { Paint, readPaint } from './theme-paint';
 
@@ -276,6 +277,11 @@ class FrozenTables implements PluginValue {
 	 */
 	private readonly paints: Paints = new Map();
 	private restarted = -Infinity;
+	/**
+	 * A freeze command, Undo or Redo has changed a header line, so the selected cell is shown once the new
+	 * freeze is marked (`asked`), and measured after the editor's own scroll (`armed`).
+	 */
+	private showing: 'no' | 'asked' | 'armed' = 'no';
 
 	private readonly onWidgets = (records: MutationRecord[]) => {
 		const widgets = new Set<HTMLElement>();
@@ -305,6 +311,10 @@ class FrozenTables implements PluginValue {
 		const widgets = entries.map(({ target }) => target.closest<HTMLElement>(`.${TABLE_CLASS}`));
 		const tables = entries.some(({ target }) => target === this.view.scrollDOM) ? this.drawn : new Set(widgets.map((widget) => widget && this.known.get(widget)));
 		for (const table of tables) table?.measure(paneHeight);
+		if (this.showing === 'armed') {
+			this.showing = 'no';
+			this.view.plugin(cellSelection)?.showSelected();
+		}
 		if (paneHeight === this.paneHeight) return;
 		const changed = this.paneHeight > 0;
 		this.paneHeight = paneHeight;
@@ -344,8 +354,26 @@ class FrozenTables implements PluginValue {
 	private readonly reread = {
 		key: 'rereadFreezes',
 		read: () => undefined,
-		write: () => this.refresh([...this.drawn]),
+		write: () => {
+			this.refresh([...this.drawn]);
+			if (this.showing !== 'asked') return;
+			this.showing = 'armed';
+			this.measureAfterLayout();
+		},
 	};
+
+	/**
+	 * Has every drawn table measured once this frame is laid out, which is after the editor's own scroll:
+	 * Undo and Redo scroll their selection, the whole table, into view, after anything this plugin writes.
+	 * Watching the pane anew sends a size at once, even an unchanged one, and so does a table that's been
+	 * marked, but an unfrozen table has nothing left to watch.
+	 */
+	private measureAfterLayout() {
+		const { scrollDOM } = this.view;
+		this.sizes ??= new (scrollDOM.ownerDocument.defaultView ?? window).ResizeObserver(this.onResized);
+		this.sizes.unobserve(scrollDOM);
+		this.sizes.observe(scrollDOM);
+	}
 
 	constructor(private readonly view: EditorView) {
 		editors.add(this);
@@ -408,7 +436,9 @@ class FrozenTables implements PluginValue {
 			header ||= update.changes.touchesRange(line.from, line.to) !== false;
 			table.from = update.changes.mapPos(table.from, 1);
 		}
-		if (header) this.view.requestMeasure(this.reread);
+		if (!header) return;
+		this.view.requestMeasure(this.reread);
+		if (update.transactions.some(showsCellAfter)) this.showing = 'asked';
 	}
 
 	destroy() {

@@ -154,6 +154,11 @@ class CellSelection implements PluginValue, Cells {
 		this.cell?.classList.add(REFUSED_CLASS);
 	}
 
+	/** Shows the selected cell after its table's freeze changed, which can leave it out of view. */
+	showSelected() {
+		if (this.cell?.isConnected) show(this.cell);
+	}
+
 	/** Whether the table whose cell is closing was selected from above. */
 	fromAbove(table: Span): boolean {
 		return this.start === table.from && this.side === true;

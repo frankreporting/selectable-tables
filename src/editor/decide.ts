@@ -488,6 +488,16 @@ export function copied({ state, layout, cells }: TableContext): string | null {
 export const writesFreeze = Annotation.define<boolean>();
 
 /**
+ * Whether a change to a table's header line shows the selected cell once the new freeze is drawn: a freeze
+ * command's own write, and Undo or Redo. Unfreezing sends a pinned cell back to its place in the table,
+ * which can be above the pane or off to its left. A freeze from Sync or a second pane doesn't move the
+ * note, as an edit from Sync doesn't scroll to an open cell.
+ */
+export function showsCellAfter(tr: Transaction): boolean {
+	return tr.annotation(writesFreeze) === true || tr.isUserEvent('undo') || tr.isUserEvent('redo');
+}
+
+/**
  * Whether the edit guard drops a change to a selected table. Typing into it, as with Shift+Enter, Ctrl+O
  * or an indent key, does nothing. Deleting, cutting, pasting and dropping stay possible on a selected
  * table: those are meant for the selection. Composed input (IME) always passes: dropping it leaves the

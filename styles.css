@@ -65,27 +65,26 @@
 }
 
 /*
- * An open cell keeps its width, and only its height changes. Table layout reads each cell's minimum and
- * preferred widths, so these keep them as they were with the cell closed. The cell's editor adds nothing,
- * except in an empty cell, which would otherwise wrap every word. All its text wraps inside the cell. And
- * the rendered text, which Obsidian hides with an inline style, stays in the layout unseen, so the column
- * holds the width it set. Only !important beats that inline style.
+ * An open cell keeps its width, and only its height changes. Table layout reads each cell's narrowest and
+ * preferred widths, and Obsidian hides the rendered text as the cell opens, so width-copy.ts puts an unseen
+ * copy of it in the box holding the cell's editor, and marks that box. The copy holds the width the text set,
+ * and the editor adds none, so all its text wraps inside the cell. An empty cell gets no copy, and grows as
+ * you type, since otherwise it would wrap every word. The box is already padded, so the copy isn't.
  */
-.markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget :is(th, td):not(:has(> .table-cell-wrapper > br:only-child)) > .table-cell-wrapper .cm-content {
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget .selectable-tables-width-copy {
+	visibility: hidden;
+	height: 0;
+	padding: 0;
+	overflow: hidden;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget .selectable-tables-holds-width .cm-content {
 	width: 0;
 }
 
 .markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget .table-cell-wrapper .cm-content.cm-lineWrapping {
 	white-space: break-spaces;
 	overflow-wrap: anywhere;
-}
-
-.markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget .table-cell-wrapper[style*="display: none"] {
-	display: block !important;
-	visibility: hidden;
-	height: 0;
-	padding-block: 0;
-	overflow: hidden;
 }
 
 /*

@@ -967,6 +967,18 @@
 
 		// --- Open cells keep their width
 		const columns = (t) => Array.from(t.el.querySelector('table').rows[0].cells, (c) => Math.round(c.getBoundingClientRect().width * 10) / 10).join(', ');
+		const WIDTH_COPY = 'selectable-tables-width-copy';
+		const copiesIn = (el) => el.querySelectorAll(`.${WIDTH_COPY}`).length;
+		// A copy anywhere but in the box holding an open cell's editor was left behind.
+		const strayCopies = (el) => Array.from(el.querySelectorAll(`.${WIDTH_COPY}`)).filter((copy) => !copy.parentElement.querySelector(':scope > * > .cm-editor')).length;
+		// A cell's boxes: its rendered text, and while it's open, the box Obsidian builds for its editor.
+		const boxesOf = (cell) => {
+			const wrappers = Array.from(cell.children).filter((child) => child.classList.contains('table-cell-wrapper'));
+			const editorBox = wrappers.find((wrapper) => wrapper.querySelector(':scope > * > .cm-editor'));
+			return { wrappers, editorBox, rendered: wrappers.find((wrapper) => wrapper !== editorBox) };
+		};
+		const openTd = (cm) => cm.contentDOM.querySelector('.cm-table-widget.has-focus .cm-editor')?.closest('td, th');
+		const lineElement = (cm, text) => Array.from(cm.contentDOM.querySelectorAll('.cm-line')).find((line) => line.textContent === text);
 		cm = await open('Markdown in cells');
 		original = cm.state.doc.toString();
 		const plants = await tableUnder(cm, 'Plants');
@@ -976,21 +988,58 @@
 		await keys(cm, plants, 'ArrowDown');
 		await press(cm, 'Enter');
 		await sleep(300);
-		const openFern = cm.contentDOM.querySelector('.cm-table-widget.has-focus .cm-editor').closest('td, th');
-		const renderedCopy = Array.from(openFern.querySelectorAll('.table-cell-wrapper')).find((w) => !w.querySelector('.cm-editor'));
-		check('relies 8: an open cell keeps its rendered text in a hidden wrapper, beside the one holding its editor', renderedCopy && renderedCopy.style.display === 'none', openFern.innerHTML.slice(0, 200));
+		const openFern = openTd(cm);
+		const fernBoxes = boxesOf(openFern);
+		const editorElement = fernBoxes.editorBox?.querySelector(':scope > * > .cm-editor')?.parentElement;
+		check('relies 8a: an open cell has its rendered text hidden, and a box of its own holding the editor\'s element, which holds .cm-editor', fernBoxes.wrappers.length === 2 && fernBoxes.rendered?.style.display === 'none' && editorElement, openFern.innerHTML.slice(0, 200));
+		const fernCopy = fernBoxes.editorBox?.querySelector(`:scope > .${WIDTH_COPY}`);
+		check('an open cell gets one copy of its rendered text, right after the editor\'s element, unseen', copiesIn(openFern) === 1 && fernCopy && editorElement.nextElementSibling === fernCopy && fernCopy.textContent === fernBoxes.rendered.textContent && getComputedStyle(fernCopy).visibility === 'hidden' && fernCopy.getBoundingClientRect().height === 0, { copies: copiesIn(openFern), text: fernCopy?.textContent });
 		check('opening a cell with a link moves no column', columns(plants) === closedWidths, { closedWidths, open: columns(plants) });
+		// Focus leaving and coming back to a cell that's still open, as when the window comes forward again.
+		cellView(cm).contentDOM.blur();
+		await settle();
+		cellView(cm).focus();
+		await settle();
+		check('focus back on an open cell adds no second copy', openTd(cm) === openFern && copiesIn(openFern) === 1, { same: openTd(cm) === openFern, copies: copiesIn(openFern) });
 		await press(cellEditor(cm), 'Tab');
 		await sleep(300);
 		check('moving to another open cell moves no column', columns(plants) === closedWidths, { closedWidths, moved: columns(plants) });
+		check('Tab to the next cell leaves no copy behind, and the cell it opens has one', openTd(cm) !== openFern && boxesOf(openFern).wrappers.length === 1 && copiesIn(openFern) === 0 && copiesIn(openTd(cm)) === 1 && strayCopies(plants.el) === 0, { left: copiesIn(openFern), opened: copiesIn(openTd(cm)) });
 		cellView(cm).dispatch(cellView(cm).state.replaceSelection(' and a good deal more text than the cell had'), { userEvent: 'input.type' });
 		await settle();
 		check('typing in an open cell moves no column', columns(plants) === closedWidths, { closedWidths, typing: columns(plants) });
+		const typedIn = openTd(cm);
 		await press(cellEditor(cm), 'Escape');
 		await sleep(300);
+		check('relies 8b: once a cell closes, its editor\'s box is gone, and its rendered text shows', !openCell(cm) && boxesOf(typedIn).wrappers.length === 1 && !typedIn.querySelector('.cm-editor') && boxesOf(typedIn).rendered.style.display !== 'none', typedIn.innerHTML.slice(0, 200));
+		check('Escape leaves no copy behind', copiesIn(plants.el) === 0, copiesIn(plants.el));
 		await press(cm, 'Escape');
 		await press(cm, 'Escape');
 		await restore(cm, original);
+		// A click out of an open cell, onto a line of text.
+		await selectTable(cm, plants);
+		await press(cm, 'Enter');
+		await keys(cm, plants, 'ArrowDown');
+		await press(cm, 'Enter');
+		await sleep(300);
+		const openedBeforeClick = copiesIn(plants.el);
+		await realClick(lineElement(cm, 'A line between the tables.'));
+		check('a click out of an open cell leaves no copy behind', openedBeforeClick === 1 && !openCell(cm) && copiesIn(plants.el) === 0, { openedBeforeClick, after: copiesIn(plants.el) });
+		// A row added with the + button while a cell is open: Obsidian builds the table anew.
+		await selectTable(cm, plants);
+		await press(cm, 'Enter');
+		await keys(cm, plants, 'ArrowDown');
+		await press(cm, 'Enter');
+		await sleep(300);
+		const addRowOpen = plants.el.querySelector('.table-row-btn');
+		addRowOpen.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true }));
+		addRowOpen.click();
+		await sleep(300);
+		const rowAdded = cm.state.doc.lines === original.split('\n').length + 1;
+		check('a row added with a cell open leaves no copy behind', rowAdded && strayCopies(plants.el) === 0 && copiesIn(plants.el) <= 1, { rowAdded, copies: copiesIn(plants.el), stray: strayCopies(plants.el) });
+		await restore(cm, original);
+		await sleep(300);
+		check('Open cells: the note is as it was', cm.state.doc.toString() === original);
 		cm = await open('Cell moves');
 		original = cm.state.doc.toString();
 		const empties = await tableUnder(cm, 'Seed trays');
@@ -1000,15 +1049,46 @@
 		await keys(cm, empties, ...repeat('ArrowDown', 2), ...repeat('ArrowRight', 2));
 		await press(cm, 'Enter');
 		await sleep(300);
+		const emptyCopies = copiesIn(openTd(cm));
 		cellView(cm).dispatch(cellView(cm).state.replaceSelection('a sentence typed into an empty cell, which is wider than the column was'), { userEvent: 'input.type' });
 		await settle();
 		const emptyTyping = columns(empties);
 		await press(cellEditor(cm), 'Escape');
 		await sleep(300);
-		check('an empty cell still grows as you type, as it always has', emptyTyping !== emptyClosed, { emptyClosed, emptyTyping });
+		check('an empty cell gets no copy, and still grows as you type, as it always has', emptyCopies === 0 && emptyTyping !== emptyClosed, { emptyCopies, emptyClosed, emptyTyping });
 		await press(cm, 'Escape');
 		await press(cm, 'Escape');
 		await restore(cm, original);
+		cm = await open('Pictures in cells');
+		original = cm.state.doc.toString();
+		const pictures = await tableUnder(cm, 'Picture');
+		const picturesClosed = columns(pictures);
+		await selectTable(cm, pictures);
+		await press(cm, 'Enter');
+		await keys(cm, pictures, 'ArrowDown', 'ArrowRight');
+		await press(cm, 'Enter');
+		await sleep(300);
+		const pictureCell = openTd(cm);
+		const pictureCopy = pictureCell && boxesOf(pictureCell).editorBox?.querySelector(`.${WIDTH_COPY}`);
+		check('a cell with a picture keeps its column\'s width open, its copy holding the picture', placeOf(pictureCell) === '1,1' && pictureCopy?.querySelector('img') && columns(pictures) === picturesClosed, { open: placeOf(pictureCell), closed: picturesClosed, opened: columns(pictures) });
+		await press(cellEditor(cm), 'Escape');
+		await sleep(300);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		const player = await tableUnder(cm, 'Player');
+		await selectTable(cm, player);
+		await press(cm, 'Enter');
+		await keys(cm, player, 'ArrowDown', 'ArrowRight');
+		await press(cm, 'Enter');
+		await sleep(300);
+		const playerCell = openTd(cm);
+		check('a cell holding a player gets no copy, which would load it again', placeOf(playerCell) === '1,1' && boxesOf(playerCell).rendered?.querySelector('audio') && copiesIn(playerCell) === 0, { open: placeOf(playerCell), audio: !!boxesOf(playerCell ?? document.body).rendered?.querySelector('audio') });
+		await press(cellEditor(cm), 'Escape');
+		await sleep(300);
+		await press(cm, 'Escape');
+		await press(cm, 'Escape');
+		await restore(cm, original);
+		check('Pictures: the note is as it was', cm.state.doc.toString() === original);
 
 		// --- D. Typing, Tab, delete
 		cm = await open('Two report tables');

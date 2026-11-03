@@ -112,6 +112,10 @@ What's planned, broadly. The order and the details may change.
 - A search result in a table selects its cell instead of opening it.
 - ← and → swap around a table in right-to-left text.
 
+## Feedback and bugs
+
+Found a bug, or have an idea? [Open an issue](https://github.com/frankreporting/selectable-tables/issues/new/choose) on GitHub. The bug form asks for what helps track it down: your Obsidian and plugin versions, your device, your theme, and the keys you pressed. Issues are public, so if a table shows the problem, make up a small one rather than pasting one from your notes.
+
 ## Development
 
 Requires Node.js 22 or later.

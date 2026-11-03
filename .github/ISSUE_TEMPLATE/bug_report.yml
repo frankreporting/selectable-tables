@@ -1,0 +1,95 @@
+name: Bug report
+description: Something Selectable Tables does wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Issues here are public, so please don't paste tables or text from your own notes. A small made-up table that shows the problem works best.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead.
+      placeholder: I selected a table with → and pressed Enter, and no cell was selected. I expected its first cell to be.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The keys you pressed, in order, starting from where the caret was.
+      placeholder: |
+        1. Put the caret on the empty line above the table.
+        2. Press →.
+        3. Press Enter.
+    validations:
+      required: true
+  - type: textarea
+    id: table
+    attributes:
+      label: A table that shows it
+      description: Made up, not from your notes. Leave it empty if any table does it.
+      render: markdown
+      placeholder: |
+        | Plant | Room    |
+        | ----- | ------- |
+        | Fern  | Kitchen |
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: Shown under Selectable Tables in Settings › Community plugins.
+      placeholder: 0.2.2
+    validations:
+      required: true
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version
+      description: Shown in Settings › General.
+      placeholder: 1.15.0
+    validations:
+      required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - Mac
+        - Windows
+        - Linux
+        - iPhone
+        - iPad
+        - Android
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Editing mode
+      options:
+        - Live Preview
+        - Source mode
+        - Reading view
+    validations:
+      required: true
+  - type: input
+    id: theme
+    attributes:
+      label: Theme
+      description: Settings › Appearance › Themes.
+      placeholder: Default
+  - type: dropdown
+    id: vim
+    attributes:
+      label: Vim key bindings
+      description: Settings › Editor › Vim key bindings.
+      options:
+        - "Off"
+        - "On"
+  - type: textarea
+    id: other
+    attributes:
+      label: Anything else
+      description: Other plugins that might be involved, or a screenshot or screen recording (drag it here). Crop out anything private.

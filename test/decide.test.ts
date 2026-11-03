@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
-import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab } from '../src/editor/decide';
+import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
 
 const TABLE = '| Plant  | Room |\n| ------ | ---- |\n| Fern   | Hall |';
@@ -341,6 +341,127 @@ describe('a selected cell', () => {
 
 	test('Copy steps aside with no cell selected', () => {
 		assert.equal(copied(on(state())), null);
+	});
+});
+
+describe('typing on a selected table or cell', () => {
+	const PARAGRAPH = `Intro\n\n${TABLE}\n\n‸\n\nAfter`;
+	const AT_END = `Intro\n\n${TABLE}\n\n‸`;
+
+	/** The edit typing starts with, as a transaction from the note's state. */
+	function edit(marked: string, cells: Cells = noCells) {
+		const state = note(marked);
+		const action = typeBelow(on(state, cells));
+		if (action?.type !== 'below') return null;
+		return { state, action, tr: state.update({ changes: { from: action.from, to: action.to, insert: action.insert } }) };
+	}
+
+	/** The note after that edit, with ‸ where the caret lands. */
+	function typed(marked: string, cells?: Cells): string | null {
+		const done = edit(marked, cells);
+		if (!done) return null;
+		const text = done.tr.state.doc.toString();
+		return `${text.slice(0, done.action.pos)}‸${text.slice(done.action.pos)}`;
+	}
+
+	test('with a blank line and then text, the new paragraph goes between two blank lines', () => {
+		assert.equal(typed(selected('Intro\n\n', '\n\nAfter')), PARAGRAPH);
+	});
+
+	test('with a blank line and then the note\'s end, the paragraph\'s own line is added', () => {
+		assert.equal(typed(selected('Intro\n\n', '\n')), AT_END);
+	});
+
+	test('with two blank lines, one line break is added', () => {
+		assert.equal(typed(selected('Intro\n\n', '\n\n\nAfter')), PARAGRAPH);
+	});
+
+	test('a table that ends the note gets its blank line and the paragraph\'s line', () => {
+		assert.equal(typed(selected('Intro\n\n', '')), AT_END);
+	});
+
+	test('text right below the table moves down, with a blank line on each side of the paragraph', () => {
+		assert.equal(typed(selected('Intro\n\n', '\nAfter')), PARAGRAPH);
+	});
+
+	test('with the blank lines already there, nothing is added, and the edit still makes an undo step', () => {
+		const text = selected('Intro\n\n', '\n\n\n\nAfter');
+		assert.equal(typed(text), PARAGRAPH);
+		// Undo then takes the typing back to the selected table, as it does where lines were added.
+		assert.ok(edit(text)?.tr.docChanged);
+		assert.equal(typed(selected('Intro\n\n', '\n\n\n\n\nAfter')), `Intro\n\n${TABLE}\n\n‸\n\n\nAfter`);
+		assert.equal(typed(selected('Intro\n\n', '\n\n')), AT_END);
+		assert.ok(edit(selected('Intro\n\n', '\n\n'))?.tr.docChanged);
+	});
+
+	test('a line of spaces counts as blank, and the caret still gets an empty line', () => {
+		assert.equal(typed(selected('Intro\n\n', '\n  \nAfter')), `Intro\n\n${TABLE}\n  \n‸\n\nAfter`);
+		assert.equal(typed(selected('Intro\n\n', '\n  ')), `Intro\n\n${TABLE}\n  \n‸`);
+	});
+
+	test('selected from below, the paragraph still goes below', () => {
+		assert.equal(typed(selected('Intro\n\n', '\n\nAfter', false)), PARAGRAPH);
+	});
+
+	test('from a selected cell, the paragraph goes below the table too', () => {
+		const cell: Cells = { selected: { row: 1, column: 1 }, left: null, grid: { rows: 2, columns: () => 2 } };
+		assert.equal(typed(selected('Intro\n\n', '\n\nAfter'), cell), PARAGRAPH);
+	});
+
+	test('with no table selected, it steps aside', () => {
+		assert.equal(edit(`Intro\n‸\n${TABLE}\n\nAfter`), null);
+		assert.equal(edit(`Intro\n⟨\n${TABLE}⟩\n\nAfter`), null);
+	});
+
+	test('the table\'s text never changes, and the edit guard lets the lines through', () => {
+		for (const after of ['\n\nAfter', '\n', '\n\n\nAfter', '', '\nAfter', '\n\n\n\nAfter', '\n  \nAfter']) {
+			for (const fromAbove of [true, false]) {
+				const text = selected('Intro\n\n', after, fromAbove);
+				const done = edit(text);
+				assert.ok(done, JSON.stringify(after));
+				const table = spanOf(text);
+				assert.equal(done.tr.state.doc.sliceString(table.from, table.to), TABLE, JSON.stringify(after));
+				// The cell comes off before the edit, so the guard sees a selected table.
+				assert.ok(!stopsEdit(done.tr, table, false), JSON.stringify(after));
+			}
+		}
+	});
+});
+
+describe('keys that type', () => {
+	const press = (key: string, mods: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean } = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, ...mods });
+
+	test('a letter, digit, punctuation mark or Space types', () => {
+		for (const key of ['a', 'Z', '5', '.', '[', ' ', 'é', '日', '😀']) assert.ok(typesText(press(key), true), key);
+	});
+
+	test('Option with a letter types its character on a Mac', () => {
+		assert.ok(typesText(press('∞', { altKey: true }), true));
+	});
+
+	test('an input method\'s first key and a dead key type', () => {
+		// On a Mac an input method's first key has its real letter; elsewhere it's Process, and on Android
+		// Unidentified. Option+E is Dead.
+		for (const key of ['Process', 'Unidentified', 'Dead']) assert.ok(typesText(press(key), true), key);
+	});
+
+	test('named keys don\'t type', () => {
+		for (const key of ['Enter', 'Tab', 'Backspace', 'Delete', 'Escape', 'ArrowDown', 'Home', 'Shift', 'Meta', 'Alt', 'F1']) assert.ok(!typesText(press(key), true), key);
+	});
+
+	test('with Cmd or Ctrl, a key is a shortcut', () => {
+		assert.ok(!typesText(press('a', { metaKey: true }), true));
+		assert.ok(!typesText(press('a', { ctrlKey: true }), true));
+		assert.ok(!typesText(press('a', { ctrlKey: true }), false));
+		assert.ok(!typesText(press('a', { ctrlKey: true, altKey: true }), true));
+	});
+
+	test('AltGr on Windows and Linux reports Ctrl+Alt, and types', () => {
+		assert.ok(typesText(press('@', { ctrlKey: true, altKey: true }), false));
+	});
+
+	test('Alt with a letter on Windows and Linux is a shortcut', () => {
+		assert.ok(!typesText(press('f', { altKey: true }), false));
 	});
 });
 

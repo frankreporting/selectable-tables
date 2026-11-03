@@ -43,7 +43,8 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | Escape | The caret goes back to the side you selected the table from. |
 | Backspace, Delete, Cut | Remove the table, undoable. |
 | Copy | Copies the table's Markdown. |
-| Typing, Tab, Shift+Enter | Nothing happens, so a stray key can't change the table. Paste replaces it, undoable. |
+| Typing | Starts a new paragraph below the table, with a blank line on each side, and what you type goes there. The table doesn't change, and one undo takes it all back. |
+| Tab, Shift+Enter | Nothing happens, so a stray key can't change the table. Paste replaces it, undoable. |
 
 **With a cell selected:** it keeps showing its rendered text, with the tint and thick border Obsidian draws around selected cells. Nothing opens as you move, so the table keeps its size.
 
@@ -56,13 +57,14 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | Enter | Opens the cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. On a table Obsidian didn't write, such as a hand-typed one, the frame turns red and nothing opens. Click a cell to edit it: that usually tidies the table, and Enter works from then on. |
 | Escape | Back to the selected table. |
 | Copy | Copies the cell's Markdown, the way the cell's editor shows it. |
-| Typing, Backspace, Delete, Cut, Paste, Option with an arrow, Shift with an arrow or any of the keys above | Nothing happens. Editor commands leave the table alone too. |
+| Typing | Starts a new paragraph below the table, as on a selected table. |
+| Backspace, Delete, Cut, Paste, Option with an arrow, Shift with an arrow or any of the keys above | Nothing happens. Editor commands leave the table alone too. |
 
 **In a cell**, Escape closes the cell and selects it. Page Up, Page Down, Cmd+↑ and Cmd+↓ close it and select the top or bottom cell of its column, so the note doesn't jump away from the table; press Enter to open that cell. Every other key works as Obsidian has it, and clicking a cell still edits it directly. An open cell keeps its width: only its height changes, so the columns stay put until you close it. An empty cell still grows as you type.
 
 With Vim mode on, Vim's own keys come first: in normal mode, j, k and the arrows still step into tables.
 
-With an input method (IME), starting to compose on a selected table or cell moves the caret beside the table, and the text lands there.
+Typing with an input method (IME), or an accent such as Option+E, works the same way: the text lands in the new paragraph below the table.
 
 ## Freeze rows and columns
 

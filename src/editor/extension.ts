@@ -1,8 +1,8 @@
 import { EditorSelection, EditorState, Extension, Prec, SelectionRange, TransactionSpec } from '@codemirror/state';
 import { EditorView, KeyBinding, keymap } from '@codemirror/view';
-import { editorEditorField, editorLivePreviewField, Notice } from 'obsidian';
+import { editorEditorField, editorLivePreviewField, Notice, Platform } from 'obsidian';
 import { cellFollowsCaret, cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab } from './decide';
+import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText } from './decide';
 import { canFreeze, frozenTables } from './freeze';
 import { viewLayout } from './layout';
 import type { Span } from './table-text';
@@ -107,6 +107,14 @@ function run(view: EditorView, action: Action | null): boolean {
 		case 'refuse':
 			view.plugin(cellSelection)?.refuse();
 			new Notice('This table can\'t open from the keyboard. Click a cell to edit it.');
+			return true;
+		case 'below':
+			// The cell goes first, so the edit guard sees a selected table. The edit has no user event, which
+			// the guard lets through where the table ends the note and the line breaks go right after it.
+			// Undo still takes it away with the typing: the history joins an edit to the one before it by the
+			// later edit's event, and touching edits that close together count as one.
+			view.plugin(cellSelection)?.leave();
+			view.dispatch({ changes: { from: action.from, to: action.to, insert: action.insert }, selection: EditorSelection.cursor(action.pos), scrollIntoView: true });
 			return true;
 	}
 }
@@ -262,25 +270,44 @@ const markSelectedTable = EditorView.editorAttributes.of((view) => {
 	return { class: SELECTED_CLASS };
 });
 
+/** Where Ctrl+Option types nothing, so Ctrl+Alt isn't AltGr. */
+const APPLE = Platform.isMacOS || Platform.isIosApp;
+
 /**
- * Typing on a selected table does nothing, so a stray key can't change it. This stops the browser's
- * text input itself: with the table selected, the browser's own caret can't sit across the table, so
- * a typed character would otherwise land on the line below. On a selected cell, no input goes through.
- * Copy gives the cell, not the table underneath it, and Cut and Paste do nothing.
+ * Whether typing on a selected table or cell can start a paragraph below it now. Vim's normal mode has its
+ * own letters. This runs on every key that types, so the cheapest test comes first.
+ */
+function typesBelow(view: EditorView): boolean {
+	return selectedTables.has(view.state) && active(view) && !view.scrollDOM.classList.contains(VIM_CLASS);
+}
+
+/**
+ * A key that types on a selected table or cell starts a new paragraph below the table, and its text goes
+ * there. The caret moves on the key's keydown, which comes before the text, and the browser then types at
+ * the new caret, so Obsidian's own handling of typed text, such as closing brackets, still runs. An input
+ * method left alone replaces a selected table with its first letter and puts the rest elsewhere; its
+ * keydown comes before its composition, and that's the only safe moment to move the caret: moving it once
+ * the composition runs leaves it stuck, and Live Preview stops drawing until it ends. An input method with
+ * no keydown is left alone.
+ *
+ * Text the keydown didn't see, such as from the emoji picker or dictation, goes below the table too, and
+ * other text input on a selected table stays stopped, since the browser's caret can't sit across the
+ * table. On a selected cell, no other input goes through. Copy gives the cell, not the table underneath
+ * it, and Cut and Paste do nothing.
  */
 const selectedEvents = EditorView.domEventHandlers({
-	beforeinput(event, view) {
-		if (cellSelected(view.state)) return event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo';
-		if (event.inputType !== 'insertText' && event.inputType !== 'insertReplacementText') return false;
-		return selectedTables.has(view.state);
-	},
-	// An input method composes past beforeinput, and at a note's start or right below the properties it
-	// would replace the selected table. Its keydown comes first, with key code 229, and the caret steps
-	// beside the table then. Moving the selection any later leaves the composition stuck, and Live Preview
-	// stops drawing until it ends, so an input method with no keydown is left alone.
 	keydown(event, view) {
-		if (event.keyCode === 229 && !view.compositionStarted && selectedTables.has(view.state)) run(view, escape({ ...context(view), cells: noCells }));
+		if (!event.defaultPrevented && !event.isComposing && typesText(event, APPLE) && typesBelow(view)) run(view, typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells }));
 		return false;
+	},
+	beforeinput(event, view) {
+		const typed = event.inputType === 'insertText' || event.inputType === 'insertReplacementText';
+		if (typed && event.data && typesBelow(view) && run(view, typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells }))) {
+			view.dispatch({ ...view.state.replaceSelection(event.data), scrollIntoView: true, userEvent: 'input.type' });
+			return true;
+		}
+		if (cellSelected(view.state)) return event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo';
+		return typed && selectedTables.has(view.state);
 	},
 	copy(event, view) {
 		const text = copied(context(view));

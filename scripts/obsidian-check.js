@@ -78,6 +78,30 @@
 		await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
 		await wait();
 	}
+	// Typing as the keyboard sends it: each key's keydown, then its text. An event sent to one element types nothing.
+	async function realType(text) {
+		for (const char of text) {
+			const [code, virtual] = char === ' ' ? ['Space', 32] : /\d/.test(char) ? [`Digit${char}`, char.charCodeAt(0)] : [`Key${char.toUpperCase()}`, char.toUpperCase().charCodeAt(0)];
+			const event = { key: char, code, text: char, unmodifiedText: char, windowsVirtualKeyCode: virtual };
+			await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyDown' });
+			await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+		}
+		await settle();
+	}
+	// An input method's first key, as Chromium sends it, then its composition. On a Mac the key has its real
+	// letter, elsewhere Process, and a dead key is Dead, all with key code 229 and before the composition
+	// starts. A composition left running freezes the window, so it always ends, with Input.insertText.
+	async function realCompose({ key, code, altKey }, steps, commit) {
+		const event = { key, code, windowsVirtualKeyCode: 229, modifiers: altKey ? 1 : 0 };
+		try {
+			await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+			for (const text of steps) await cdp.sendCommand('Input.imeSetComposition', { text, selectionStart: text.length, selectionEnd: text.length });
+		} finally {
+			await cdp.sendCommand('Input.insertText', { text: commit });
+			await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+		}
+		await settle();
+	}
 	async function realClick(el) {
 		const { left, top, width, height } = el.getBoundingClientRect();
 		const point = { x: left + width / 2, y: top + height / 2, button: 'left', clickCount: 1 };
@@ -353,11 +377,8 @@
 		await selectTable(cm, seed);
 		await press(cm, 'Enter');
 		await keys(cm, seed, 'ArrowDown', 'ArrowRight');
-		const typed = new InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true, cancelable: true });
-		cm.contentDOM.dispatchEvent(typed);
-		await settle();
-		quiet = await keys(cm, seed, ' ', ['Enter', { shiftKey: true }]);
-		check('22 typing, Space and Shift+Enter do nothing', typed.defaultPrevented && quiet && at(cm) === '1,1', at(cm));
+		quiet = await keys(cm, seed, ['Enter', { shiftKey: true }]);
+		check('22 Shift+Enter does nothing', quiet && at(cm) === '1,1', at(cm));
 		quiet = await keys(cm, seed, 'Backspace', 'Delete');
 		const cut = clipboard(cm, 'cut');
 		const paste = clipboard(cm, 'paste', 'pasted');
@@ -570,12 +591,14 @@
 		check('undo that selects another table leaves no cell marked', firstTable && marked(cm).length === 0 && cm.state.doc.toString() === original, at(cm));
 		await restore(cm, original);
 
-		// An input method's keydown has key code 229, and the caret steps beside the table on it.
+		// An input method's first key on a selected cell starts a paragraph below the table, before its text.
 		const composed = await tableUnder(cm, 'Seed trays');
 		await selectTable(cm, composed);
 		await press(cm, 'Enter');
 		await press(cm, 'Process', { keyCode: 229 });
-		check('an input method\'s key on a selected cell moves the caret beside the table', marked(cm).length === 0 && sel(cm).anchor === sel(cm).head && sel(cm).line === composed.first - 1 && cm.state.doc.toString() === original, sel(cm));
+		const paragraphAt = composed.to + 2;
+		check('an input method\'s key on a selected cell starts a paragraph below the table', marked(cm).length === 0 && sel(cm).anchor === paragraphAt && sel(cm).head === paragraphAt && cm.state.doc.toString() === `${original.slice(0, paragraphAt)}\n\n${original.slice(paragraphAt)}`, sel(cm));
+		await restore(cm, original);
 
 		// A held Enter stops at the selected cell, and a drag over the table drops it.
 		const heldTable = await tableUnder(cm, 'Seed trays');
@@ -959,6 +982,15 @@
 			const insertSelected = selectsWhole(cm, t1) && !openCell(cm);
 			await press(cm, 'Escape');
 			check('in Vim\'s insert mode, the class is off and a word jump selects the table', !insertClass && insertSelected && cm.state.doc.toString() === original, { insertClass, insertSelected });
+			// Back in normal mode, a letter on a selected table is Vim's, and starts no paragraph.
+			[t1] = tables(cm);
+			cm.dispatch({ selection: { anchor: t1.from, head: t1.to } });
+			await settle();
+			const vimSelected = cm.scrollDOM.classList.contains('cm-vimMode') && cm.dom.classList.contains('selectable-tables-selected');
+			await press(cm, 'l');
+			check('in Vim\'s normal mode, a letter on a selected table is Vim\'s, and starts no paragraph', vimSelected && cm.state.doc.toString() === original, { vimSelected, ...sel(cm) });
+			await press(cm, 'Escape');
+			await closeCell(cm, t1.from - 1);
 		} finally {
 			app.vault.setConfig('vimMode', undefined);
 			await sleep(2500);
@@ -1096,26 +1128,87 @@
 		[t1] = tables(cm);
 		await caretOnLine(cm, t1.first - 1);
 		await press(cm, 'ArrowRight');
-		// The guard against typing works on the browser's beforeinput event. (document.execCommand skips
-		// that event, so it can't stand in for typing. Real key presses, sent through the CLI's dev:cdp
-		// with Input.dispatchKeyEvent, were checked on 10/29 and changed nothing.)
-		const input = new InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true, cancelable: true });
-		cm.contentDOM.dispatchEvent(input);
-		await settle();
 		await press(cm, 'Tab');
 		await press(cm, 'Enter', { shiftKey: true });
 		s = sel(cm);
-		check('D18 typing, Tab and Shift+Enter on a selected table change nothing', input.defaultPrevented && cm.state.doc.toString() === original && s.anchor === t1.from && s.head === t1.to && !openCell(cm), s);
+		check('D18 Tab and Shift+Enter on a selected table change nothing', cm.state.doc.toString() === original && s.anchor === t1.from && s.head === t1.to && !openCell(cm), s);
 		await restore(cm, original);
+
+		// Typing on a selected table or cell starts a paragraph below the table, with a blank line on each
+		// side, and one undo takes it all back and selects the table again, from the side it was selected from.
+		// Cmd+Z (Ctrl+Z elsewhere): Obsidian's undo command doesn't run from the CLI's eval.
+		const mac = navigator.platform.startsWith('Mac');
+		const undo = () => press(cm, 'z', { metaKey: mac, ctrlKey: !mac, code: 'KeyZ' });
+		// The note with `text` in a paragraph of its own below the table ending at `end`, past its blank line.
+		const typedBelow = (end, text) => `${original.slice(0, end + 2)}${text}\n\n${original.slice(end + 2)}`;
+		const selectedFrom = (t, fromAbove) => sel(cm).anchor === (fromAbove ? t.from : t.to) && sel(cm).head === (fromAbove ? t.to : t.from);
+		const near = (t) => JSON.stringify(cm.state.doc.toString().slice(t.to - 3, t.to + 20));
+		let typed;
+		let after;
+		for (const [name, text] of [['a letter', 'h'], ['a digit', '5'], ['Space', ' ']]) {
+			[t1] = tables(cm);
+			await selectTable(cm, t1);
+			await realType(text);
+			typed = cm.state.doc.toString() === typedBelow(t1.to, text) && sel(cm).head === t1.to + 2 + text.length;
+			after = near(t1);
+			await undo();
+			check(`D19 ${name} on a selected table starts a paragraph below it, and one undo selects the table again`, typed && cm.state.doc.toString() === original && selectedFrom(t1, true), { after, ...sel(cm) });
+			await restore(cm, original);
+		}
+		[, t2] = tables(cm);
+		await selectTable(cm, t2, false);
+		await realType('h');
+		typed = cm.state.doc.toString() === typedBelow(t2.to, 'h');
+		after = near(t2);
+		await undo();
+		check('D19 typing on a table selected from below starts the paragraph below it too, and undo selects it from below', typed && cm.state.doc.toString() === original && selectedFrom(t2, false), { after, ...sel(cm) });
+		await restore(cm, original);
+		[t1] = tables(cm);
+		await selectTable(cm, t1);
+		await press(cm, 'Enter');
+		const cellBefore = at(cm);
+		await realType('h');
+		typed = cm.state.doc.toString() === typedBelow(t1.to, 'h') && marked(cm).length === 0;
+		after = near(t1);
+		await undo();
+		check('D20 typing on a selected cell starts a paragraph below the table, and one undo selects the table again', cellBefore === '0,0' && typed && cm.state.doc.toString() === original && selectedFrom(t1, true) && marked(cm).length === 0, { cellBefore, after, ...sel(cm) });
+		await restore(cm, original);
+
+		// An input method's composition, and a dead key's, lands in the new paragraph and ends normally.
+		const compositions = [
+			['an input method on a Mac', { key: 'n', code: 'KeyN' }, ['n', 'に', 'にh', 'にほ', 'にほn', 'にほん', '日本'], '日本'],
+			['an input method on Windows', { key: 'Process', code: 'KeyN' }, ['n', 'に', '日本'], '日本'],
+			['Option+E', { key: 'Dead', code: 'KeyE', altKey: true }, ['´'], 'é'],
+		];
+		for (const [name, key, steps, commit] of compositions) {
+			[t1] = tables(cm);
+			await selectTable(cm, t1);
+			await realCompose(key, steps, commit);
+			typed = cm.state.doc.toString() === typedBelow(t1.to, commit) && sel(cm).head === t1.to + 2 + commit.length;
+			const ended = !cm.composing && !cm.compositionStarted;
+			after = near(t1);
+			await undo();
+			check(`D21 ${name} on a selected table composes in a paragraph below it and ends, and one undo selects the table again`, typed && ended && cm.state.doc.toString() === original && selectedFrom(t1, true), { after, ended, ...sel(cm) });
+			await restore(cm, original);
+		}
+		cm = await open('Markdown in cells');
+		check('D21 a note opened after the compositions still draws its tables', tables(cm).length > 0, tables(cm).length);
+		cm = await open('Two report tables');
+
+		[t1] = tables(cm);
+		await selectTable(cm, t1);
+		clipboard(cm, 'paste', 'pasted');
+		await settle();
+		check('D22 Paste still replaces a selected table', cm.state.doc.toString() === original.slice(0, t1.from) + 'pasted' + original.slice(t1.to), near(t1));
+		await restore(cm, original);
+
 		[t1] = tables(cm);
 		cm.dispatch({ selection: { anchor: t1.from, head: t1.to } });
 		// Past CodeMirror's half-second grouping, so undo takes back only the delete.
 		await sleep(700);
 		await press(cm, 'Backspace');
 		check('D16 Backspace deletes the selected table', cm.state.doc.toString() === original.slice(0, t1.from) + original.slice(t1.to));
-		// Cmd+Z (Ctrl+Z elsewhere): Obsidian's undo command doesn't run from the CLI's eval.
-		const mac = navigator.platform.startsWith('Mac');
-		await press(cm, 'z', { metaKey: mac, ctrlKey: !mac, code: 'KeyZ' });
+		await undo();
 		check('D16 undo brings it back unchanged', cm.state.doc.toString() === original);
 		await restore(cm, original);
 

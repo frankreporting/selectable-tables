@@ -25,7 +25,12 @@ export type Action =
 	/** A caret at `pos`, in a selected cell's text, so that Obsidian opens the cell. */
 	| { type: 'open'; pos: number }
 	/** Enter can't safely open a cell of this table, and shows that. */
-	| { type: 'refuse' };
+	| { type: 'refuse' }
+	/**
+	 * A key that types starts a new paragraph below the table: the text from `from` to `to` becomes `insert`,
+	 * which adds the line breaks the paragraph needs, and the caret goes to `pos`, in the note after that.
+	 */
+	| { type: 'below'; from: number; to: number; insert: string; pos: number };
 
 /** A rendered table's shape. Obsidian fills short rows, but a row's own length is what counts. */
 export interface Grid {
@@ -286,9 +291,61 @@ export function deleteForward(state: EditorState, layout: Layout): Action | null
 	return table && { type: 'select', table, fromAbove: true };
 }
 
-/** A key that would type over a selected table does nothing, so a stray key can't change it. */
+/** A key that would put a line break or a tab over a selected table does nothing, so it can't change it. */
 export function stay(state: EditorState, layout: Layout): Action | null {
 	return selectedTable(state, layout) && { type: 'stay' };
+}
+
+/** A line Markdown takes for a blank one: spaces and tabs at most. */
+const blank = (line: Line) => /^[ \t]*$/.test(line.text);
+
+/**
+ * A key that types on a selected table or cell starts a new paragraph below the table, whichever side it
+ * was selected from, and the key's text goes there. The table keeps its blank line below, and the
+ * paragraph gets one before whatever follows it. Line breaks are added only where those are missing,
+ * after the first blank line below the table so the caret's line is a new, empty one. With the lines
+ * already there, the line break before the caret's line is written over with itself, so the typing still
+ * has an undo step that selects the table again.
+ */
+export function typeBelow({ state, layout }: TableContext): Action | null {
+	const table = selectedTable(state, layout);
+	if (!table) return null;
+	const { doc } = state;
+	const last = doc.lineAt(table.to).number;
+	let blanks = 0;
+	while (last + blanks < doc.lines && blank(doc.line(last + blanks + 1))) blanks++;
+	// A blank line, the paragraph's, and a blank line before anything that follows.
+	const missing = (last + blanks < doc.lines ? 3 : 2) - blanks;
+	let change: { from: number; to: number; insert: string };
+	if (missing > 0) {
+		const below = last < doc.lines ? doc.line(last + 1) : null;
+		const at = !below ? table.to : blank(below) ? below.to : below.from;
+		change = { from: at, to: at, insert: '\n'.repeat(missing) };
+	} else {
+		const from = doc.line(last + 2).from - 1;
+		change = { from, to: from + 1, insert: '\n' };
+	}
+	const pos = state.changes(change).apply(doc).line(last + 2).from;
+	return { type: 'below', ...change, pos };
+}
+
+/** The parts of a key event that say whether it types. */
+export interface Key {
+	key: string;
+	ctrlKey: boolean;
+	metaKey: boolean;
+	altKey: boolean;
+}
+
+/**
+ * Whether a key types: a character, Space included, or a key whose text comes later. An input method's
+ * first key has its real letter on a Mac, `Process` on Windows and Linux, and `Unidentified` on Android,
+ * and a dead key such as Option+E is `Dead`. With Cmd or Ctrl it's a shortcut. Option types on a Mac,
+ * while on Windows and Linux Alt is a shortcut too, except as AltGr, which Windows reports as Ctrl+Alt.
+ */
+export function typesText({ key, ctrlKey, metaKey, altKey }: Key, apple: boolean): boolean {
+	if (metaKey || (apple ? ctrlKey : ctrlKey !== altKey)) return false;
+	return [...key].length === 1 || key === 'Process' || key === 'Unidentified' || key === 'Dead';
 }
 
 /** The caret leaves a selected table on one side. With no line there, the check on key moves keeps it. */

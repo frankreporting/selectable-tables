@@ -77,7 +77,7 @@ To freeze, select or open a cell, then run one of these from the command palette
 - **Freeze rows and columns up to here:** both at once. On a table's first cell, that freezes the header row and the first column.
 - **Unfreeze table.**
 
-The cell stays selected, and Undo takes the change back. To give a command its own keys, look it up in **Settings → Hotkeys**.
+The cell stays selected and in view, and Undo takes the change back. To give a command its own keys, look it up in **Settings → Hotkeys**.
 
 A freeze is saved as a comment in the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column. The commands put it in the first cell, unless the row already has one:
 

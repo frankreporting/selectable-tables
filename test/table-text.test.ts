@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Text } from '@codemirror/state';
-import { cellCaret, cellSource, frontmatterEnd, looksLikeTable, tableInText, writtenByObsidian } from '../src/editor/table-text';
+import { cellCaret, cellSource, frontmatterEnd, looksLikeTable, rewrittenWith, tableInText, writtenByObsidian } from '../src/editor/table-text';
 
 const doc = (...lines: string[]) => Text.of(lines);
 const whole = (text: Text) => ({ from: 0, to: text.length });
@@ -170,6 +170,23 @@ test('padding that is not plain spaces does not count', () => {
 	assert.ok(!written('| a\u00a0  |', '| --- |', '| b   |'));
 	assert.ok(!written('| a\u3000  |', '| --- |', '| b   |'));
 	assert.ok(!written('|\ta   |', '| --- |', '| b   |'));
+});
+
+test('a table Obsidian wrote is written again around a new header, as Obsidian writes it', () => {
+	const text = doc('| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |');
+	assert.deepEqual(rewrittenWith(text, whole(text), '| Climbing plant | Room |'), ['| Climbing plant | Room |', '| -------------- | ---- |', '| Fern           | Hall |']);
+	assert.deepEqual(rewrittenWith(text, whole(text), '| Plant | Room |'), ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |']);
+});
+
+test('the delimiter is written with dashes across each column, and colons where it\'s aligned', () => {
+	const text = doc('| a   | b   |  c  |   d |', '| --- | :-- | :-: | --: |', '| e   | f   |  g  |   h |');
+	assert.equal(rewrittenWith(text, whole(text), '| a   | b   |  c  |   d |')?.[1], '| --- | :-- | :-: | --: |');
+	assert.deepEqual(rewrittenWith(text, whole(text), '| aaaaaa | bbbbbb | cccccc | dddddd |'), ['| aaaaaa | bbbbbb | cccccc | dddddd |', '| ------ | :----- | :----: | -----: |', '| e      | f      |   g    |      h |']);
+});
+
+test('a table Obsidian didn\'t write isn\'t written again', () => {
+	const text = doc('|a|b|', '|---|---|', '|c|d|');
+	assert.equal(rewrittenWith(text, whole(text), '| x | b |'), null);
 });
 
 test('the frontmatter ends at its closing line', () => {

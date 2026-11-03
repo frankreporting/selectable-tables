@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
-import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText } from '../src/editor/decide';
+import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText, writesFreeze } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
 
 const TABLE = '| Plant  | Room |\n| ------ | ---- |\n| Fern   | Hall |';
@@ -342,6 +342,13 @@ describe('a selected cell', () => {
 	test('Copy steps aside with no cell selected', () => {
 		assert.equal(copied(on(state())), null);
 	});
+
+	test('Copy on a header cell leaves out the freeze mark, which belongs to the table', () => {
+		const frozen = '| %%freeze 2 1%% a | b   |\n| ----------------- | --- |\n| %%freeze 2 1%% d  | e   |';
+		const frozenState = () => note(`\n⟨${frozen}⟩\n`);
+		assert.equal(copied(on(frozenState(), cellAt(0, 0))), 'a');
+		assert.equal(copied(on(frozenState(), cellAt(1, 0))), '%%freeze 2 1%% d', 'a body cell has no mark, only text');
+	});
 });
 
 describe('typing on a selected table or cell', () => {
@@ -515,6 +522,12 @@ describe('the edit guard', () => {
 	test('composed input passes: dropping it leaves the composition stuck', () => {
 		assert.ok(!stopsEdit(edit('input.type.compose'), table, true));
 		assert.ok(!stopsEdit(edit('input.type.compose'), table, false));
+	});
+
+	test('a freeze command\'s own write passes, on a selected cell too', () => {
+		const write = note(text).update({ changes: { from: table.from, insert: 'x' }, annotations: writesFreeze.of(true), userEvent: 'freeze' });
+		assert.ok(!stopsEdit(write, table, true));
+		assert.ok(!stopsEdit(write, table, false));
 	});
 
 	test('edits elsewhere in the note pass', () => {

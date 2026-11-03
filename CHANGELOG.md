@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2 (2026-11-02)
+
+Typing on a selected table now starts a new paragraph below it
+
+### Improved
+
+- Typing on a selected table or cell starts a new paragraph below the table, with a blank line on each side, instead of doing nothing. One undo takes it back.
+
+### Fixed
+
+- Typing with an input method, such as Japanese, or an accent like Option+E, on a table selected from above no longer turns the table into raw Markdown.
+
 ## 0.2.1 (2026-11-02)
 
 Expanded theme support for frozen tables

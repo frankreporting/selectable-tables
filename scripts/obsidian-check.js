@@ -1783,11 +1783,14 @@
 				shed = await frozenTable('Sheds');
 				check('Command 2 Undo takes the freeze back, and the text is as it was', cm.state.doc.toString() === original && frozenRows(shed).length === 0 && !shed.el.classList.contains(FROZEN), header(shed));
 				check('Command 2 the cell stays selected after Undo', at(cm) === '2,1' && selectsWhole(cm, shed), at(cm));
-				await press(cm, 'z', { metaKey: true, shiftKey: true });
+				// Redo through Obsidian's editor: a Shift+Cmd+Z sent to one element doesn't reach it, even on a text line.
+				app.workspace.activeEditor.editor.redo();
 				await sleep(300);
-				check('Command 2 Redo puts it back', cm.state.doc.toString() === frozenText, header(shed));
-				await press(cm, 'z', { metaKey: true });
+				const redone = cm.state.doc.toString() === frozenText;
+				check('Command 2 Redo puts it back', redone, cm.state.doc.lineAt(shed.from).text);
+				if (redone) await press(cm, 'z', { metaKey: true });
 				await sleep(300);
+				check('Command 2 and Undo again takes it back', cm.state.doc.toString() === original);
 
 				await run('freeze-at-cell');
 				shed = await frozenTable('Sheds');

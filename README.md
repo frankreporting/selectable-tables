@@ -98,6 +98,7 @@ The comment doesn't show, and it stays with the table's text, so it copies, sync
 
 - On iPhone, as the keyboard opens or closes with the caret in a frozen table, its frozen rows can flicker for a moment, and the caret can drift inside its cell until you type.
 - Dragging to select cells doesn't work yet with a frozen table and can result in the wrong cells selected.
+- On a phone or tablet, a long press on a cell doesn't offer the freeze items yet. Run them from the command palette there.
 
 ## Roadmap
 

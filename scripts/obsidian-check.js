@@ -1301,7 +1301,13 @@
 
 		cm = await open('Edge cases');
 		original = cm.state.doc.toString();
-		const edge = tables(cm);
+		// A short window draws only the note's top, so its end is drawn too before the tables are counted.
+		const top = tables(cm);
+		cm.dispatch({ effects: cm.constructor.scrollIntoView(cm.state.doc.length, { y: 'end' }) });
+		await sleep(300);
+		const edge = [...top, ...tables(cm)].filter((t, i, all) => all.findIndex((u) => u.from === t.from) === i).sort((x, y) => x.from - y.from);
+		cm.dispatch({ effects: cm.constructor.scrollIntoView(0, { y: 'start' }) });
+		await sleep(300);
 		check('G26/27 the callout and the list item hold no rendered table', edge.length === 3, edge.map((e) => e.first));
 		const [heading, a, b] = edge;
 		await caretOnLine(cm, heading.first - 1, 0);
@@ -1350,15 +1356,22 @@
 			original = cm.state.doc.toString();
 			const pane = () => cm.scrollDOM.getBoundingClientRect();
 			// A table with its top at the pane's top, and its element, which Obsidian can replace.
+			// The tables above it change height as they're drawn, so in a short window the first scroll can fall
+			// short of the table, and it scrolls again.
 			async function frozenTable(heading, past = 0) {
 				const start = cm.state.doc.toString().indexOf(`## ${heading}`);
-				cm.dispatch({ effects: cm.constructor.scrollIntoView(start, { y: 'start' }) });
-				await sleep(300);
-				const found = tables(cm).find((t) => t.from > start);
+				const line = cm.state.doc.lineAt(start).number;
+				const under = () => tables(cm).find((t) => t.from > start && t.first - line <= 3);
+				let found = null;
+				for (let tries = 0; tries < 5 && !found; tries++) {
+					cm.dispatch({ effects: cm.constructor.scrollIntoView(start, { y: 'start' }) });
+					await sleep(300);
+					found = under();
+				}
 				cm.scrollDOM.scrollTop += found.el.getBoundingClientRect().top - pane().top + 16 + past;
 				await frames();
 				await sleep(150);
-				return { ...tables(cm).find((t) => t.from > start), heading };
+				return { ...under(), heading };
 			}
 			const rowsOf = (t) => t.el.querySelector('table').rows;
 			const frozenRows = (t) => Array.from(rowsOf(t)).filter((row) => row.classList.contains(ROW)).map((row) => row.rowIndex);
@@ -1979,8 +1992,6 @@
 				const config = app.vault.config;
 				const hadNative = Object.hasOwn(config, 'nativeMenus');
 				const nativeBefore = config.nativeMenus;
-				config.nativeMenus = false;
-				app.updateUseNativeMenu();
 				const shownMenu = () => Array.from(document.querySelectorAll('.menu')).pop() ?? null;
 				// Escape sent to the menu itself, so the note's editor never hears it.
 				async function closeMenu() {
@@ -1988,12 +1999,15 @@
 					await sleep(200);
 				}
 				try {
+					config.nativeMenus = false;
+					app.updateUseNativeMenu();
 					const SECTION = 'selectable-tables-freeze';
 					const names = ['Freeze rows up to here', 'Freeze columns up to here', 'Freeze rows and columns up to here', 'Unfreeze table'];
 					const header = (t) => cm.state.doc.lineAt(t.from).text;
 					const tableNamed = (heading) => {
 						const start = cm.state.doc.toString().indexOf(`## ${heading}`);
-						return tables(cm).find((t) => t.from > start);
+						const line = cm.state.doc.lineAt(start).number;
+						return tables(cm).find((t) => t.from > start && t.first - line <= 3);
 					};
 					const items = () => Array.from(shownMenu()?.querySelectorAll('.menu-item') ?? []).map((item) => ({ title: item.querySelector('.menu-item-title')?.textContent ?? '', section: item.dataset.section ?? '' }));
 					const freezeItems = () => items().filter((item) => item.section === SECTION).map((item) => item.title);
@@ -2091,6 +2105,10 @@
 					sheds = await frozenTable('Sheds', -200);
 					await selectTable(cm, sheds);
 					await press(cm, 'Enter');
+					// Selecting a table taller than the pane scrolls to its end, so the lines above it come back first.
+					cm.scrollDOM.scrollTop += sheds.el.getBoundingClientRect().top - pane().top - 184;
+					await frames();
+					await sleep(150);
 					const textLine = Array.from(cm.contentDOM.querySelectorAll(':scope > .cm-line')).find((el) => {
 						const r = el.getBoundingClientRect();
 						return el.textContent.startsWith('Line ') && r.top > pane().top + 10 && r.bottom < pane().bottom - 10;
@@ -2112,6 +2130,17 @@
 					check('Menu 6 a right-click in a range shows Obsidian\'s menu for the range, with no freeze items', items().length > 0 && freezeItems().length === 0, { sections: sections(), freeze: freezeItems() });
 					await closeMenu();
 					await closeCell(cm, cm.state.doc.line(sheds.first - 1).from);
+
+					// 7. The handles for dragging a row or a column have menus of their own, for that row or column.
+					sheds = await frozenTable('Sheds');
+					const handle = rowsOf(sheds)[2].cells[0].querySelector('.table-row-drag-handle');
+					if (handle) {
+						const { left, top, width, height } = handle.getBoundingClientRect();
+						handle.dispatchEvent(new PointerEvent('contextmenu', { bubbles: true, cancelable: true, pointerType: 'mouse', button: 2, clientX: left + width / 2, clientY: top + height / 2, view: window }));
+						await sleep(300);
+					}
+					check('Menu 7 a row\'s drag handle keeps Obsidian\'s menu for the row, with no freeze items', handle && items().length > 0 && freezeItems().length === 0, { handle: !!handle, sections: sections(), freeze: freezeItems() });
+					await closeMenu();
 					check('Menu: the note is as it was', cm.state.doc.toString() === original);
 				} finally {
 					await closeMenu();

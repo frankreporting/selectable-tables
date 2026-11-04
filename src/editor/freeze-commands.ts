@@ -23,6 +23,8 @@ const MENU_SECTION = 'selectable-tables-freeze';
 
 /** On a table's widget while a range of cells is dragged across. */
 const RANGE_CLASS = 'has-selection';
+/** Obsidian's handles for dragging a row or a column, inside a cell, with menus of their own. */
+const HANDLES = '.table-row-drag-handle, .table-col-drag-handle';
 
 /** A cell of one of a note's tables, by its widget, which Obsidian keeps when it builds the table anew. */
 interface Place {
@@ -37,12 +39,17 @@ interface Target {
 	open: EditorView | null;
 }
 
-/** The cell an element is in, in one of the note's own tables, not a table in some editor inside it. */
+/**
+ * The cell an element is in, in one of the note's own tables. A cell can hold an embedded note with a table of
+ * its own, whose cells aren't the table's, so the cell is the one whose table is the widget's.
+ */
 function placeOf(view: EditorView, element: Element): Place | null {
-	const cell = element.closest<HTMLTableCellElement>('td, th');
-	const widget = cell?.closest<HTMLElement>(`.${TABLE_CLASS}`);
+	const widget = element.closest<HTMLElement>(`.${TABLE_CLASS}`);
+	const table = widget?.parentElement === view.contentDOM ? widget.querySelector('table') : null;
+	let cell = element.closest<HTMLTableCellElement>('td, th');
+	while (cell && cell.closest('table') !== table) cell = cell.parentElement?.closest<HTMLTableCellElement>('td, th') ?? null;
 	const row = cell?.parentElement as HTMLTableRowElement | null | undefined;
-	if (!cell || !row || !widget || widget.parentElement !== view.contentDOM) return null;
+	if (!widget || !cell || !row) return null;
 	return { widget, cell: { row: row.rowIndex, column: cell.cellIndex } };
 }
 
@@ -140,13 +147,14 @@ export function cellMenu(menu: Menu, editor: Editor, info: MarkdownView | Markdo
 /**
  * Obsidian's own menu for a cell that isn't open. It comes from Menu.forEvent, which prevents the event's
  * default and gives the same menu to a later listener on that event: this one, on the note's content, hears it
- * after the cell does. A right-click inside an open cell is left to `editor-menu`, and a range dragged across
- * cells keeps Obsidian's menu for the range, where no one cell is "here".
+ * after the cell does. A right-click inside an open cell is left to `editor-menu`. A range dragged across cells
+ * keeps Obsidian's menu for the range, where no one cell is "here", and so do the handles for dragging a row or a
+ * column, whose menus are for that row or column.
  */
 export const tableMenus = ViewPlugin.define((view) => {
 	const onMenu = (event: MouseEvent) => {
 		const target = event.target as Element;
-		if (!event.defaultPrevented || target.closest('.cm-editor') !== view.dom) return;
+		if (!event.defaultPrevented || target.closest('.cm-editor') !== view.dom || target.closest(HANDLES)) return;
 		const place = placeOf(view, target);
 		if (place && !place.widget.classList.contains(RANGE_CLASS)) addItems(Menu.forEvent(event), view, place);
 	};

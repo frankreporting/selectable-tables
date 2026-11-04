@@ -1301,7 +1301,13 @@
 
 		cm = await open('Edge cases');
 		original = cm.state.doc.toString();
-		const edge = tables(cm);
+		// A short window draws only the note's top, so its end is drawn too before the tables are counted.
+		const top = tables(cm);
+		cm.dispatch({ effects: cm.constructor.scrollIntoView(cm.state.doc.length, { y: 'end' }) });
+		await sleep(300);
+		const edge = [...top, ...tables(cm)].filter((t, i, all) => all.findIndex((u) => u.from === t.from) === i).sort((x, y) => x.from - y.from);
+		cm.dispatch({ effects: cm.constructor.scrollIntoView(0, { y: 'start' }) });
+		await sleep(300);
 		check('G26/27 the callout and the list item hold no rendered table', edge.length === 3, edge.map((e) => e.first));
 		const [heading, a, b] = edge;
 		await caretOnLine(cm, heading.first - 1, 0);
@@ -1350,15 +1356,22 @@
 			original = cm.state.doc.toString();
 			const pane = () => cm.scrollDOM.getBoundingClientRect();
 			// A table with its top at the pane's top, and its element, which Obsidian can replace.
+			// The tables above it change height as they're drawn, so in a short window the first scroll can fall
+			// short of the table, and it scrolls again.
 			async function frozenTable(heading, past = 0) {
 				const start = cm.state.doc.toString().indexOf(`## ${heading}`);
-				cm.dispatch({ effects: cm.constructor.scrollIntoView(start, { y: 'start' }) });
-				await sleep(300);
-				const found = tables(cm).find((t) => t.from > start);
+				const line = cm.state.doc.lineAt(start).number;
+				const under = () => tables(cm).find((t) => t.from > start && t.first - line <= 3);
+				let found = null;
+				for (let tries = 0; tries < 5 && !found; tries++) {
+					cm.dispatch({ effects: cm.constructor.scrollIntoView(start, { y: 'start' }) });
+					await sleep(300);
+					found = under();
+				}
 				cm.scrollDOM.scrollTop += found.el.getBoundingClientRect().top - pane().top + 16 + past;
 				await frames();
 				await sleep(150);
-				return { ...tables(cm).find((t) => t.from > start), heading };
+				return { ...under(), heading };
 			}
 			const rowsOf = (t) => t.el.querySelector('table').rows;
 			const frozenRows = (t) => Array.from(rowsOf(t)).filter((row) => row.classList.contains(ROW)).map((row) => row.rowIndex);
@@ -1970,6 +1983,172 @@
 				await press(cm, 'Escape');
 				await restore(cm, cellNote);
 				cm = await open('Frozen tables');
+			}
+
+			// --- Freezing from the right-click menu, with real right-clicks: Obsidian builds its menus from the
+			// browser's own events. A script can't read a native menu, which a Mac shows unless the vault says
+			// otherwise, so Obsidian draws its own here: the setting changes in memory, is never saved, and goes back.
+			{
+				const config = app.vault.config;
+				const hadNative = Object.hasOwn(config, 'nativeMenus');
+				const nativeBefore = config.nativeMenus;
+				const shownMenu = () => Array.from(document.querySelectorAll('.menu')).pop() ?? null;
+				// Escape sent to the menu itself, so the note's editor never hears it.
+				async function closeMenu() {
+					shownMenu()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+					await sleep(200);
+				}
+				try {
+					config.nativeMenus = false;
+					app.updateUseNativeMenu();
+					const SECTION = 'selectable-tables-freeze';
+					const names = ['Freeze rows up to here', 'Freeze columns up to here', 'Freeze rows and columns up to here', 'Unfreeze table'];
+					const header = (t) => cm.state.doc.lineAt(t.from).text;
+					const tableNamed = (heading) => {
+						const start = cm.state.doc.toString().indexOf(`## ${heading}`);
+						const line = cm.state.doc.lineAt(start).number;
+						return tables(cm).find((t) => t.from > start && t.first - line <= 3);
+					};
+					const items = () => Array.from(shownMenu()?.querySelectorAll('.menu-item') ?? []).map((item) => ({ title: item.querySelector('.menu-item-title')?.textContent ?? '', section: item.dataset.section ?? '' }));
+					const freezeItems = () => items().filter((item) => item.section === SECTION).map((item) => item.title);
+					const sections = () => [...new Set(items().map((item) => item.section))];
+					async function rightClick(el, x) {
+						const { left, top, width, height } = el.getBoundingClientRect();
+						const point = { x: x ?? left + width / 2, y: top + height / 2, button: 'right', clickCount: 1 };
+						await cdp.sendCommand('Input.dispatchMouseEvent', { ...point, type: 'mousePressed' });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { ...point, type: 'mouseReleased' });
+						await sleep(500);
+					}
+					async function choose(title) {
+						const item = Array.from(shownMenu()?.querySelectorAll('.menu-item') ?? []).find((el) => el.querySelector('.menu-item-title')?.textContent === title);
+						if (item) await realClick(item);
+						await sleep(300);
+						return !!item;
+					}
+					const undo = async () => {
+						await press(cm, 'z', { metaKey: true });
+						await sleep(300);
+					};
+
+					// 1. A cell that isn't open, with nothing selected: the caret on the line above the table.
+					let sheds = await frozenTable('Sheds');
+					await caretOnLine(cm, sheds.first - 1);
+					sheds = await frozenTable('Sheds');
+					let heard = null;
+					const hear = (event) => {
+						heard = { prevented: event.defaultPrevented, pointer: event.pointerType };
+					};
+					cm.contentDOM.addEventListener('contextmenu', hear);
+					await rightClick(rowsOf(sheds)[2].cells[1]);
+					cm.contentDOM.removeEventListener('contextmenu', hear);
+					check('relies 21: a right-click on a cell that isn\'t open reaches the note\'s content with its default prevented, by Obsidian\'s Menu.forEvent', heard?.prevented === true && heard.pointer === 'mouse', heard);
+					check('Menu 1 a right-click on a cell shows Obsidian\'s own items for the table, and opens no cell', sections().includes('table') && sections().includes('table-sort') && !openCell(cm), { sections: sections(), open: openAt(cm) });
+					check('Menu 1 the freeze items are in that same menu, after Obsidian\'s, with no Unfreeze on a table with no mark', freezeItems().join() === names.slice(0, 3).join() && sections().at(-1) === SECTION, { freeze: freezeItems(), sections: sections() });
+					check('Menu 1 chose Freeze rows up to here', await choose(names[0]), items());
+					sheds = tableNamed('Sheds');
+					check('Menu 1 Freeze rows up to here freezes rows 1 to 3, up to the right-clicked cell', header(sheds).includes('%%freeze 3 0%%') && frozenRows(sheds).join() === '0,1,2', { header: header(sheds), rows: frozenRows(sheds) });
+					check('Menu 1 the right-clicked cell is selected, over the whole table, with the keyboard in the note', at(cm) === '2,1' && selectsWhole(cm, sheds) && cm.hasFocus && !openCell(cm) && !shownMenu(), { at: at(cm), sel: sel(cm), focus: cm.hasFocus, menu: !!shownMenu() });
+					const frozenText = cm.state.doc.toString();
+					await press(cm, 'ArrowDown');
+					check('Menu 1 the arrows move the cell from there, and change nothing', at(cm) === '3,1' && cm.state.doc.toString() === frozenText, at(cm));
+					await press(cm, 'ArrowUp');
+					await undo();
+					sheds = tableNamed('Sheds');
+					check('Menu 1 Undo takes it back, and the cell stays selected', cm.state.doc.toString() === original && frozenRows(sheds).length === 0 && at(cm) === '2,1', { at: at(cm), header: header(sheds) });
+
+					// 2. An open cell, opened by Enter one cell to the right: a right-click in its text.
+					await press(cm, 'ArrowRight');
+					await press(cm, 'Enter');
+					check('Menu 2 the third row\'s third cell is open', openAt(cm) === '2,2', openAt(cm));
+					let fromMenu = null;
+					const ref = app.workspace.on('editor-menu', (menu, editor, info) => {
+						fromMenu = { cellEditor: editor !== info.editor, noteInfo: info.editor?.cm === cm, own: editor.cm === cellView(cm) };
+					});
+					await rightClick(cellEditor(cm));
+					app.workspace.offref(ref);
+					check('relies 21: a right-click in an open cell fires editor-menu with the cell\'s own editor, and the note\'s view as its info', fromMenu?.cellEditor && fromMenu.noteInfo && fromMenu.own, fromMenu);
+					check('Menu 2 a right-click in an open cell shows the freeze items too, with the editor\'s items and Obsidian\'s own for the table', freezeItems().join() === names.slice(0, 3).join() && sections().includes('table') && sections().some((section) => section !== SECTION && !section.startsWith('table')), { freeze: freezeItems(), sections: sections() });
+					check('Menu 2 chose Freeze columns up to here', await choose(names[1]), items());
+					sheds = tableNamed('Sheds');
+					check('Menu 2 the cell closes and stays selected, and its column and those to its left freeze', !openCell(cm) && at(cm) === '2,2' && header(sheds).includes('%%freeze 0 3%%') && sheds.el.classList.contains(`${FROZEN}-columns-3`), { open: openAt(cm), at: at(cm), header: header(sheds) });
+					check('Menu 2 the keyboard is in the note after', cm.hasFocus && selectsWhole(cm, sheds), { focus: cm.hasFocus, sel: sel(cm) });
+					await undo();
+					check('Menu 2 Undo takes only that back', cm.state.doc.toString() === original, header(tableNamed('Sheds')));
+
+					// 3. Another cell, with one open.
+					await press(cm, 'Enter');
+					check('Menu 3 the cell is open again', openAt(cm) === '2,2', openAt(cm));
+					sheds = tableNamed('Sheds');
+					await rightClick(rowsOf(sheds)[3].cells[0]);
+					check('Menu 3 a right-click on another cell, with one open, offers the freeze items', freezeItems().join() === names.slice(0, 3).join(), { freeze: freezeItems(), sections: sections() });
+					check('Menu 3 chose Freeze rows and columns up to here', await choose(names[2]), items());
+					sheds = tableNamed('Sheds');
+					check('Menu 3 it freezes up to the right-clicked cell, which is selected, and the open cell closes', header(sheds).includes('%%freeze 4 1%%') && frozenRows(sheds).join() === '0,1,2,3' && at(cm) === '3,0' && !openCell(cm) && cm.hasFocus, { header: header(sheds), at: at(cm), open: openAt(cm) });
+					await undo();
+					check('Menu 3 Undo takes it back', cm.state.doc.toString() === original, header(tableNamed('Sheds')));
+
+					// 4. A frozen table offers Unfreeze too.
+					await press(cm, 'Escape');
+					await press(cm, 'Escape');
+					let plants = await frozenTable('Plants');
+					await rightClick(rowsOf(plants)[3].cells[2]);
+					check('Menu 4 on a frozen table, Unfreeze table is offered too', freezeItems().join() === names.join(), freezeItems());
+					check('Menu 4 chose Unfreeze table', await choose(names[3]), items());
+					plants = tableNamed('Plants');
+					check('Menu 4 Unfreeze table takes the mark out, and the right-clicked cell is selected', !header(plants).includes('%%freeze') && !plants.el.classList.contains(FROZEN) && at(cm) === '3,2', { header: header(plants), at: at(cm) });
+					await undo();
+					check('Menu 4 Undo puts the freeze back', cm.state.doc.toString() === original && tableNamed('Plants').el.classList.contains(FROZEN), header(tableNamed('Plants')));
+					await press(cm, 'Escape');
+					await press(cm, 'Escape');
+
+					// 5. A text line, with a cell selected in a table below it, where the commands are offered.
+					sheds = await frozenTable('Sheds', -200);
+					await selectTable(cm, sheds);
+					await press(cm, 'Enter');
+					// Selecting a table taller than the pane scrolls to its end, so the lines above it come back first.
+					cm.scrollDOM.scrollTop += sheds.el.getBoundingClientRect().top - pane().top - 184;
+					await frames();
+					await sleep(150);
+					const textLine = Array.from(cm.contentDOM.querySelectorAll(':scope > .cm-line')).find((el) => {
+						const r = el.getBoundingClientRect();
+						return el.textContent.startsWith('Line ') && r.top > pane().top + 10 && r.bottom < pane().bottom - 10;
+					});
+					check('Menu 5 a text line is on screen, with a cell selected', textLine && at(cm) === '0,0', { line: !!textLine, at: at(cm) });
+					if (textLine) await rightClick(textLine, textLine.getBoundingClientRect().left + 20);
+					check('Menu 5 a right-click on a text line shows Obsidian\'s menu, with no freeze items', items().length > 0 && freezeItems().length === 0, { sections: sections(), freeze: freezeItems() });
+					await closeMenu();
+
+					// 6. A range dragged across cells keeps Obsidian's menu for the range.
+					sheds = await frozenTable('Sheds');
+					const first = rowsOf(sheds)[1].cells[1];
+					await click(first);
+					first.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 4, button: 0, view: window }));
+					await sleep(300);
+					sheds = tableNamed('Sheds');
+					check('Menu 6 a fourth click selects every cell, as a range', sheds.el.classList.contains('has-selection'), sheds.el.className);
+					await rightClick(rowsOf(sheds)[2].cells[2]);
+					check('Menu 6 a right-click in a range shows Obsidian\'s menu for the range, with no freeze items', items().length > 0 && freezeItems().length === 0, { sections: sections(), freeze: freezeItems() });
+					await closeMenu();
+					await closeCell(cm, cm.state.doc.line(sheds.first - 1).from);
+
+					// 7. The handles for dragging a row or a column have menus of their own, for that row or column.
+					sheds = await frozenTable('Sheds');
+					const handle = rowsOf(sheds)[2].cells[0].querySelector('.table-row-drag-handle');
+					if (handle) {
+						const { left, top, width, height } = handle.getBoundingClientRect();
+						handle.dispatchEvent(new PointerEvent('contextmenu', { bubbles: true, cancelable: true, pointerType: 'mouse', button: 2, clientX: left + width / 2, clientY: top + height / 2, view: window }));
+						await sleep(300);
+					}
+					check('Menu 7 a row\'s drag handle keeps Obsidian\'s menu for the row, with no freeze items', handle && items().length > 0 && freezeItems().length === 0, { handle: !!handle, sections: sections(), freeze: freezeItems() });
+					await closeMenu();
+					check('Menu: the note is as it was', cm.state.doc.toString() === original);
+				} finally {
+					await closeMenu();
+					if (hadNative) config.nativeMenus = nativeBefore;
+					else delete config.nativeMenus;
+					app.updateUseNativeMenu();
+					await restore(cm, original);
+				}
 			}
 
 			const back = await frozenTable('Plants', 300);

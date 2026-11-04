@@ -70,14 +70,14 @@ Typing with an input method (IME), or an accent such as Option+E, works the same
 
 A long or wide table can keep the initial rows and columns in view as you scroll, just like in a spreadsheet. Any number of tables in a note can freeze. This works in Live Preview, on the desktop, on phones and on tablets. **Note:** A device too old to pin rows, such as an iPhone or iPad before iOS 26, leaves the table to scroll as usual.
 
-To freeze, select or open a cell, then run one of these from the command palette (Cmd+P):
+To freeze, right-click a cell and choose one of these, or select or open a cell and run one from the command palette (Cmd+P):
 
 - **Freeze rows up to here:** the cell's row and every row above it.
 - **Freeze columns up to here:** the cell's column and every column to its left.
 - **Freeze rows and columns up to here:** both at once. On a table's first cell, that freezes the header row and the first column.
 - **Unfreeze table.**
 
-The cell stays selected and in view, and Undo takes the change back. To give a command its own keys, look it up in **Settings → Hotkeys**.
+Afterwards that cell is selected and in view, and Undo takes the change back. To give a command its own keys, look it up in **Settings → Hotkeys**.
 
 A freeze is saved as a comment in the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column. The commands put it in the first cell, unless the row already has one:
 
@@ -105,7 +105,7 @@ What's planned, broadly. The order and the details may change.
 
 **Next:**
 
-- **Finish freezing rows and columns:** make drags work, add the commands to the right-click menu, and freeze in Reading view too. Make it possible to keep a wide table's sideways scrollbar in view even if the bottom of the table is below the viewport.
+- **Finish freezing rows and columns:** make drags work, and freeze in Reading view too. Make it possible to keep a wide table's sideways scrollbar in view even if the bottom of the table is below the viewport.
 
 **After that:**
 

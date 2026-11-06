@@ -3,7 +3,8 @@
  * them, so each is painted with what shows there unfrozen: its own color, over its row's, its header's or
  * body's, the table's, the widget's and the note's. This reads those from the page, so it follows whatever
  * a theme does, with no list of themes. It only reads: styles.css paints frozen cells over the theme's own
- * colors, so freeze.ts reads a table before marking it.
+ * colors, so freeze.ts reads a table before marking it. It also reads what shows at the cells' corners, for
+ * the pinned rows to lay under their cells, since a theme can round them.
  */
 
 /**
@@ -23,6 +24,13 @@ const BEHIND_VARIABLE = '--selectable-tables-behind';
 const STRIP_VARIABLE = '--selectable-tables-strip';
 /** From styles.css, on the widget: how far the strip's shadows reach, and to which side. */
 const STRIP_OFFSET = 'var(--selectable-tables-strip-offset)';
+/**
+ * On the widget: what shows at a cell's corners and between cells, as shadows, for each pinned row to lay
+ * under its cells. Rows passing under would show there otherwise, where a theme rounds its cells.
+ */
+const CORNERS_VARIABLE = '--selectable-tables-corners';
+/** An inset shadow that fills its box: once the spread passes half the row's height, nothing is left clear. */
+const FILL = 'inset 0 0 0 100vmax';
 /** When nothing behind the table reads as solid. */
 const PAGE_FALLBACK = 'var(--background-primary)';
 
@@ -70,6 +78,11 @@ export function opacity(color: string): number {
  */
 export function layers(colors: string[]): string {
 	return colors.length ? colors.map((color) => `linear-gradient(${color} 0 0)`).join(', ') : 'none';
+}
+
+/** Colors as box-shadows, top first, each placed by `offsets`: a shadow's offsets and spread. */
+export function shadows(colors: string[], offsets: string): string {
+	return colors.length ? colors.map((color) => `${offsets} ${color}`).join(', ') : 'none';
 }
 
 /**
@@ -120,7 +133,8 @@ function bodyRows(table: HTMLTableElement): [HTMLTableRowElement | undefined, HT
 /**
  * Reads how the theme paints `table`, as drawn and unmarked: the header's odd and even cells, and those of
  * the body's odd and even rows, read from the first two cells of each, so a frozen column's own cells are
- * read as they are.
+ * read as they are. Also what shows at the cells' corners: the browser draws a cell's color, and its row's and
+ * its header's or body's, inside the cell's rounding, so the corners show the table's color, over what's behind it.
  */
 export function readPaint(widget: HTMLElement, table: HTMLTableElement): Paint {
 	const behind: string[] = [];
@@ -131,6 +145,8 @@ export function readPaint(widget: HTMLElement, table: HTMLTableElement): Paint {
 		if (!stack(cell, widget, colors)) colors.push(...behind);
 		return layers(colors);
 	};
+	const corners: string[] = [];
+	if (!stack(table, widget, corners)) corners.push(...behind, page);
 
 	const header = table.tHead?.rows[0] ?? table.rows[0];
 	const [odd, even] = bodyRows(table);
@@ -138,7 +154,8 @@ export function readPaint(widget: HTMLElement, table: HTMLTableElement): Paint {
 	const variables: Paint['variables'] = [
 		[PAGE_VARIABLE, page],
 		[BEHIND_VARIABLE, layers(behind)],
-		[STRIP_VARIABLE, [...behind, page].map((color) => `${STRIP_OFFSET} 0 0 ${color}`).join(', ')],
+		[STRIP_VARIABLE, shadows([...behind, page], `${STRIP_OFFSET} 0 0`)],
+		[CORNERS_VARIABLE, shadows(corners, FILL)],
 	];
 	let last: [string, string] | null = null;
 	CELL_VARIABLES.forEach(([oddCell, evenCell], index) => {

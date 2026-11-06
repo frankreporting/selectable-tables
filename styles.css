@@ -282,6 +282,17 @@
 }
 
 /*
+ * A frozen cell is solid only inside its shape, so where a theme rounds its cells, as Baseline does, rows passing
+ * under would show at a pinned cell's corners. So each pinned row lays what shows there at rest under its cells,
+ * as freeze.ts reads it: the table's color, over what's behind the table. Only the row's shadow can, since the
+ * browser draws a row's color inside each cell's rounding. Elsewhere the cells cover it. WebKit draws no shadow
+ * on a table row, so on iPhone and iPad the corners still show what passes.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows .selectable-tables-frozen-row {
+	box-shadow: var(--selectable-tables-corners, inset 0 0 0 100vmax var(--background-primary));
+}
+
+/*
  * Pinned below the pane's top, the rows leave a band above them that the table's other rows pass through. The
  * header's cells fill it, and the widget's box clips that, so nothing shows until the rows have moved.
  */

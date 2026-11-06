@@ -2237,6 +2237,69 @@
 				check('Theme: the note is as it was', cm.state.doc.toString() === original);
 			}
 
+			// --- A theme that centers tables with flex, as Baseline does with Table width on Auto (Center): its rule, on
+			// the class that setting puts on the body, added after the plugin's styles. A control with one class more than
+			// the plugin's rule puts plain centering back, as it was before `safe`, to show the check can see the fault.
+			{
+				const CENTER = 'table-width-fit-center';
+				const centering = document.createElement('style');
+				centering.textContent = `body.${CENTER} .markdown-source-view.mod-cm6 .cm-table-widget { display: flex; justify-content: center; }`;
+				const control = document.createElement('style');
+				control.textContent = `body.${CENTER} .markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget.cm-table-widget { justify-content: center; }`;
+				// Where a table sits in its box: from the box's start to the table's, and from the table's end to the box's.
+				const placeIn = (t) => {
+					const w = t.el, cs = getComputedStyle(w), wr = w.getBoundingClientRect(), tr = w.querySelector('table').getBoundingClientRect();
+					const start = wr.left + w.clientLeft + parseFloat(cs.paddingLeft), end = wr.left + w.clientLeft + w.clientWidth - parseFloat(cs.paddingRight);
+					return { before: tr.left - start, after: end - tr.right, left: tr.left, overflows: w.scrollWidth > w.clientWidth, display: cs.display, justify: cs.justifyContent };
+				};
+				// Scrolled to its end and back to its start, how far a row's first unfrozen cell sits under its frozen one.
+				const underFrozen = async (t, row) => {
+					t.el.scrollLeft = 100000;
+					await frames();
+					t.el.scrollLeft = 0;
+					await frames();
+					const cells = rowsOf(t)[row].cells;
+					return cells[0].getBoundingClientRect().right - cells[1].getBoundingClientRect().left;
+				};
+				document.head.append(centering);
+				document.body.classList.add(CENTER);
+				app.workspace.trigger('css-change');
+				await frames();
+				try {
+					const wide = await frozenTable('Plants');
+					const at = placeIn(wide);
+					const header = await underFrozen(wide, 0), body = await underFrozen(wide, 2);
+					const bed = rowsOf(wide)[2].cells[1], bedBox = bed.getBoundingClientRect();
+					const shown = document.elementFromPoint(bedBox.left + 3, bedBox.top + 3)?.closest('td, th') === bed;
+					check('Center 1 with a theme centering tables with flex, a frozen table wider than its box starts at the box\'s edge', at.display === 'flex' && at.justify === 'safe center' && at.overflows && Math.abs(at.before) < 0.5, at);
+					check('Center 1 scrolled right and back, Bed shows in full beside the frozen Name column', header <= 0.5 && body <= 0.5 && shown, { header, body, shown });
+					document.head.append(control);
+					await frames();
+					const plainWide = placeIn(wide), hidden = await underFrozen(wide, 2);
+					control.remove();
+					await frames();
+					check('Center 1 control: with plain centering, its start is out of reach and Bed sits under Name', plainWide.justify === 'center' && plainWide.before < -1 && hidden > 1, { ...plainWide, hidden });
+					check('Center: the note is as it was', cm.state.doc.toString() === original);
+
+					cm = await open('Cell moves');
+					const small = await tableUnder(cm, 'Seed trays');
+					const fits = placeIn(small);
+					document.head.append(control);
+					await frames();
+					const plainSmall = placeIn(small);
+					control.remove();
+					await frames();
+					check('Center 2 a table that fits stays centered, just where plain centering puts it', !fits.overflows && fits.justify === 'safe center' && fits.before > 20 && Math.abs(fits.before - fits.after) <= 1 && Math.abs(fits.left - plainSmall.left) < 0.01, { fits, plainSmall });
+				} finally {
+					control.remove();
+					centering.remove();
+					document.body.classList.remove(CENTER);
+					app.workspace.trigger('css-change');
+					await frames();
+				}
+				cm = await open('Frozen tables');
+			}
+
 			// --- On a phone. Obsidian's own classes on the real editor; emulate-mobile gives a status bar of 59 px.
 			const PHONE = ['is-mobile', 'is-phone', 'is-floating-nav', 'auto-full-screen', 'emulate-mobile'];
 			const STATUS_BAR = 59;

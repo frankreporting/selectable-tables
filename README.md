@@ -93,6 +93,7 @@ The comment doesn't show, and it stays with the table's text, so it copies, sync
 - Rows taller than half the pane, or columns as wide as the table, stop pinning until there's room, so there's always somewhere to scroll.
 - A cell you select, open or type in snaps back into view if it was partially hidden by a frozen cell.
 - Tested in both light and dark mode on Obsidian's default theme, Baseline, Minimal, Things, Catppuccin, Prism and Blue Topaz.
+- A theme that centers tables, such as Baseline with **Table width** on **Auto (Center)**, still centers a table that fits. A wider one starts at the left edge, so you can scroll to every column. This holds for every table, frozen or not.
 
 ### Known issues:
 

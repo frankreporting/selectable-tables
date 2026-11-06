@@ -2300,6 +2300,73 @@
 				cm = await open('Frozen tables');
 			}
 
+			// --- A theme that rounds every cell, as Baseline does. A frozen cell is solid only inside its rounding, so rows
+			// passing under a pinned row would show at its corners, unless the row lays what shows there at rest under
+			// its cells. The rows are pinned by a real scroll and read back with capturePage, since page state reads
+			// right even where the compositor draws rows wrong. Loud body rows, added once the table is read, make
+			// anything showing through easy to count. A control takes the rows' shadow off, to show the check sees it.
+			{
+				const RADIUS = 8;
+				const rounding = document.createElement('style');
+				rounding.textContent = `
+					body .markdown-rendered table { border-collapse: separate; border-spacing: 0; }
+					body .markdown-rendered :is(th, td) { border: 1px solid var(--table-border-color); border-radius: ${RADIUS}px; }`;
+				const loud = document.createElement('style');
+				loud.textContent = `.markdown-rendered tbody tr:not(.${ROW}) > td { background: rgb(255, 0, 255) !important; }`;
+				const control = document.createElement('style');
+				control.textContent = `.markdown-source-view .cm-table-widget .${ROW} { box-shadow: none !important; }`;
+				const contents = window.electron.remote.getCurrentWebContents();
+				// Loud pixels as drawn, in a square the rounding's size at each corner of each header cell in the widget's view.
+				const showing = async (t) => {
+					const image = await contents.capturePage();
+					const { width, height } = image.getSize();
+					const scale = width / window.innerWidth, bitmap = image.toBitmap();
+					const view = t.el.getBoundingClientRect();
+					let count = 0;
+					for (const cell of rowsOf(t)[0].cells) {
+						const r = cell.getBoundingClientRect();
+						if (r.left < view.left || r.right > view.right) continue;
+						for (const [left, top] of [[r.left, r.top], [r.right - RADIUS, r.top], [r.left, r.bottom - RADIUS], [r.right - RADIUS, r.bottom - RADIUS]]) {
+							for (let y = Math.round(top * scale); y < Math.round((top + RADIUS) * scale) && y < height; y++) {
+								for (let x = Math.round(left * scale); x < Math.round((left + RADIUS) * scale) && x < width; x++) {
+									// BGRA
+									const i = (y * width + x) * 4;
+									if (bitmap[i + 2] > 200 && bitmap[i + 1] < 80 && bitmap[i] > 200) count++;
+								}
+							}
+						}
+					}
+					return count;
+				};
+				document.head.append(rounding);
+				app.workspace.trigger('css-change');
+				await frames();
+				try {
+					const tools = await frozenTable('Tools', -100);
+					document.head.append(loud);
+					await frames();
+					const box = pane();
+					await cdp.sendCommand('Input.synthesizeScrollGesture', { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2), xDistance: 0, yDistance: -400, speed: 1500, gestureSourceType: 'mouse', preventFling: true });
+					await sleep(300);
+					await frames(4);
+					const header = rowsOf(tools)[0];
+					const pinned = { top: topInPane(header), past: -topInPane(tools.el), radius: getComputedStyle(header.cells[2]).borderTopRightRadius };
+					const leaks = await showing(tools);
+					check('Corners 1 with a theme rounding every cell, rows scrolled under the pinned header don\'t show at its corners', Math.abs(pinned.top) <= 1 && pinned.past > 200 && pinned.radius === `${RADIUS}px` && leaks === 0, { ...pinned, leaks });
+					document.head.append(control);
+					await frames(4);
+					const shown = await showing(tools);
+					check('Corners 1 control: without the rows\' shadow, they do', shown > 0, shown);
+				} finally {
+					control.remove();
+					loud.remove();
+					rounding.remove();
+					app.workspace.trigger('css-change');
+					await frames();
+				}
+				check('Corners: the note is as it was', cm.state.doc.toString() === original);
+			}
+
 			// --- On a phone. Obsidian's own classes on the real editor; emulate-mobile gives a status bar of 59 px.
 			const PHONE = ['is-mobile', 'is-phone', 'is-floating-nav', 'auto-full-screen', 'emulate-mobile'];
 			const STATUS_BAR = 59;

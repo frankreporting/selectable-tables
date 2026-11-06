@@ -46,6 +46,8 @@ export default defineConfig(
 			'@typescript-eslint/no-floating-promises': 'off',
 			'obsidianmd/hardcoded-config-path': 'off',
 			'obsidianmd/rule-custom-message': 'off',
+			// Node has no window, so a test stands in for the browser's globals on globalThis.
+			'obsidianmd/no-global-this': 'off',
 		},
 	},
 );

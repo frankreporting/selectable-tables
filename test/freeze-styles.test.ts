@@ -43,3 +43,10 @@ test('styles.css changes a frozen table\'s borders only when freeze.ts finds the
 		assert.ok(block.includes('.selectable-tables-own-borders'), block);
 	}
 });
+
+test('styles.css lays what shows at a cell\'s corners under every pinned row', () => {
+	const rule = styles.split('}').find((block) => block.includes('box-shadow: var(--selectable-tables-corners')) ?? '';
+	assert.ok(rule.trimEnd().endsWith('.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-frozen-rows .selectable-tables-frozen-row {\n\tbox-shadow: var(--selectable-tables-corners, inset 0 0 0 100vmax var(--background-primary));'), rule);
+	// Only the pinned rows get it: on the cells it would draw over their own colors.
+	assert.equal(styles.match(/--selectable-tables-corners/g)?.length, 1);
+});

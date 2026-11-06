@@ -98,6 +98,7 @@ The comment doesn't show, and it stays with the table's text, so it copies, sync
 ### Known issues:
 
 - On iPhone, as the keyboard opens or closes with the caret in a frozen table, its frozen rows can flicker for a moment, and the caret can drift inside its cell until you type.
+- On iPhone and iPad, in themes that round table cells, such as Baseline, rows scrolling under a frozen header can show at its rounded corners.
 - Dragging to select cells doesn't work yet with a frozen table and can result in the wrong cells selected.
 - On a phone or tablet, a long press on a cell doesn't offer the freeze items yet. Run them from the command palette there.
 

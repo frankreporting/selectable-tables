@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.3 (2026-11-08)
+
+Freeze from the right-click menu or the command palette
+
+### New
+
+- You can now freeze and unfreeze rows and columns from the command palette or right-click context menu. The new commands are:
+  - **Freeze rows up to here**
+  - **Freeze columns up to here**
+  - **Freeze rows and columns up to here**
+  - **Unfreeze table**
+  - Changes are reversible with built-in Undo
+- Report a bug or suggest an idea through the forms linked under **Feedback and bugs** in the plugin's description.
+
+### Fixed
+
+- In themes that center tables, such as Baseline with **Table width** on **Auto (Center)**, a table wider than the note can now be scrolled back to its first columns.
+- In themes that round table cells, such as Baseline, rows scrolling under a frozen header no longer show at its corners, except on iPhone and iPad.
+- A header cell with a freeze comment no longer grows a line taller in a narrow column.
+
 ## 0.2.2 (2026-11-02)
 
 Typing on a selected table now starts a new paragraph below it

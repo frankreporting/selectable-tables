@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hasMark, markText, MAX_FROZEN_COLUMNS, readFreeze, withFreeze, withoutMark } from '../src/editor/freeze-mark';
+import { hasMark, markedCells, markText, MAX_FROZEN_COLUMNS, readFreeze, withFreeze, withoutMark } from '../src/editor/freeze-mark';
 
 const nothing = { rows: 0, columns: 0 };
 
@@ -118,4 +118,29 @@ test('a cell copied without its mark keeps the rest of its text', () => {
 	assert.equal(withoutMark('%%freeze 2 1%%'), '');
 	assert.equal(withoutMark('`%%freeze 2 1%%` shows the mark'), '`%%freeze 2 1%%` shows the mark');
 	assert.equal(withoutMark('Name'), 'Name');
+});
+
+test('the cells holding a mark are found by column, wherever the mark sits in them', () => {
+	assert.deepEqual(markedCells('| %%freeze 2 1%% Name | Age |'), [0]);
+	assert.deepEqual(markedCells('| Name | Age %%freeze 1 2%% |'), [1]);
+	assert.deepEqual(markedCells('| Name | Ag%%freeze 1 2%%e | Bed |'), [1]);
+	assert.deepEqual(markedCells('| %%freeze 0 0%% Name | Age |'), [0], 'a mark that freezes nothing still leaves its space');
+	assert.deepEqual(markedCells('| %%freeze 1 1%% **Name** | #tag | Age |'), [0]);
+});
+
+test('every cell holding a mark is found, the first or not', () => {
+	assert.deepEqual(markedCells('| %%freeze 1 1%% Name | Age | %%freeze 4 4%% Bed |'), [0, 2]);
+});
+
+test('no cell holds a mark in a header without one, or with one only in code', () => {
+	assert.deepEqual(markedCells('| Name | Age |'), []);
+	assert.deepEqual(markedCells('| `%%freeze 2 1%%` | Age |'), []);
+	assert.deepEqual(markedCells('| `%%freeze 2 1%%` | %%freeze 1 0%% Age |'), [1]);
+});
+
+test('cells are counted as Obsidian counts them: an escaped pipe is text, and a row may have no leading pipe', () => {
+	assert.deepEqual(markedCells('| a \\| b | %%freeze 1 1%% Age |'), [1]);
+	assert.deepEqual(markedCells('Name %%freeze 2 1%% | Age'), [0]);
+	assert.deepEqual(markedCells('Name | Age %%freeze 2 1%%'), [1]);
+	assert.deepEqual(markedCells('|| %%freeze 1 1%% |'), [1]);
 });

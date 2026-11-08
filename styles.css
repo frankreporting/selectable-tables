@@ -99,6 +99,17 @@
 }
 
 /*
+ * A freeze mark draws nothing, but the space typed beside it stays in its header cell, and Obsidian's cells
+ * keep every space (`--table-white-space: break-spaces`). In a column only as wide as the cell's first word,
+ * that space takes a line of its own. freeze.ts marks the header cells holding a mark, and they drop spaces
+ * at a line's start and end, and show two in a row as one, as many themes already have every cell do. How
+ * the text wraps stays as the theme set it, and an open cell's editor keeps its own spacing.
+ */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables .cm-table-widget th.selectable-tables-mark-cell {
+	white-space-collapse: collapse;
+}
+
+/*
  * Frozen rows and columns. Collapsed borders belong to the table and stay behind when cells move, so when a
  * theme collapses them, freeze.ts marks the table and its cells draw their own, with Obsidian's variables, to
  * look the same. A theme with separate borders already has its cells draw them, and they're left alone.

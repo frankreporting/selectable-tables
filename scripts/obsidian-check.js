@@ -1376,6 +1376,34 @@
 			const rowsOf = (t) => t.el.querySelector('table').rows;
 			const frozenRows = (t) => Array.from(rowsOf(t)).filter((row) => row.classList.contains(ROW)).map((row) => row.rowIndex);
 			const topInPane = (el) => el.getBoundingClientRect().top - pane().top;
+			// A mark's space (STA-56): the header cells holding a mark, by column, and how many lines a cell's text takes.
+			const MARK_CELL = 'selectable-tables-mark-cell';
+			const markCells = (t) => Array.from(rowsOf(t)[0].cells).flatMap((cell, column) => (cell.classList.contains(MARK_CELL) ? [column] : [])).join();
+			// Lines by where the text sits: a tag's padded box starts a few pixels above the text beside it, and a
+			// space that collapses away has no width.
+			const linesIn = (cell) => {
+				const range = document.createRange();
+				range.selectNodeContents(cell.querySelector('.table-cell-wrapper') ?? cell);
+				const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0).sort((a, b) => a.top - b.top);
+				let lines = 0, last = -Infinity;
+				for (const rect of rects) {
+					if (rect.top - last > rect.height / 2) lines++;
+					last = rect.top;
+				}
+				return lines;
+			};
+			// A narrow table squeezes every column to its longest word, its first to "Name", whatever the pane's
+			// width. A long cell of the fourth column wrapping shows it.
+			const squeeze = async (t) => {
+				t.el.style.setProperty('width', '600px');
+				await frames();
+				return linesIn(rowsOf(t)[1].cells[3]) >= 2;
+			};
+			const unsqueeze = async (t) => {
+				t.el.style.removeProperty('width');
+				if (!t.el.getAttribute('style')) t.el.removeAttribute('style');
+				await frames();
+			};
 
 			const plain = await frozenTable('Sheds');
 			const padding = getComputedStyle(plain.el);
@@ -1733,6 +1761,78 @@
 			check('Frozen 7 a column added from the table\'s button keeps the mark', cm.state.doc.toString().includes('%%freeze 2 1%%') && edited.el.classList.contains(`${FROZEN}-columns-1`), edited.el.className);
 			await restore(cm, original);
 			await sleep(300);
+
+			// --- A mark's space. The mark draws nothing, but the space typed beside it stays in its header cell, and
+			// Obsidian's cells keep every space, so in a column as narrow as "Name" it took a line of its own (STA-56).
+			{
+				const freezeRows = async () => {
+					app.commands.executeCommandById('selectable-tables:freeze-rows');
+					await sleep(300);
+				};
+				let spaced = await frozenTable('Plants');
+				let squeezed = await squeeze(spaced);
+				let name = rowsOf(spaced)[0].cells[0];
+				check('relies 22: a mark draws nothing, and the space typed after it stays in its cell\'s text', name.querySelector('.table-cell-wrapper').textContent === ' Name', JSON.stringify(name.textContent));
+				check('Mark 1 the header cell holding a typed mark is marked, and no other', markCells(spaced) === '0', markCells(spaced));
+				check('Mark 1 that cell is one line, in a column squeezed to "Name"', squeezed && linesIn(name) === 1 && rowsOf(spaced)[0].offsetHeight < rowsOf(spaced)[1].offsetHeight, { squeezed, lines: linesIn(name), header: rowsOf(spaced)[0].offsetHeight, row: rowsOf(spaced)[1].offsetHeight });
+				spaced.el.querySelector('.table-row-btn').click();
+				await sleep(300);
+				check('Mark 1 a row added from the table\'s button, which builds the table anew, keeps the mark\'s cell marked', markCells(spaced) === '0' && linesIn(rowsOf(spaced)[0].cells[0]) === 1, markCells(spaced));
+				await unsqueeze(spaced);
+				await restore(cm, original);
+				await sleep(300);
+
+				// Toggling the class on a header row that's already right, as each change to a header line does.
+				spaced = await frozenTable('Plants');
+				const cells = Array.from(rowsOf(spaced)[0].cells);
+				const started = performance.now();
+				for (let i = 0; i < 1000; i++) cells.forEach((cell, column) => cell.classList.toggle(MARK_CELL, column === 0));
+				const each = (performance.now() - started) / 1000;
+				check(`Mark speed: setting a header row's ${cells.length} cells takes ${each.toFixed(4)} ms`, each < 0.05, each);
+
+				let shed = await frozenTable('Sheds');
+				squeezed = await squeeze(shed);
+				const height = rowsOf(shed)[0].offsetHeight;
+				check('Mark 2 a table with no mark has no cell marked', markCells(shed) === '', markCells(shed));
+				await selectTable(cm, shed);
+				await press(cm, 'Enter');
+				await freezeRows();
+				shed = await frozenTable('Sheds');
+				name = rowsOf(shed)[0].cells[0];
+				check('Mark 2 Freeze rows up to here marks the Name cell, and the header row stays as tall', squeezed && cm.state.doc.lineAt(shed.from).text.includes('%%freeze 1 0%% Name') && markCells(shed) === '0' && linesIn(name) === 1 && Math.abs(rowsOf(shed)[0].offsetHeight - height) <= 1, { squeezed, header: cm.state.doc.lineAt(shed.from).text.slice(0, 30), marked: markCells(shed), lines: linesIn(name), before: height, after: rowsOf(shed)[0].offsetHeight });
+				await press(cm, 'Enter');
+				const typedIn = openCell(cm) && cellView(cm);
+				const shown = typedIn?.state.doc.toString();
+				check('Mark 3 the open cell shows the mark and its space as typed', shown === '%%freeze 1 0%% Name', JSON.stringify(shown));
+				if (typedIn) {
+					typedIn.dispatch({ changes: { from: typedIn.state.doc.length, insert: 's' }, selection: { anchor: typedIn.state.doc.length + 1 }, userEvent: 'input.type' });
+					await sleep(200);
+					await press(typedIn, 'Escape');
+				}
+				await sleep(200);
+				check('relies 22: opening, editing and closing a cell keeps its element', rowsOf(shed)[0].cells[0] === name && name.isConnected && name.textContent === ' Names', { same: rowsOf(shed)[0].cells[0] === name, text: JSON.stringify(name.textContent) });
+				check('Mark 3 the cell stays marked and one line after it was opened and edited', name.classList.contains(MARK_CELL) && linesIn(name) === 1, { marked: markCells(shed), lines: linesIn(name) });
+				await press(cm, 'Escape');
+				await press(cm, 'Escape');
+
+				// Formatted text, which a mark written right against it would change: a tag needs a space before it.
+				for (const [label, text] of [['bold', '**Name**'], ['a tag', '#shed'], ['a link', '[[Name]]']]) {
+					await restore(cm, original);
+					const line = cm.state.doc.lineAt(cm.state.doc.toString().indexOf('| Name    | Bed', cm.state.doc.toString().indexOf('## Sheds')));
+					cm.dispatch({ changes: { from: line.from, to: line.from + '| Name    '.length, insert: `| %%freeze 1 0%% ${text} ` } });
+					await sleep(300);
+					shed = await frozenTable('Sheds');
+					squeezed = await squeeze(shed);
+					name = rowsOf(shed)[0].cells[0];
+					check(`Mark 4 a header cell starting with ${label} is marked, and one line`, squeezed && markCells(shed) === '0' && linesIn(name) === 1 && shed.el.classList.contains(FROZEN), { squeezed, marked: markCells(shed), lines: linesIn(name), html: name.querySelector('.table-cell-wrapper')?.innerHTML.slice(0, 80) });
+					await unsqueeze(shed);
+				}
+				await restore(cm, original);
+				await sleep(300);
+				shed = await frozenTable('Sheds');
+				check('Mark 5 taking the mark out takes the class off', markCells(shed) === '', markCells(shed));
+				check('Mark: the note is as it was', cm.state.doc.toString() === original);
+			}
 
 			// --- Freezing from a command
 			{
@@ -2463,6 +2563,9 @@
 				check('No pinning: nothing is marked, so columns don\'t pin without rows', !scrolled.el.classList.contains(FROZEN) && frozenRows(scrolled).length === 0 && getComputedStyle(rowsOf(scrolled)[1].cells[0]).position === 'relative' && !scrolled.el.querySelector('.selectable-tables-tint-cover'), scrolled.el.className);
 				check('No pinning: the table scrolls as usual, with its usual borders', topInPane(rowsOf(scrolled)[0]) < -100 && getComputedStyle(scrolled.el.querySelector('table')).borderCollapse === 'collapse', { row: topInPane(rowsOf(scrolled)[0]) });
 				check('No pinning: the mark still doesn\'t show', rowsOf(scrolled)[0].cells[0].textContent.trim() === 'Name', rowsOf(scrolled)[0].cells[0].textContent);
+				const squeezed = await squeeze(scrolled);
+				check('No pinning: the mark\'s cell is still marked, and one line in a squeezed column', squeezed && markCells(scrolled) === '0' && linesIn(rowsOf(scrolled)[0].cells[0]) === 1, { squeezed, marked: markCells(scrolled), lines: linesIn(rowsOf(scrolled)[0].cells[0]) });
+				await unsqueeze(scrolled);
 				await selectTable(cm, scrolled);
 				await press(cm, 'Enter');
 				await keys(cm, scrolled, 'ArrowDown', 'ArrowRight');

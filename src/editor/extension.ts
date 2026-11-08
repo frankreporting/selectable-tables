@@ -3,7 +3,7 @@ import { EditorView, KeyBinding, keymap, ViewPlugin } from '@codemirror/view';
 import { type Editor, editorEditorField, editorInfoField, editorLivePreviewField, Notice, Platform } from 'obsidian';
 import { cellFollowsCaret, cellSelected, cellSelection, TABLE_CLASS } from './cells';
 import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText } from './decide';
-import { canFreeze, frozenTables } from './freeze';
+import { frozenTables } from './freeze';
 import { viewLayout } from './layout';
 import type { Span } from './table-text';
 
@@ -366,5 +366,5 @@ export function noteView(editor: Editor): EditorView | null {
 
 /** The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. */
 export function selectableTables(): Extension {
-	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, keepCellsClosed, markSelectedTable, cellSelection, cellFollowsCaret, knownViews, canFreeze() ? frozenTables : [], EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
+	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, keepCellsClosed, markSelectedTable, cellSelection, cellFollowsCaret, knownViews, frozenTables, EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
 }

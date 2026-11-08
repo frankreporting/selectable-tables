@@ -1,7 +1,7 @@
 import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { CELL_CLASS, cellSelection, pinnedTables, TABLE_CLASS } from './cells';
 import { showsCellAfter } from './decide';
-import { Freeze, MAX_FROZEN_COLUMNS, readFreeze } from './freeze-mark';
+import { Freeze, markedCells, MAX_FROZEN_COLUMNS, readFreeze } from './freeze-mark';
 import { Paint, readPaint } from './theme-paint';
 
 /** On a table's widget while anything in it is frozen. */
@@ -24,6 +24,11 @@ const COLUMNS_CLASS = 'selectable-tables-frozen-columns';
 
 /** Before the table, on a table with frozen columns. styles.css keeps the selected table's tint out of the strip beside them with it. */
 const COVER_CLASS = 'selectable-tables-tint-cover';
+/**
+ * On each header cell holding a mark, frozen or not, so styles.css can drop the space typed beside the mark.
+ * Obsidian keeps a cell's element when it opens, closes or draws the cell again, so the class stays.
+ */
+const MARK_CELL_CLASS = 'selectable-tables-mark-cell';
 
 const columnsClass = (count: number) => `${COLUMNS_CLASS}-${count}`;
 const columnVariable = (column: number) => `--selectable-tables-column-${column}`;
@@ -50,8 +55,9 @@ const RESTART_GAP = 120;
 
 /**
  * Whether this device can pin a table's rows: that takes scroll-driven animations, which an iPhone or iPad
- * has only from iOS 26. All of freezing hangs off what's marked here, so without them nothing is marked, and
- * a table scrolls as usual rather than pinning its columns and not its rows.
+ * has only from iOS 26. All of freezing hangs off what's marked here, so without them every table reads as
+ * freezing nothing, and scrolls as usual rather than pinning its columns and not its rows. Its mark's cell
+ * is still marked, since the mark's space shows there too.
  */
 export const canFreeze = () => CSS.supports('animation-timeline', 'view()');
 
@@ -251,14 +257,26 @@ class DrawnTable {
 		this.paint = null;
 		this.freeze = { rows: 0, columns: 0 };
 	}
+
+	/**
+	 * Marks the header cells that hold a mark, and only those, by column: Obsidian's cells line up with the
+	 * header line's. Every header cell is set, so a class left by another copy of the plugin, or by a mark
+	 * that's gone, comes off too. A cell already right isn't touched, so it isn't styled again.
+	 */
+	showMarks(columns: number[]) {
+		const header = this.widget.querySelector('table')?.rows[0];
+		Array.from(header?.cells ?? []).forEach((cell, column) => cell.classList.toggle(MARK_CELL_CLASS, columns.includes(column)));
+	}
 }
 
 /**
- * Finds a note's drawn tables and marks the frozen ones; styles.css does the rest. Nothing here runs as the
- * note scrolls. The mark is read when a table is drawn, and again when a change touches its header line, so
- * typing elsewhere costs one comparison per drawn table.
+ * Finds a note's drawn tables and marks the frozen ones, and the header cells holding a mark; styles.css does
+ * the rest. Nothing here runs as the note scrolls. The mark is read when a table is drawn, and again when a
+ * change touches its header line, so typing elsewhere costs one comparison per drawn table. It runs on every
+ * device, but freezes only where `canFreeze` says rows can pin.
  */
 class FrozenTables implements PluginValue {
+	private readonly freezes = canFreeze();
 	private readonly known = new WeakMap<HTMLElement, DrawnTable>();
 	/** The tables in the editor's drawn range. */
 	private readonly drawn = new Set<DrawnTable>();
@@ -447,7 +465,10 @@ class FrozenTables implements PluginValue {
 		this.widgets.disconnect();
 		this.rebuilds.disconnect();
 		this.sizes?.disconnect();
-		for (const table of this.drawn) table.clear();
+		for (const table of this.drawn) {
+			table.clear();
+			table.showMarks([]);
+		}
 		this.drawn.clear();
 	}
 
@@ -475,13 +496,17 @@ class FrozenTables implements PluginValue {
 	private refresh(drawn: DrawnTable[]) {
 		const { view } = this;
 		const tables = drawn.filter(({ widget }) => widget.isConnected);
+		const headerLines = new Map<DrawnTable, string>();
 		const marking = tables.filter((table) => {
 			table.from = view.posAtDOM(table.widget);
 			this.unwatch(table);
-			return table.unmark(readFreeze(view.state.doc.lineAt(table.from).text), this.theme);
+			const header = view.state.doc.lineAt(table.from).text;
+			headerLines.set(table, header);
+			return table.unmark(this.freezes ? readFreeze(header) : { rows: 0, columns: 0 }, this.theme);
 		});
 		for (const table of marking) table.read(this.paints, this.theme);
 		for (const table of marking) table.mark();
+		for (const table of tables) table.showMarks(markedCells(headerLines.get(table) ?? ''));
 		for (const table of tables) {
 			if (!table.watched.length) continue;
 			this.sizes ??= new (table.widget.ownerDocument.defaultView ?? window).ResizeObserver(this.onResized);

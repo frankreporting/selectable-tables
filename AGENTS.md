@@ -99,7 +99,7 @@ npm run build
 - Attach `manifest.json`, `main.js`, and `styles.css` (if present) to the release as individual assets.
 - Plugins are submitted through the Obsidian Community directory (https://community.obsidian.md), not by a pull request to `obsidianmd/obsidian-releases` (since May 2026). Sign in with an Obsidian account, link GitHub, and add the repo. The directory reads `manifest.json` at the default branch's HEAD; installs come from the release whose tag matches its `version`.
 - Every release is reviewed automatically (code quality, security, malware), and the dashboard shows suggestions, warnings and failures. A **preview scan** runs on any branch, tag or commit before a release, without publishing anything.
-- `eslint-plugin-obsidianmd` is the rule set Obsidian points to for checking the guidelines locally; `npm run lint` runs it.
+- `eslint-plugin-obsidianmd` is the rule set Obsidian points to for checking the guidelines locally; `npm run lint` runs it, with `stylelint-config-obsidianmd` on `styles.css`.
 
 ## Security, privacy, and compliance
 

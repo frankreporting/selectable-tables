@@ -80,6 +80,15 @@ A table is a block widget over text that reads as a Markdown table. At a note's 
 
 `npm run build` (typecheck included), `npm run lint` and `npm test` must pass. CI runs the same on Node 22 and 24.
 
+`npm run lint` runs what the directory's scan checks, so a release's scorecard holds no surprises:
+
+- **ESLint** with `eslint-plugin-obsidianmd`.
+- **Obsidian's CSS rules** (`stylelint-config-obsidianmd`) on `styles.css`, failing on any warning. Their warnings, such as `:has()` and `!important`, are what the scan reports. The formatting rules the config inherits, which the scan doesn't report, are off in `stylelint.config.mjs`.
+- **A typecheck of `src` without `@types/node`** (`tsconfig.scan.json`), as the scan's lint runs. Node's types declare newer methods, such as `Array.prototype.at`, than our `lib` has, so the usual typecheck passes them and the scan reports them.
+- **`scripts/check-version.mjs`:** `package.json`, `manifest.json` and `versions.json` name the same version. The release workflow runs it with the tag too, and makes no release if they differ.
+
+When `eslint-plugin-obsidianmd` or `stylelint-config-obsidianmd` publishes a new version, update to it before the next release, since the scan may already apply it.
+
 ## Releases
 
 Every release gets one set of release notes, written when we're ready to release. `CHANGELOG.md` holds only released versions, so there's no Unreleased section, and PRs don't add to it: this replaces the usual changelog entry in each PR. The README still changes in the PR.

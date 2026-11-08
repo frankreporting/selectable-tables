@@ -4,6 +4,8 @@ import { globalIgnores, defineConfig } from 'eslint/config';
 
 export default defineConfig(
 	globalIgnores([
+		// Local folders that aren't the repo's code, such as .dev's scripts and other tools' worktrees.
+		'.*/',
 		'node_modules',
 		'dist',
 		'.test-build',

@@ -50,3 +50,12 @@ test('styles.css lays what shows at a cell\'s corners under every pinned row', (
 	// Only the pinned rows get it: on the cells it would draw over their own colors.
 	assert.equal(styles.match(/--selectable-tables-corners/g)?.length, 1);
 });
+
+test('styles.css has only the header cells holding a mark drop their spaces, and leaves wrapping to the theme', () => {
+	const rules = styles.split('}').filter((block) => block.includes('selectable-tables-mark-cell'));
+	assert.equal(rules.length, 1);
+	const rule = rules[0] ?? '';
+	assert.ok(rule.trimEnd().endsWith('.cm-table-widget th.selectable-tables-mark-cell {\n\twhite-space-collapse: collapse;'), rule);
+	// The shorthand would also set wrapping, over a theme that keeps header text on one line.
+	assert.ok(!/(^|[^-])white-space:/.test(rule.split('{')[1] ?? ''), rule);
+});

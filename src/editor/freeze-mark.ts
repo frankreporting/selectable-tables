@@ -1,3 +1,5 @@
+import { rowCells } from './table-text';
+
 /** How many of a table's first rows and columns stay in view as it scrolls. */
 export interface Freeze {
 	rows: number;
@@ -45,6 +47,14 @@ export function readFreeze(header: string): Freeze {
 /** Whether a header row holds a mark, even one that freezes nothing. */
 export function hasMark(header: string): boolean {
 	return marksIn(header).length > 0;
+}
+
+/**
+ * The header cells holding a mark, by column. A mark draws nothing, but the space typed beside it stays in
+ * its cell, and Obsidian's cells keep every space, so styles.css has these cells drop it.
+ */
+export function markedCells(header: string): number[] {
+	return rowCells(header).flatMap((cell, column) => (hasMark(cell) ? [column] : []));
 }
 
 /** The mark as the commands write it. */

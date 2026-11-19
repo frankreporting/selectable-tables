@@ -9,9 +9,13 @@ import { measure } from './metrics';
 import { timed } from './profile';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
-/** Rows are drawn to OVER px past the pane, and drawn again once those drawn reach less than MARGIN past it. */
-const OVER = 1000;
-const MARGIN = 900;
+/**
+ * Rows are drawn to OVER px past the pane, and drawn again once those drawn reach less than MARGIN past it. A hard
+ * flick runs about 3,000 px a second, so this covers a page held up for some 400 ms; 1,000 px left one blank band
+ * in 2,935 captures (STA-86's timing runs).
+ */
+const OVER = 1500;
+const MARGIN = 1300;
 /** A table of no more rows than this is drawn whole, as Obsidian draws it: no rows come in as it scrolls. */
 const WHOLE = 100;
 /** Rows that leave the page are kept, to put back without rendering again; past this many, the oldest go. */

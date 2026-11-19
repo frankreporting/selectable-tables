@@ -1,5 +1,7 @@
 import esbuild from 'esbuild';
 import process from 'process';
+import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 
 const banner = `/*
@@ -8,7 +10,22 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const prod = process.argv[2] === 'production';
+const prod = process.argv.includes('production');
+// A preview build carries the plugin's own table and its switch. A release build leaves them out, so it makes no
+// private change to Obsidian. `npm run dev` watches a preview build.
+const preview = process.argv.includes('preview') || !prod;
+
+/** A release build resolves `./preview` to a module that adds nothing, so none of the renderer is bundled. */
+const previewOnly = {
+	name: 'preview-only',
+	setup(build) {
+		if (preview) return;
+		build.onResolve({ filter: /^\.\/preview$/ }, (args) => ({ path: path.join(args.resolveDir, 'preview-off.ts') }));
+	},
+};
+
+/** A class only the renderer uses. A release build that holds it would make the private change. */
+const RENDERER_MARK = 'selectable-tables-row';
 
 const context = await esbuild.context({
 	banner: {
@@ -32,6 +49,7 @@ const context = await esbuild.context({
 		'@lezer/lr',
 		...builtinModules,
 	],
+	plugins: [previewOnly],
 	format: 'cjs',
 	target: 'es2021',
 	logLevel: 'info',
@@ -43,6 +61,11 @@ const context = await esbuild.context({
 
 if (prod) {
 	await context.rebuild();
+	if (!preview && readFileSync('main.js', 'utf8').includes(RENDERER_MARK)) {
+		console.error('The release build holds the preview renderer. It must leave it out.');
+		process.exit(1);
+	}
+	console.log(preview ? "Built a preview, with the plugin's own table." : "Built a release, without the plugin's own table.");
 	process.exit(0);
 } else {
 	await context.watch();

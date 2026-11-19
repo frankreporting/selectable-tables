@@ -12,9 +12,10 @@ import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markd
 
 /**
  * Rows are drawn to OVER px past the pane, and drawn again once those drawn reach less than MARGIN past it. 1,000 px
- * left one blank band in 2,935 captures at 3,000 and 6,000 px a second (STA-86's timing runs). Real hard flicks run
- * far faster, past 25,000 px a second, and there drawing farther ahead, 3,000 px the way the note scrolls, changed
- * nothing: the rows were in the page in time, and what held the screen back was the work each row added costs.
+ * left one blank band in 2,935 captures at 3,000 and 6,000 px a second (STA-86's timing runs). Real hard flicks and
+ * fast mouse wheels run far faster, past 25,000 px a second, and there drawing farther ahead, 3,000 px the way the
+ * note scrolls, changed nothing. What blanked the pane for seconds was each batch of rows taking longer than the
+ * last, from the renderer's node iterators piling up in the page (see `renderBatch`).
  */
 const OVER = 1500;
 const MARGIN = 1300;
@@ -40,6 +41,21 @@ export function skewEstimates(fraction: number): void {
 	skew = fraction;
 }
 const skewed = (height: number, row: number) => (skew ? height * (1 + skew * Math.sin(row * 12.9898)) : height);
+
+/** An empty element like `from`, with its attributes, made in `owner` and added to `parent` if given. */
+function copyOf<T extends Element>(from: T, owner: Document, parent?: Element): T {
+	const copy = owner.createElement(from.localName) as unknown as T;
+	for (const { name, value } of Array.from(from.attributes)) copy.setAttribute(name, value);
+	parent?.append(copy);
+	return copy;
+}
+
+/** A cell's box, as Obsidian's own table puts one in each cell. */
+function cellBox(owner: Document): HTMLDivElement {
+	const box = owner.createElement('div');
+	box.className = 'table-cell-wrapper';
+	return box;
+}
 
 /** A spacer row: one cell across the table. */
 function spacer(...classes: string[]): HTMLTableRowElement {
@@ -452,27 +468,40 @@ export class Model implements Span {
 		const view = this.view!;
 		const header = view.state.doc.lineAt(this.from).text;
 		const path = view.state.field(editorInfoField, false)?.file?.path ?? '';
-		const holder = createDiv();
+		// Obsidian's renderer reads each cell's text direction with a node iterator rooted at the cell, and a document
+		// keeps every iterator until a garbage collection, checking each one whenever a node in it is moved or taken
+		// out. An iterator also follows its cell into another document. So rows rendered in the page, or moved into it
+		// whole, piled thousands of iterators onto the page during a fast scroll, and every change there got slower,
+		// the plugin's and Obsidian's alike: a batch of rows took 50 ms to put in place, then 300 (STA-86). Each batch
+		// renders in a document of its own, and only the cells' contents move into cells made here, in the page's
+		// document, with the rendered cells' attributes. The rendered cells and their iterators stay behind.
+		const scratch = activeDocument.implementation.createHTMLDocument('');
+		const holder = scratch.createElement('div');
 		// The rows' embeds and post-processors' children, kept until the last of these rows leaves.
 		const batch: Batch = { component: new Component(), rows: 0 };
 		this.component.addChild(batch.component);
 		void MarkdownRenderer.render(this.app, markdownOf(header, rows, this.columns, this.aligns), holder, path, batch.component);
-		const out = Array.from(holder.querySelector('table')?.rows ?? []);
-		for (const tr of out) {
-			for (const cell of Array.from(tr.cells)) {
-				const wrapper = createDiv('table-cell-wrapper');
-				wrapper.append(...Array.from(cell.childNodes));
-				cell.append(wrapper);
+		const page = view.dom.ownerDocument;
+		const out: HTMLTableRowElement[] = [];
+		for (const rendered of Array.from(holder.querySelector('table')?.rows ?? [])) {
+			const tr = copyOf(rendered, page);
+			for (const cell of Array.from(rendered.cells)) {
+				const box = cellBox(page);
+				box.append(...Array.from(cell.childNodes));
+				copyOf(cell, page, tr).append(box);
 			}
-			while (tr.cells.length < this.columns) tr.insertCell().createDiv('table-cell-wrapper');
+			while (tr.cells.length < this.columns) tr.insertCell().append(cellBox(page));
 			this.batchOf.set(tr, batch);
 			batch.rows++;
+			out.push(tr);
 		}
 		if (!batch.rows) this.component.removeChild(batch.component);
 		// A link to a note that doesn't exist looks as Obsidian draws it.
-		for (const link of Array.from(holder.querySelectorAll<HTMLElement>('a.internal-link'))) {
-			const href = link.getAttribute('data-href') ?? link.getAttribute('href');
-			if (href) link.toggleClass('is-unresolved', !this.app.metadataCache.getFirstLinkpathDest(getLinkpath(href), path));
+		for (const tr of out) {
+			for (const link of Array.from(tr.querySelectorAll<HTMLElement>('a.internal-link'))) {
+				const href = link.getAttribute('data-href') ?? link.getAttribute('href');
+				if (href) link.toggleClass('is-unresolved', !this.app.metadataCache.getFirstLinkpathDest(getLinkpath(href), path));
+			}
 		}
 		return out;
 	}

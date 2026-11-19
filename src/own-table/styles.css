@@ -36,9 +36,11 @@
  * the table's box: it carries Obsidian's classes for a table's box, so Obsidian's and a theme's sizes for that box
  * land on it once, as on Obsidian's one widget: its reach into the margins, its padding beside the table, a theme's
  * width. It scrolls the blocks sideways together. Only its padding above and below goes, which CodeMirror can't see
- * in a box around blocks: the first block keeps the padding above, and the last the padding below.
+ * in a box around blocks: the first block keeps the padding above, and the last the padding below. It stacks its
+ * blocks whatever a theme does with a table's box: one that centers tables makes the box a flex row.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks.selectable-tables-blocks {
+	display: flow-root;
 	overflow-x: auto;
 	overflow-y: hidden;
 	padding-block: 0;

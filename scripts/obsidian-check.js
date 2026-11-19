@@ -2974,29 +2974,36 @@
 				};
 				const inPlace = () => big.drawnRows().filter(({ tr }) => tr.isConnected).every(({ row, tr }) => tr.matches(':nth-child(odd)') === (row % 2 === 0) && tr.matches(':first-child') === (row === 0) && tr.matches(':last-child') === (row === big.count - 1));
 				const themeWas = app.customCss.theme;
-				const themes = ['', 'Minimal', 'Baseline'].filter((name) => !name || app.customCss.themes[name]);
+				// Baseline's Table width setting at Auto (Center) makes a table's box a flex row; its blocks still stack.
+				const themes = [['', ''], ['Minimal', ''], ['Baseline', ''], ['Baseline', 'table-width-fit-center']].filter(([name]) => !name || app.customCss.themes[name]);
+				const stacked = () => {
+					const boxes = shownBoxes(big).map((box) => box.getBoundingClientRect());
+					return boxes.every((box, i) => i === 0 || (box.top >= boxes[i - 1].bottom - 1 && Math.abs(box.left - boxes[i - 1].left) < 1));
+				};
 				const seams = {};
 				try {
-					for (const name of themes) {
+					for (const [name, setting] of themes) {
 						app.customCss.setTheme(name);
+						document.body.toggleClass('table-width-fit-center', !!setting);
 						await sleep(1200);
 						view = await open('Table 2000 by 12');
 						const found = {};
 						for (const seam of [100, 200, 1900]) {
 							await toRow(seam);
-							found[seam] = { ...seamAt(seam), places: inPlace() };
+							found[seam] = { ...seamAt(seam), places: inPlace(), stacked: stacked() };
 						}
 						await toRow(0, 'start');
 						found.ends = inPlace();
 						await toRow(big.count - 1, 'end');
 						found.ends = found.ends && inPlace();
-						seams[name || 'default'] = found;
+						seams[[name || 'default', setting].filter(Boolean).join(' ')] = found;
 					}
 				} finally {
+					document.body.removeClass('table-width-fit-center');
 					app.customCss.setTheme(themeWas);
 					await sleep(800);
 				}
-				check(`Own 13: seams between blocks look as rows within one block do, in ${Object.keys(seams).join(', ')}`, Object.values(seams).every((found) => found.ends && [100, 200, 1900].every((seam) => found[seam].ok && found[seam].places)), seams);
+				check(`Own 13: seams between blocks look as rows within one block do, in ${Object.keys(seams).join(', ')}`, Object.values(seams).every((found) => found.ends && [100, 200, 1900].every((seam) => found[seam].ok && found[seam].places && found[seam].stacked)), seams);
 
 				// Sideways: the box scrolls every block together, and keeps the table's place after the note scrolls far and back.
 				view = await open('Table 2000 by 12');
@@ -3012,6 +3019,24 @@
 				sideBox = shownBoxes(big)[0].parentElement;
 				check('Own 14: the box scrolls every block sideways together, and keeps the table\'s place after scrolling far down and back', reach > 0 && left > 0 && together && Math.abs(sideBox.scrollLeft - left) < 0.5, { reach, left, together, after: sideBox.scrollLeft });
 				sideBox.scrollLeft = 0;
+
+				// A press on the box beside the large table selects it whole, and a key typed then starts a paragraph below it.
+				view = await open('Table 2000 by 12');
+				await toRow(150);
+				const besideText = view.state.doc.toString();
+				const besideBox = shownBoxes(big)[0].parentElement;
+				const row150 = drawnRow(150).getBoundingClientRect();
+				const atPadding = { clientX: besideBox.getBoundingClientRect().left + 4, clientY: row150.top + row150.height / 2 };
+				besideBox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, view: window, ...atPadding }));
+				besideBox.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, view: window, ...atPadding }));
+				await settle();
+				const beside = view.state.selection.main;
+				const besideSelected = beside.from === big.from && beside.to === big.to && view.state.doc.toString() === besideText;
+				await realType('y');
+				await sleep(300);
+				const typedAfter = view.state.doc.toString().slice(big.to);
+				check('Own 16: a press beside the large table, on its box, selects it whole, and a key typed then starts a paragraph below it', besideSelected && view.state.doc.toString().slice(0, big.to) === besideText.slice(0, big.to) && /^\n\ny\n/.test(typedAfter), { selection: [beside.from, beside.to], table: [big.from, big.to], after: JSON.stringify(typedAfter.slice(0, 12)) });
+				await restore(view, besideText);
 
 				// The parser's jump: at the note's end, an edit above the table (as Sync makes one) has the parser start
 				// again near the screen, inside the table, and read its rows there as text. It reads the header again a

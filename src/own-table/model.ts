@@ -315,6 +315,8 @@ export class Model implements Span {
 		}
 		const widths = this.fit();
 		if (widths.join(',') !== this.widths.join(',')) {
+			// Every row's estimate changes, so the blocks are decorated again for CodeMirror to take their heights.
+			this.generation++;
 			this.widths = widths;
 			this.headHeight = rowHeight(this.headWords, widths, this.metrics, true);
 			this.rowWords.forEach((cells, r) => this.heights.set(r, rowHeight(cells, widths, this.metrics!, false), false));
@@ -679,28 +681,40 @@ export class Model implements Span {
 	 */
 	private visible(): Window | null {
 		const view = this.view;
-		const block = this.blocks.find((each) => each?.dom.isConnected);
-		if (!view || !block) return null;
+		if (!view) return null;
 		const scroller = view.scrollDOM;
 		const pane = scroller.getBoundingClientRect().top;
+		// From the block in the page nearest the pane's top: CodeMirror keeps the blocks holding the selection in the
+		// page too, and its heights for the blocks between can differ from the table's.
+		let block: Block | undefined;
+		let nearest = Infinity;
+		for (const each of this.blocks) {
+			if (!each?.dom.isConnected) continue;
+			const box = each.dom.getBoundingClientRect();
+			const distance = box.top > pane ? box.top - pane : box.bottom < pane ? pane - box.bottom : 0;
+			if (distance < nearest) {
+				nearest = distance;
+				block = each;
+			}
+		}
+		if (!block) return null;
 		// Where body row 0 starts on the page: a block's body starts at its first row.
 		const body = block.tbody.getBoundingClientRect().top - this.heights.top(blockRows(this.count, block.index).first);
 		const scrollTop = scroller.scrollTop * view.scaleY;
 		let line = view.lineBlockAtHeight(scrollTop + 8);
 		const first = view.viewportLineBlocks[0];
 		if (first && line.from < view.viewport.from && first.top - scrollTop <= 200) line = first;
-		const anchorBlock = line.from >= this.from && line.from <= this.to ? blockSpans(view.state.doc, this).findIndex((span) => span.from === line.from) : -1;
+		// Scrolled to the bottom, CodeMirror keeps the bottom still instead.
+		const bottom = scroller.scrollTop > Math.max(1, scroller.scrollHeight - scroller.clientHeight - 4);
+		const anchorBlock = !bottom && line.from >= this.from && line.from <= this.to ? blockSpans(view.state.doc, this).findIndex((span) => span.from === line.from) : -1;
 		return { top: pane - body, bottom: pane + scroller.clientHeight - body, anchorBlock };
 	}
 
-	/** Whether a block is in the page, so rows can be drawn in it. */
-	private inPage(index: number): boolean {
-		return !!this.blocks[index]?.dom.isConnected;
-	}
-
 	/**
-	 * Draws the rows within OVER px of the pane, unless those drawn already reach MARGIN past it: only rows in blocks
-	 * CodeMirror has put in the page, since the others have nowhere to go yet. They're drawn when their block comes in.
+	 * Draws the rows within OVER px of the pane, unless those drawn already reach MARGIN past it, in their blocks, built
+	 * here if CodeMirror hasn't asked for them yet. CodeMirror puts the next block in the page only once the screen is
+	 * about 250 px from its edge, so a block that came in empty and had its rows drawn then made that frame long, and a
+	 * hard flick ran past it into blank space. Drawn ahead, a block comes in with its rows.
 	 */
 	private draw(visible: Window | null, force: boolean): void {
 		const view = this.view;
@@ -734,7 +748,18 @@ export class Model implements Span {
 		}
 		this.dirty.clear();
 		const need: number[] = [];
-		for (let row = first; row < end; row++) if (!this.rendered.has(row) && this.inPage(blockOf(this.count, row))) need.push(row);
+		for (let row = first; row < end; row++) if (!this.rendered.has(row)) need.push(row);
+		let built = false;
+		for (const row of need) {
+			const index = blockOf(this.count, row);
+			if (this.blocks[index]) continue;
+			this.build(index);
+			built = true;
+		}
+		if (built) {
+			this.apply();
+			if (view.state.doc.lineAt(this.from).text !== this.headText) this.renderHead();
+		}
 		const fresh = this.renderRows(need);
 		need.forEach((row, i) => this.rendered.set(row, fresh[i]!));
 		this.drawn = { first, end };
@@ -776,7 +801,13 @@ export class Model implements Span {
 	 * box the blocks are in now.
 	 */
 	placeBox(added: HTMLElement | null): void {
-		if (this.blockCount < 2) return;
+		if (this.blockCount < 2) {
+			// A table back to one block has no box, and starts again at its left edge if it grows past 100 rows.
+			this.sideBox?.removeEventListener('scroll', this.onSideways);
+			this.sideBox = null;
+			this.scrollX = 0;
+			return;
+		}
 		const box = added ?? this.blocks.find((block) => block?.dom.isConnected)?.dom.parentElement ?? null;
 		if (!box?.hasClass(BOX_CLASS)) return;
 		if (!added && box === this.sideBox) return;

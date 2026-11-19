@@ -4,7 +4,7 @@ import { Decoration, type DecorationSet, EditorView, type PluginValue, ViewPlugi
 import type { Tree } from '@lezer/common';
 import { type App, editorEditorField, Platform } from 'obsidian';
 import { noCells, stopsEdit, typeBelow, typesText } from '../editor/decide';
-import { viewLayout } from '../editor/layout';
+import { type Layout, viewLayout } from '../editor/layout';
 import { frontmatterEnd, type Span } from '../editor/table-text';
 import { endOfNextLine, findTables, type Found, lineChange, updateTables } from './find';
 import { OBSIDIAN_ROW, ROW_CLASS } from './hide-rows';
@@ -248,12 +248,30 @@ export function ownTables(app: App, failed: () => void) {
 	 * its text goes there: the caret moves on the key's keydown, before the text, and before an input method's
 	 * composition starts, which mustn't be touched once it runs.
 	 */
-	const typing = EditorView.domEventHandlers({
+	const tableEvents = EditorView.domEventHandlers({
 		keydown(event, view) {
-			if (event.defaultPrevented || event.isComposing || !typesText(event, APPLE) || !selectedModel(view.state)) return false;
-			const action = typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells });
+			const model = event.defaultPrevented || event.isComposing || !typesText(event, APPLE) ? null : selectedModel(view.state);
+			if (!model) return false;
+			// The table as a whole: CodeMirror's layout holds a table of more than 100 rows as several blocks.
+			const layout: Layout = { ...viewLayout(view), tableAt: (pos) => (pos >= model.from && pos <= model.to ? { from: model.from, to: model.to } : null) };
+			const action = typeBelow({ state: view.state, layout, cells: noCells });
 			if (action?.type === 'below') view.dispatch({ changes: { from: action.from, to: action.to, insert: action.insert }, selection: EditorSelection.cursor(action.pos), scrollIntoView: true });
 			return false;
+		},
+		/**
+		 * A press on the box around a table's blocks, beside the table, selects it, as a press on a table's one block
+		 * does. CodeMirror would put the caret at a block's edge, in the table's text. Not on the box's scrollbar.
+		 */
+		mousedown(event, view) {
+			const box = event.target as Node | null;
+			if (event.button !== 0 || !box?.instanceOf(HTMLElement) || !box.hasClass(BOX_CLASS)) return false;
+			if (event.offsetX >= box.clientWidth || event.offsetY >= box.clientHeight) return false;
+			const id = Number(box.getAttribute(BOX_ID));
+			const model = view.state.field(tables, false)?.models.find((each) => each.id === id);
+			if (!model) return false;
+			event.preventDefault();
+			select(model);
+			return true;
 		},
 	});
 
@@ -364,7 +382,7 @@ export function ownTables(app: App, failed: () => void) {
 	});
 
 	return {
-		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, keepSelectedTable, Prec.highest(typing)] : unsupported) as Extension,
+		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, keepSelectedTable, Prec.highest(tableEvents)] : unsupported) as Extension,
 		/** Obsidian's `css-change`: a new theme, font or snippet, so every table is laid out again. */
 		themeChanged() {
 			for (const editor of editors) editor.resize(editor.view);

@@ -112,7 +112,9 @@
 /*
  * Frozen rows and columns. Collapsed borders belong to the table and stay behind when cells move, so when a
  * theme collapses them, freeze.ts marks the table and its cells draw their own, with Obsidian's variables, to
- * look the same. A theme with separate borders already has its cells draw them, and they're left alone.
+ * look the same. A theme with separate borders already has its cells draw them, and they're left alone. In
+ * preview builds the plugin's own table takes the same class, since collapsed borders repaint the whole table
+ * for every row it adds.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own-borders table {
 	border-collapse: separate;

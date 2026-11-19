@@ -25,6 +25,8 @@ export interface Metrics {
 	available: number;
 	/** The table's box's padding above and below. */
 	pad: number;
+	/** The theme collapses the table's borders. */
+	collapsed: boolean;
 }
 
 /** A cell's text as it will show: its words, with their widths. */

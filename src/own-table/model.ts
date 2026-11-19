@@ -1,6 +1,7 @@
 import type { Text } from '@codemirror/state';
 import type { EditorView, Rect } from '@codemirror/view';
 import { type App, Component, editorInfoField, getLinkpath, MarkdownRenderer } from 'obsidian';
+import { OWN_BORDERS_CLASS } from '../editor/freeze';
 import { markedCells } from '../editor/freeze-mark';
 import { rowCells, type Span } from '../editor/table-text';
 import { fitColumns, measureCell, type Metrics, rowHeight, type Words } from './estimate';
@@ -10,9 +11,10 @@ import { timed } from './profile';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
 /**
- * Rows are drawn to OVER px past the pane, and drawn again once those drawn reach less than MARGIN past it. A hard
- * flick runs about 3,000 px a second, so this covers a page held up for some 400 ms; 1,000 px left one blank band
- * in 2,935 captures (STA-86's timing runs).
+ * Rows are drawn to OVER px past the pane, and drawn again once those drawn reach less than MARGIN past it. 1,000 px
+ * left one blank band in 2,935 captures at 3,000 and 6,000 px a second (STA-86's timing runs). Real hard flicks run
+ * far faster, past 25,000 px a second, and there drawing farther ahead, 3,000 px the way the note scrolls, changed
+ * nothing: the rows were in the page in time, and what held the screen back was the work each row added costs.
  */
 const OVER = 1500;
 const MARGIN = 1300;
@@ -41,7 +43,8 @@ const skewed = (height: number, row: number) => (skew ? height * (1 + skew * Mat
 
 /** A spacer row: one cell across the table. */
 function spacer(...classes: string[]): HTMLTableRowElement {
-	const tr = createEl('tr', { cls: [SPACER_CLASS, ...classes] });
+	// Only room for rows not drawn, so screen readers skip it: the rows' own numbers say where each one is.
+	const tr = createEl('tr', { cls: [SPACER_CLASS, ...classes], attr: { 'aria-hidden': 'true' } });
 	tr.createEl('td');
 	return tr;
 }
@@ -362,11 +365,18 @@ export class Model implements Span {
 
 	/** The columns' widths on the page. Fixed widths keep columns still as rows come and go. */
 	private apply(): void {
-		const key = `${this.columns}:${this.widths.join(',')}`;
+		// Collapsed borders belong to the whole table, so every row added would repaint all of it on screen, and a
+		// hard flick would outrun that: the cells draw their own instead, as a frozen table's do.
+		const own = !!this.metrics?.collapsed;
+		this.dom?.toggleClass(OWN_BORDERS_CLASS, own);
+		// Joined, a column holds half of each line beside it. Drawn by its cells, the first column holds both its lines
+		// whole, one line's width more, so it gets that width back and its text has the same room as in Obsidian's.
+		const widths = own ? this.widths.map((width, column) => (column === 0 ? width + this.metrics!.border : width)) : this.widths;
+		const key = `${this.columns}:${widths.join(',')}`;
 		if (key === this.applied || !this.colgroup || !this.table) return;
 		this.colgroup.empty();
-		for (const width of this.widths) this.colgroup.createEl('col').style.width = `${width}px`;
-		this.table.style.width = `${this.widths.reduce((sum, width) => sum + width, 0)}px`;
+		for (const width of widths) this.colgroup.createEl('col').style.width = `${width}px`;
+		this.table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
 		for (const row of [this.above, this.parity, this.below]) (row.firstChild as HTMLTableCellElement).colSpan = Math.max(1, this.columns);
 		if (this.applied) this.schedule(true);
 		this.applied = key;
@@ -389,8 +399,14 @@ export class Model implements Span {
 		// A row an edit added isn't drawn until the next measure: until then, the rows around it close up.
 		for (let row = first; row < end; row++) {
 			const tr = this.rendered.get(row);
-			if (tr) want.push(tr);
+			if (!tr) continue;
+			// Only rows near the pane are in the page, so each says which row of the table it is, the header being 1.
+			const index = String(row + 2);
+			if (tr.getAttribute('aria-rowindex') !== index) tr.setAttribute('aria-rowindex', index);
+			want.push(tr);
 		}
+		const rows = String(this.count + 1);
+		if (this.table && this.table.getAttribute('aria-rowcount') !== rows) this.table.setAttribute('aria-rowcount', rows);
 		if (end < this.count) want.push(this.below);
 		const height = (row: HTMLTableRowElement, px: number) => {
 			const cell = row.firstChild as HTMLTableCellElement;
@@ -476,6 +492,7 @@ export class Model implements Span {
 		const text = view.state.doc.lineAt(this.from).text;
 		const [row] = this.render([]);
 		for (const column of markedCells(text)) row?.cells[column]?.addClass(MARK_CELL_CLASS);
+		row?.setAttribute('aria-rowindex', '1');
 		const old = thead.firstElementChild;
 		if (old?.instanceOf(HTMLTableRowElement)) this.release(old);
 		thead.empty();

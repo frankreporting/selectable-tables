@@ -2707,10 +2707,27 @@
 					const target = drawn.find((entry) => entry.row === row);
 					const pane = view.scrollDOM.getBoundingClientRect();
 					const onScreen = target && target.tr.getBoundingClientRect().bottom > pane.top && target.tr.getBoundingClientRect().top < pane.bottom;
-					places[place] = { rows: drawn.length, labels, wrong: rowsRight(view), onScreen: !!onScreen, widths: widthsAt() };
+					// A screen reader hears each drawn row's place in the whole table, and skips the rows that only hold room.
+					const numbered = drawn.every(({ row, tr }) => tr.getAttribute('aria-rowindex') === String(row + 2));
+					const spacers = [...big.box.querySelectorAll('tbody tr.selectable-tables-spacer')];
+					const hidden = spacers.every((tr) => tr.getAttribute('aria-hidden') === 'true');
+					const count = big.box.querySelector('table').getAttribute('aria-rowcount') === String(big.count + 1) && big.box.querySelector('thead tr')?.getAttribute('aria-rowindex') === '1';
+					places[place] = { rows: drawn.length, labels, wrong: rowsRight(view), onScreen: !!onScreen, widths: widthsAt(), numbered, hidden, count };
 				}
 				check('Own 2: the rows drawn at the large table\'s top, middle and end show their own lines', Object.values(places).every((p) => p.rows > 0 && p.labels && !p.wrong.length && p.onScreen), places);
 				check('Own 2: no column changes width from the table\'s top to its end', places.top.widths === places.middle.widths && places.top.widths === places.end.widths, places);
+				check('Own 2: each drawn row gives its row number and the table its row count, and the filler rows are hidden from screen readers', Object.values(places).every((p) => p.numbered && p.hidden && p.count), places);
+				// Joined borders belong to the whole table, so each row added would repaint all of it: the cells draw their own.
+				const joined = (() => {
+					const probe = createDiv({ cls: 'cm-embed-block cm-table-widget markdown-rendered' });
+					probe.createDiv('table-wrapper').createEl('table', { cls: 'table-editor' });
+					view.contentDOM.parentElement.appendChild(probe);
+					const value = getComputedStyle(probe.querySelector('table')).borderCollapse;
+					probe.remove();
+					return value === 'collapse';
+				})();
+				const ownTable = big.box.querySelector('table');
+				check('Own 2: where the theme joins borders, the cells draw their own, as a frozen table\'s do', !joined || (big.box.classList.contains('selectable-tables-own-borders') && getComputedStyle(ownTable).borderCollapse === 'separate'), { joined, classes: big.box.className, collapse: getComputedStyle(ownTable).borderCollapse });
 
 				// The note holds while rows above the pane take their real heights, scrolling up through rows not drawn.
 				for (const skew of [0, 0.4]) {

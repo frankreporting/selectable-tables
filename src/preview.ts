@@ -1,0 +1,54 @@
+import type { Extension } from '@codemirror/state';
+import { Notice, type Plugin } from 'obsidian';
+import { ownTables } from './own-table';
+
+/** What the plugin saves for the preview: whether it draws tables itself. */
+interface Saved {
+	ownTables?: boolean;
+}
+
+/**
+ * The preview switch: a command that has the plugin draw Live Preview tables itself, for the whole vault, with no
+ * restart. Only a preview build has it (esbuild.config.mjs); a release build puts preview-off.ts here. With the
+ * switch on, the plugin's own table takes the place of its keys and frozen tables, which don't work on it yet.
+ * The setting is saved with the plugin's data, which Sync can carry to other devices.
+ */
+export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {
+	const { app } = plugin;
+	const usual = [...extensions];
+	const saved: Saved = ((await plugin.loadData()) as Saved | null) ?? {};
+	let on = false;
+	let given = false;
+
+	const own = ownTables(app, () => {
+		// The copy of Obsidian's language can't be made, after an Obsidian update say: tables stay Obsidian's.
+		if (given) return;
+		given = true;
+		new Notice("Selectable Tables can't draw tables in this version of Obsidian, so it leaves them to Obsidian.");
+		queueMicrotask(() => use(false));
+	});
+
+	const use = (drawing: boolean) => {
+		on = drawing;
+		extensions.length = 0;
+		extensions.push(...(drawing ? [own.extension] : usual));
+		app.workspace.updateOptions();
+	};
+
+	plugin.registerEvent(app.workspace.on('css-change', () => own.themeChanged()));
+	plugin.addCommand({
+		id: 'draw-tables-preview',
+		name: 'Draw tables with the plugin (preview)',
+		callback: async () => {
+			const drawing = !on;
+			given = false;
+			use(drawing);
+			saved.ownTables = drawing;
+			await plugin.saveData(saved);
+			new Notice(drawing ? 'Selectable Tables now draws tables itself (preview).' : 'Obsidian draws tables again.');
+		},
+	});
+	// For the check script and timing runs, on the plugin: whether the switch is on, and the tables' insides.
+	Object.assign(plugin, { preview: { isOn: () => on, use, ...own.debug } });
+	if (saved.ownTables) use(true);
+}

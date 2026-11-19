@@ -9,9 +9,10 @@ const FROZEN_CLASS = 'selectable-tables-frozen';
 /**
  * Also on a frozen table's widget when its theme collapses the table's borders. Collapsed borders belong to
  * the table and stay behind when cells move, so styles.css gives the cells their own then. A theme with
- * separate borders already has its cells draw them, so they're left as they are.
+ * separate borders already has its cells draw them, so they're left as they are. The plugin's own table, in
+ * preview builds, takes it too: with collapsed borders, every row it adds repaints the whole table on screen.
  */
-const OWN_BORDERS_CLASS = 'selectable-tables-own-borders';
+export const OWN_BORDERS_CLASS = 'selectable-tables-own-borders';
 /** On the widget while its frozen rows are pinned. */
 const ROWS_CLASS = 'selectable-tables-frozen-rows';
 /** On each frozen row. They're few, so script can mark them one at a time. */

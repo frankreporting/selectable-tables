@@ -1,0 +1,32 @@
+/*
+ * The plugin's own table, in preview builds only: scripts/install-test-vault.mjs adds this to styles.css there.
+ * The table's box carries Obsidian's classes for its own table, so Obsidian's look and a theme's land on it.
+ */
+
+/* Columns keep the widths the plugin works out from the text, so they hold as rows come and go. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own table {
+	table-layout: fixed;
+}
+
+/* Rows that stand in for the rows not drawn take only their height: no padding, border, color or shadow of a theme's. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-own tr.selectable-tables-spacer > td {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	min-width: 0;
+	box-shadow: none;
+}
+
+/* A row that only keeps the drawn rows odd or even, for themes that stripe rows: hidden, it still counts for them. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-own tr.selectable-tables-parity {
+	display: none;
+}
+
+/* The hidden table the plugin reads a theme's fonts and sizes from. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe.selectable-tables-probe {
+	position: absolute;
+	visibility: hidden;
+	top: 0;
+	left: 0;
+	pointer-events: none;
+}

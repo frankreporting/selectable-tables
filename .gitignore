@@ -29,5 +29,8 @@ test-vault/*/.obsidian/*
 !test-vault/*/.obsidian/app.json
 !test-vault/*/.obsidian/community-plugins.json
 
+# The test vault's large table, written by scripts/make-table-notes.mjs (npm run test-vault)
+test-vault/*/Table 2000 by 12.md
+
 # In-Obsidian check results (scripts/obsidian-check.js)
 test-vault/check-results.json

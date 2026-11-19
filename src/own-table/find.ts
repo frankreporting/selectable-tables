@@ -200,8 +200,10 @@ export function updateTables(before: readonly Span[], changes: ChangeSet | null,
 		// Text inserted right at a table's start, ending in a line break, puts its header below the text.
 		const below = doc.lineAt(Math.min(next.after, doc.length)).from;
 		const from = rows.next(next.from, next.from + 1) !== next.from && below > next.from && rows.next(below, below + 1) === below ? below : next.from;
-		// A table the parser skipped: a long stretch around it has nothing on it, and its text still opens a table.
-		const kept = rows.next(from, from + 1) === from || (rows.gap(from, next.to) >= SKIP && opensTable(doc, from));
+		// A table the parser skipped: a long stretch around its header has nothing on it, and its text still opens a
+		// table. With a table drawn as blocks, the screen can start inside it, so the parser can start again on one of
+		// its rows and read the rest as text: only its header is in the stretch.
+		const kept = rows.next(from, from + 1) === from || (rows.gap(from, doc.lineAt(from).to) >= SKIP && opensTable(doc, from));
 		if (kept) {
 			const end = endOf({ ...next, from });
 			out.push({ from, to: end, was: next.was });

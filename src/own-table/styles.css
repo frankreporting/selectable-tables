@@ -30,3 +30,59 @@
 	left: 0;
 	pointer-events: none;
 }
+
+/*
+ * A table of more than 100 rows is drawn as one block per 100 rows, in a box CodeMirror puts around them. The box is
+ * the table's box: it carries Obsidian's classes for a table's box, so Obsidian's and a theme's sizes for that box
+ * land on it once, as on Obsidian's one widget: its reach into the margins, its padding beside the table, a theme's
+ * width. It scrolls the blocks sideways together. Only its padding above and below goes, which CodeMirror can't see
+ * in a box around blocks: the first block keeps the padding above, and the last the padding below.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks.selectable-tables-blocks {
+	overflow-x: auto;
+	overflow-y: hidden;
+	padding-block: 0;
+}
+
+/*
+ * The blocks inside don't scroll, are as wide as their table, and drop the box's sizes. Obsidian, and themes after
+ * it, set a table box's side margins with !important, so the margins here need it too.
+ */
+.markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own {
+	display: flow-root;
+	overflow: visible;
+	contain: none;
+	/* stylelint-disable-next-line declaration-no-important */
+	margin: 0 !important;
+	padding-inline: 0;
+	width: max-content;
+	max-width: none;
+	min-width: 100%;
+	box-sizing: border-box;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-first) {
+	padding-top: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) {
+	padding-bottom: 0;
+}
+
+/*
+ * A table selected whole: Obsidian's tint, and the frame styles.css draws, run on across the seams between blocks,
+ * where each block's would reach past its table and lie over the next block's.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.is-selected:not(.selectable-tables-first) table::after {
+	top: 0;
+	border-top-width: 0;
+	border-start-start-radius: 0;
+	border-start-end-radius: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.is-selected:not(.selectable-tables-last) table::after {
+	bottom: 0;
+	border-bottom-width: 0;
+	border-end-start-radius: 0;
+	border-end-end-radius: 0;
+}

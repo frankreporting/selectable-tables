@@ -7,7 +7,13 @@ import type { Measure, Metrics } from './estimate';
  * own, so the plugin can lay out a table from its text before drawing it. A change of look reads them again.
  */
 
-const metricsOf = new WeakMap<EditorView, Metrics>();
+const metricsOf = new WeakMap<EditorView, { metrics: Metrics; look: number }>();
+/**
+ * Counts changes of look. Metrics read before the latest are out of date in every editor, including editors whose
+ * tables are Obsidian's at the time: with the preview switch off, nothing forgets an editor's metrics, so turning it
+ * back on after a change of theme laid tables out with the theme before (STA-88's hand check).
+ */
+let look = 0;
 /** The last note's metrics, for a table laid out before its own editor has been measured. */
 let latest: Metrics | null = null;
 
@@ -160,19 +166,32 @@ function same(a: Metrics, b: Metrics): boolean {
  * another say, has no sizes to read: it gets the last note's until it is.
  */
 export function metricsFor(view: EditorView): Metrics | null {
-	const known = metricsOf.get(view);
+	const known = current(view);
 	if (known) return known;
 	if (!view.dom.isConnected || view.contentDOM.clientWidth === 0) return latest;
 	const fresh = read(view);
 	const metrics = latest && same(latest, fresh) ? latest : fresh;
-	metricsOf.set(view, metrics);
+	metricsOf.set(view, { metrics, look });
 	latest = metrics;
 	return metrics;
 }
 
+/** An editor's metrics if read since the last change of look. */
+function current(view: EditorView): Metrics | null {
+	const known = metricsOf.get(view);
+	return known && known.look === look ? known.metrics : null;
+}
+
 /** An editor's metrics if read already, or the last note's. */
 export function knownMetrics(view: EditorView | null): Metrics | null {
-	return (view && metricsOf.get(view)) ?? latest;
+	return (view && current(view)) ?? latest;
+}
+
+/** The look changed, a theme, a font or a snippet: every editor's metrics and the text widths kept are out of date. */
+export function lookChanged(): void {
+	look++;
+	latest = null;
+	widths.clear();
 }
 
 /** Forgets an editor's metrics, after its width or the theme changed. */
@@ -188,11 +207,6 @@ export function availableWidth(view: EditorView): number {
 
 const context = activeDocument.createElement('canvas').getContext('2d');
 const widths = new Map<string, number>();
-
-/** Forgets the text widths kept, after a change of look or a font that finished loading. */
-export function forgetWidths(): void {
-	widths.clear();
-}
 
 /** Text widths from a canvas, kept by font and word: the same words come back in every row. */
 export const measure: Measure = (font, text) => {

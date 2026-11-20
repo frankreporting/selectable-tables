@@ -43,7 +43,7 @@ export interface Metrics {
 	keepSpaces: boolean;
 	/** The theme makes every table as wide as the room it has, as Typewriter and Baseline do. */
 	stretch: boolean;
-	/** The page is WebKit's, as on an iPhone or iPad, which shares a table's room by its own rule. */
+	/** Obsidian runs in WebKit, on an iPhone or iPad, which shares a table's room by its own rule. */
 	webkit: boolean;
 }
 

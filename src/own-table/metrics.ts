@@ -1,4 +1,5 @@
 import type { EditorView } from '@codemirror/view';
+import { Platform } from 'obsidian';
 import type { Measure, Metrics } from './estimate';
 
 /**
@@ -141,7 +142,8 @@ function read(view: EditorView): Metrics {
 			keepSpaces: wrapStyle.whiteSpaceCollapse === 'break-spaces' || wrapStyle.whiteSpace === 'break-spaces',
 			// The probe's cells are tiny, so a table as wide as the room is one the theme stretches.
 			stretch: (probe.querySelector('table')?.getBoundingClientRect().width ?? 0) >= available - 1,
-			webkit: /AppleWebKit/.test(navigator.userAgent) && !/Chrom/.test(navigator.userAgent),
+			// Obsidian runs in WebKit only on an iPhone or iPad.
+			webkit: Platform.isIosApp,
 		};
 	} finally {
 		stand.remove();

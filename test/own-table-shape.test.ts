@@ -12,6 +12,9 @@ const metrics: Metrics = {
 	side: { first: 20, middle: 20, last: 20, only: 20 },
 	padY: 8,
 	border: 1,
+	tableBorder: 0,
+	outer: 1,
+	firstExtra: 1,
 	lineHeight: 24,
 	headLineHeight: 24,
 	minColumn: 30,
@@ -19,6 +22,10 @@ const metrics: Metrics = {
 	pad: 32,
 	padTop: 16,
 	collapsed: true,
+	spacing: 0,
+	keepSpaces: false,
+	stretch: false,
+	webkit: false,
 };
 const measure = (font: string, text: string) => (text === ' ' ? 5 : text.length * 10);
 
@@ -31,6 +38,22 @@ test("a cell's words measure without their Markdown, and styled spans take their
 	assert.equal(measureCell('[[Note|alias]]', metrics, false, measure).max, 50);
 	assert.equal(measureCell('[[Note\\|alias]]', metrics, false, measure).max, 50);
 	assert.equal(measureCell('#tag', metrics, false, measure).max, 40 + 6);
+});
+
+test('a word runs on across styled text until a space', () => {
+	const joined = measureCell('**ab**, cd', metrics, false, measure);
+	assert.equal(joined.min, 30);
+	assert.equal(joined.max, 30 + 5 + 20);
+});
+
+test('where the theme keeps every space, a word not last on its line takes its space with it', () => {
+	const keeping = { ...metrics, keepSpaces: true };
+	assert.equal(measureCell('aa bb', keeping, false, measure).min, 25);
+	assert.equal(measureCell('aa bb', metrics, false, measure).min, 20);
+	assert.equal(linesAt(measureCell('aa bb cc dd', metrics, false, measure), 47), 2);
+	assert.equal(linesAt(measureCell('aa bb cc dd', keeping, false, measure), 47), 3);
+	// A header cell holding a freeze mark drops its spaces, whatever the theme keeps.
+	assert.equal(measureCell('%%freeze 1 1%% aa bb', keeping, true, measure).min, 20);
 });
 
 test('a freeze mark, a comment, draws nothing and takes no room', () => {
@@ -60,6 +83,16 @@ test('columns take their longest line when it fits, and their widest word when n
 	const shared = fitColumns([40, 40], [400, 800], metrics);
 	assert.ok(shared[0]! >= 60 && shared[1]! > shared[0]! && shared[0]! + shared[1]! <= 601);
 	assert.deepEqual(fitColumns([0], [0], metrics), [30]);
+});
+
+test('WebKit shares the room by how wide each column wants to be, in order, and takes back any excess from the end', () => {
+	const webkit = { ...metrics, webkit: true };
+	// Room 599: the first column gets 599 * 400 / 1000, and the second what's left.
+	const [a, b] = fitColumns([40, 40], [380, 580], webkit);
+	assert.ok(Math.abs(a! - 239.6) < 0.05 && Math.abs(b! - 359.4) < 0.05, `${a} ${b}`);
+	// The second column can't be narrower than 220, so the first gives back what that takes beyond the room.
+	const [c, d] = fitColumns([30, 200], [300, 210], { ...webkit, available: 300 });
+	assert.ok(Math.abs(c! - 79) < 0.05 && d === 220, `${c} ${d}`);
 });
 
 test("a row is as tall as its tallest cell's lines", () => {

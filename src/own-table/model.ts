@@ -8,7 +8,7 @@ import { fitColumns, measureCell, type Metrics, rowHeight, type Words } from './
 import { blockCount, blockHeight, blockOf, blockRows, blockSpans, bodyLayout, topInBlock } from './blocks';
 import { BOX_CLASS } from './boxes';
 import { covers, Heights, type RowRange, type Visible, wanted } from './heights';
-import { measure } from './metrics';
+import { measure, measureContent } from './metrics';
 import { timed } from './profile';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
@@ -38,6 +38,32 @@ const PARITY_CLASS = 'selectable-tables-parity';
 /** On a block's hidden first and last rows, which only count for a theme's rules for a table's first and last rows. */
 const EDGE_CLASS = 'selectable-tables-edge';
 
+/** What draws with a size the text can't tell: pictures and players. */
+const MEDIA = 'img, video, audio, iframe';
+/** Whether a picture or player has its size yet: a picture once it has loaded, a video once it knows its size. */
+function sized(el: Element): boolean {
+	if (el.instanceOf(HTMLImageElement)) return el.complete && el.naturalWidth > 0;
+	if (el.instanceOf(HTMLVideoElement)) return el.readyState >= 1;
+	return true;
+}
+/** The cells in some rows that hold a picture or a player. */
+function mediaCells(rows: Iterable<HTMLTableRowElement>): HTMLTableCellElement[] {
+	const cells = new Set<HTMLTableCellElement>();
+	for (const tr of rows) {
+		for (const el of Array.from(tr.querySelectorAll(MEDIA))) {
+			const cell = el.closest('td, th');
+			if (cell?.instanceOf(HTMLTableCellElement)) cells.add(cell);
+		}
+	}
+	return [...cells];
+}
+
+/** How narrow and wide a cell's content can be, measured. */
+interface Size {
+	min: number;
+	max: number;
+}
+
 /** On a header cell holding a freeze mark: styles.css has it drop the space beside the mark. */
 const MARK_CELL_CLASS = 'selectable-tables-mark-cell';
 
@@ -58,10 +84,12 @@ function copyOf<T extends Element>(from: T, owner: Document, parent?: Element): 
 	return copy;
 }
 
-/** A cell's box, as Obsidian's own table puts one in each cell. */
-function cellBox(owner: Document): HTMLDivElement {
+/** A cell's box, as Obsidian's own table puts one in each cell. An empty one holds a line break, as Obsidian's does. */
+function cellBox(owner: Document, content: Node[] = []): HTMLDivElement {
 	const box = owner.createElement('div');
 	box.className = 'table-cell-wrapper';
+	if (content.length) box.append(...content);
+	else box.append(owner.createElement('br'));
 	return box;
 }
 
@@ -153,6 +181,11 @@ export class Model implements Span {
 	/** The batch each rendered row came from, unloaded once none of its rows is kept. */
 	private readonly batchOf = new WeakMap<HTMLTableRowElement, Batch>();
 	private headText: string | null = null;
+	/**
+	 * The table's direction, from its header's first cell, as Obsidian sets it on its table's box: a table whose first
+	 * cell reads right to left runs right to left, its first column at the right.
+	 */
+	private dir = '';
 	private drawn: RowRange = { first: 0, end: 0 };
 	private readonly dirty = new Set<number>();
 	private checkRows = false;
@@ -162,6 +195,16 @@ export class Model implements Span {
 	private remeasure = false;
 	private pending = false;
 	private force = false;
+	/**
+	 * Cells holding a picture or a player, measured once it had its size, by their Markdown, a header cell's apart:
+	 * the text alone can't say how wide they draw. Forgotten when the sizes change, and measured again.
+	 */
+	private readonly media = new Map<string, Size>();
+	/** Cells to measure for their pictures and players, on the next measure. */
+	private readonly mediaCells = new Set<HTMLTableCellElement>();
+	/** The drawn rows' pictures and players are to be measured again, after the sizes changed. */
+	private rescanMedia = false;
+	private readonly mediaKey = {};
 	private readonly drawKey = {};
 	private readonly heightKey = {};
 
@@ -242,7 +285,7 @@ export class Model implements Span {
 		this.columns = columns;
 		this.aligns = Array.from({ length: columns }, (_, c) => alignOf(delimiter[c] ?? ''));
 		this.metrics = metrics;
-		this.headWords = cellsOf(headLine, columns).map((text) => measureCell(text, metrics, true, measure));
+		this.headWords = cellsOf(headLine, columns).map((text) => this.withMedia(text, true, measureCell(text, metrics, true, measure)));
 		this.rowWords = lines.map((line) => this.measureRow(line));
 		this.widths = this.fit();
 		this.headHeight = rowHeight(this.headWords, this.widths, metrics, true);
@@ -257,7 +300,13 @@ export class Model implements Span {
 	}
 
 	private measureRow(line: string): Words[] {
-		return cellsOf(line, this.columns).map((text) => measureCell(text, this.metrics!, false, measure));
+		return cellsOf(line, this.columns).map((text) => this.withMedia(text, false, measureCell(text, this.metrics!, false, measure)));
+	}
+
+	/** A cell's words, as wide as its picture or player measured, once it has been. */
+	private withMedia(text: string, header: boolean, words: Words): Words {
+		const size = this.media.size ? this.media.get(`${header ? 'h' : 'd'}\u0001${text}`) : undefined;
+		return size ? { ...words, min: size.min, max: size.max } : words;
 	}
 
 	/** Column widths from every cell's size. */
@@ -313,15 +362,20 @@ export class Model implements Span {
 			this.heights.splice(at, removed, words.map((cells) => rowHeight(cells, this.widths, this.metrics!, false)));
 			this.shiftRows(at, removed, added);
 		}
+		this.refit();
+	}
+
+	/** Fits the columns again to their cells' sizes, and says whether any width changed. */
+	private refit(): boolean {
 		const widths = this.fit();
-		if (widths.join(',') !== this.widths.join(',')) {
-			// Every row's estimate changes, so the blocks are decorated again for CodeMirror to take their heights.
-			this.generation++;
-			this.widths = widths;
-			this.headHeight = rowHeight(this.headWords, widths, this.metrics, true);
-			this.rowWords.forEach((cells, r) => this.heights.set(r, rowHeight(cells, widths, this.metrics!, false), false));
-			this.remeasure = true;
-		}
+		if (widths.join(',') === this.widths.join(',')) return false;
+		// Every row's estimate changes, so the blocks are decorated again for CodeMirror to take their heights.
+		this.generation++;
+		this.widths = widths;
+		this.headHeight = rowHeight(this.headWords, widths, this.metrics!, true);
+		this.rowWords.forEach((cells, r) => this.heights.set(r, rowHeight(cells, widths, this.metrics!, false), false));
+		this.remeasure = true;
+		return true;
 	}
 
 	/**
@@ -353,6 +407,8 @@ export class Model implements Span {
 		this.stale = true;
 		this.metrics = null;
 		this.todo = true;
+		this.media.clear();
+		this.rescanMedia = true;
 	}
 
 	/** Whether the page has something to catch up on. */
@@ -402,9 +458,17 @@ export class Model implements Span {
 		dom.addEventListener('click', (event) => {
 			if (!leftAlone(event)) this.select(this);
 		});
-		// A picture that loads changes its row's height.
-		dom.addEventListener('load', () => this.schedule(true), true);
+		// A picture that loads changes its row's height, and can widen its column, as in Obsidian's table, where the
+		// browser lays the table out again. A video does once it knows its size.
+		const loaded = (event: Event) => {
+			const cell = (event.target as Element).closest('td, th');
+			if (cell?.instanceOf(HTMLTableCellElement)) this.sizeMedia([cell]);
+			this.schedule(true);
+		};
+		dom.addEventListener('load', loaded, true);
+		dom.addEventListener('loadedmetadata', loaded, true);
 		dom.toggleClass('is-selected', this.selected);
+		if (this.dir) dom.dir = this.dir;
 		const block: Block = { index, dom, table, colgroup, thead, tbody, lead: spacer(PARITY_CLASS, EDGE_CLASS), above: spacer(), parity: spacer(PARITY_CLASS), below: spacer(), tail: spacer(PARITY_CLASS, EDGE_CLASS), applied: '' };
 		this.blocks[index] = block;
 		return block;
@@ -450,8 +514,8 @@ export class Model implements Span {
 		// hard flick would outrun that: the cells draw their own instead, as a frozen table's do.
 		const own = !!this.metrics?.collapsed;
 		// Joined, a column holds half of each line beside it. Drawn by its cells, the first column holds both its lines
-		// whole, one line's width more, so it gets that width back and its text has the same room as in Obsidian's.
-		const widths = own ? this.widths.map((width, column) => (column === 0 ? width + this.metrics!.border : width)) : this.widths;
+		// whole, half of each more, so it gets that room back and its text has the same room as in Obsidian's.
+		const widths = own ? this.widths.map((width, column) => (column === 0 ? width + this.metrics!.firstExtra : width)) : this.widths;
 		const key = `${this.columns}:${widths.join(',')}`;
 		const count = this.blockCount;
 		let changed = false;
@@ -468,7 +532,9 @@ export class Model implements Span {
 			if (key === block.applied) continue;
 			block.colgroup.empty();
 			for (const width of widths) block.colgroup.createEl('col').style.width = `${width}px`;
-			block.table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
+			// A table's width holds its own borders, which a theme may set beside its cells', and the space between cells.
+			const { tableBorder, spacing } = this.metrics!;
+			block.table.style.width = `${widths.reduce((sum, width) => sum + width, tableBorder + spacing * (this.columns + 1))}px`;
 			for (const row of [block.lead, block.above, block.parity, block.below, block.tail]) (row.firstChild as HTMLTableCellElement).colSpan = Math.max(1, this.columns);
 			if (block.applied) changed = true;
 			block.applied = key;
@@ -566,9 +632,15 @@ export class Model implements Span {
 		for (const rendered of Array.from(holder.querySelector('table')?.rows ?? [])) {
 			const tr = copyOf(rendered, page);
 			for (const cell of Array.from(rendered.cells)) {
-				const box = cellBox(page);
-				box.append(...Array.from(cell.childNodes));
-				copyOf(cell, page, tr).append(box);
+				const td = copyOf(cell, page, tr);
+				const box = td.appendChild(cellBox(page, Array.from(cell.childNodes)));
+				// A cell's text direction goes on its box: where cells draw their own borders (styles.css), they do it by the
+				// table's direction, which a cell reading the other way would turn round, leaving the table's end bare.
+				const dir = td.getAttribute('dir');
+				if (dir) {
+					td.removeAttribute('dir');
+					box.dir = dir;
+				}
 			}
 			while (tr.cells.length < this.columns) tr.insertCell().append(cellBox(page));
 			this.batchOf.set(tr, batch);
@@ -607,6 +679,13 @@ export class Model implements Span {
 		thead.empty();
 		if (row) thead.append(row);
 		this.headText = text;
+		if (row) this.sizeMedia(mediaCells([row]));
+		const dir = row?.cells[0]?.firstElementChild?.getAttribute('dir') ?? '';
+		if (dir !== this.dir) {
+			this.dir = dir;
+			for (const block of this.blocks) block?.dom.setAttr('dir', dir || null);
+			this.placeBox(null, true);
+		}
 	}
 
 	/** Rows ready for the page: kept ones whose text is the same, and the rest rendered together. */
@@ -764,7 +843,66 @@ export class Model implements Span {
 		need.forEach((row, i) => this.rendered.set(row, fresh[i]!));
 		this.drawn = { first, end };
 		this.arrange();
+		// Players have their size at once, and pictures kept from before have loaded; the rest measure as they load.
+		this.sizeMedia(mediaCells(this.rescanMedia ? [...this.rendered.values(), ...Array.from(this.blocks[0]?.thead?.rows ?? [])] : fresh));
+		this.rescanMedia = false;
 		if (need.length || force) view.requestMeasure({ key: this.heightKey, read: () => timed('measure', () => this.readHeights()), write: (measured) => timed('draw', () => this.fixHeights(measured, anchor, anchorTop)) });
+	}
+
+	/** Measures cells' pictures and players on the next measure, and widens their columns to fit, as Obsidian's table does. */
+	private sizeMedia(cells: Iterable<HTMLTableCellElement>): void {
+		const view = this.view;
+		if (!view) return;
+		for (const cell of cells) this.mediaCells.add(cell);
+		if (!this.mediaCells.size) return;
+		view.requestMeasure({
+			key: this.mediaKey,
+			read: () => timed('measure', () => this.readMedia()),
+			write: (sizes) => timed('draw', () => this.fitMedia(sizes)),
+		});
+	}
+
+	private readMedia(): { key: string; header: boolean; row: number; column: number; size: Size }[] {
+		const view = this.view;
+		const cells = [...this.mediaCells];
+		this.mediaCells.clear();
+		if (!view || !this.metrics || this.stale) return [];
+		const rowOf = new Map<HTMLTableRowElement, number>();
+		for (const [row, tr] of this.rendered) rowOf.set(tr, row);
+		const doc = view.state.doc;
+		const { header } = linesOf(doc, this);
+		const out: { key: string; header: boolean; row: number; column: number; size: Size }[] = [];
+		for (const cell of cells) {
+			const tr = cell.parentElement;
+			if (!cell.isConnected || !tr?.instanceOf(HTMLTableRowElement) || !Array.from(cell.querySelectorAll(MEDIA)).every(sized)) continue;
+			const head = cell.localName === 'th';
+			const row = head ? -1 : (rowOf.get(tr) ?? -2);
+			if (row < -1 || row >= this.count) continue;
+			const column = cell.cellIndex;
+			const text = cellsOf(doc.line(head ? header : header + 2 + row).text, this.columns)[column];
+			if (text === undefined) continue;
+			out.push({ key: `${head ? 'h' : 'd'}\u0001${text}`, header: head, row, column, size: measureContent(view, cell, this.metrics) });
+		}
+		return out;
+	}
+
+	/** Takes measured cells' sizes, and fits the columns again if any of them needs more or less room. */
+	private fitMedia(sizes: { key: string; header: boolean; row: number; column: number; size: Size }[]): void {
+		let changed = false;
+		for (const { key, header, row, column, size } of sizes) {
+			const was = this.media.get(key);
+			if (was && Math.abs(was.min - size.min) < 0.01 && Math.abs(was.max - size.max) < 0.01) continue;
+			this.media.set(key, size);
+			const words = header ? this.headWords : this.rowWords[row];
+			const cell = words?.[column];
+			if (!words || !cell) continue;
+			words[column] = { ...cell, min: size.min, max: size.max };
+			changed = true;
+		}
+		if (changed && this.refit()) {
+			this.todo = true;
+			this.refresh();
+		}
 	}
 
 	private readHeights(): Measured {
@@ -800,7 +938,7 @@ export class Model implements Span {
 	 * swipe or a cell brought into view gave it. `added` is a box CodeMirror has just put in the page; with null, the
 	 * box the blocks are in now.
 	 */
-	placeBox(added: HTMLElement | null): void {
+	placeBox(added: HTMLElement | null, turned = false): void {
 		if (this.blockCount < 2) {
 			// A table back to one block has no box, and starts again at its left edge if it grows past 100 rows.
 			this.sideBox?.removeEventListener('scroll', this.onSideways);
@@ -810,7 +948,9 @@ export class Model implements Span {
 		}
 		const box = added ?? this.blocks.find((block) => block?.dom.isConnected)?.dom.parentElement ?? null;
 		if (!box?.hasClass(BOX_CLASS)) return;
-		if (!added && box === this.sideBox) return;
+		// The box runs the table's way, so a wide table that runs right to left starts scrolled to its first column.
+		if ((box.getAttribute('dir') ?? '') !== this.dir) box.setAttr('dir', this.dir || null);
+		if (!added && !turned && box === this.sideBox) return;
 		if (box !== this.sideBox) {
 			this.sideBox?.removeEventListener('scroll', this.onSideways);
 			this.sideBox = box;

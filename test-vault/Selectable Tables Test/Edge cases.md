@@ -29,4 +29,12 @@ Two tables with one blank line between them:
 | --- | --- |
 | 3   | 4   |
 
+A table whose first cell reads right to left, so it runs from the right:
+
+| תאריך | משימה           | Hours |
+| ----- | --------------- | ----- |
+| שני   | השקיה בבוקר     | 1.5   |
+| שלישי | Plant the beans | 2     |
+|       | שתילה           | 0.5   |
+
 The last line.

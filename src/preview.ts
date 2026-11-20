@@ -36,6 +36,11 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	};
 
 	plugin.registerEvent(app.workspace.on('css-change', () => own.themeChanged()));
+	// A theme's font loads once text first uses it, after the plugin may have measured the theme's tables with the
+	// font standing in for it, and Obsidian sends nothing then.
+	const fontsLoaded = () => own.themeChanged();
+	activeDocument.fonts.addEventListener('loadingdone', fontsLoaded);
+	plugin.register(() => activeDocument.fonts.removeEventListener('loadingdone', fontsLoaded));
 	plugin.addCommand({
 		id: 'draw-tables-preview',
 		name: 'Draw tables with the plugin (preview)',

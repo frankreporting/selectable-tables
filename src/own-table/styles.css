@@ -22,13 +22,37 @@
 	display: none;
 }
 
-/* The hidden table the plugin reads a theme's fonts and sizes from. */
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe.selectable-tables-probe {
+/*
+ * The hidden table the plugin reads a theme's fonts and sizes from, in a stand-in for the note's content, so it sits
+ * where a table does and takes the width a table's box has there.
+ */
+.markdown-source-view.mod-cm6 .cm-content.selectable-tables-probe-content.selectable-tables-probe-content {
 	position: absolute;
-	visibility: hidden;
 	top: 0;
 	left: 0;
+	min-height: 0;
+	visibility: hidden;
 	pointer-events: none;
+}
+
+/*
+ * A copy of a cell holding a picture or a player, alone in the probe: squeezed for its narrowest, spread for its
+ * widest. Its table takes only the room its cell asks for, whatever width a theme gives tables (Baseline's 100%).
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe .table-wrapper.selectable-tables-squeezed {
+	width: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe .table-wrapper.selectable-tables-spread {
+	width: 100000px;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe .table-wrapper:is(.selectable-tables-squeezed, .selectable-tables-spread) > table {
+	/* stylelint-disable declaration-no-important */
+	width: auto !important;
+	min-width: 0 !important;
+	max-width: none !important;
+	/* stylelint-enable declaration-no-important */
 }
 
 /*
@@ -57,7 +81,9 @@
 	/* stylelint-disable-next-line declaration-no-important */
 	margin: 0 !important;
 	padding-inline: 0;
-	width: max-content;
+
+	/* As wide as the table, and no wider than the box for a table a theme makes 100% wide, as Border does. */
+	width: fit-content;
 	max-width: none;
 	min-width: 100%;
 	box-sizing: border-box;
@@ -69,6 +95,20 @@
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) {
 	padding-bottom: 0;
+}
+
+/*
+ * A theme's border on the table itself, as Blue Topaz and Obsidian Nord draw, belongs at the table's ends, not at
+ * every seam between its blocks. Nord sets it with !important, so these need it too.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-first) table {
+	/* stylelint-disable-next-line declaration-no-important */
+	border-top-width: 0 !important;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) table {
+	/* stylelint-disable-next-line declaration-no-important */
+	border-bottom-width: 0 !important;
 }
 
 /*

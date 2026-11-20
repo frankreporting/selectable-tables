@@ -1321,7 +1321,8 @@
 		const edge = [...top, ...tables(cm)].filter((t, i, all) => all.findIndex((u) => u.from === t.from) === i).sort((x, y) => x.from - y.from);
 		cm.dispatch({ effects: cm.constructor.scrollIntoView(0, { y: 'start' }) });
 		await sleep(300);
-		check('G26/27 the callout and the list item hold no rendered table', edge.length === 3, edge.map((e) => e.first));
+		// Drawn: the table under the long heading, the two a blank line apart, and the right-to-left one (STA-88).
+		check('G26/27 the callout and the list item hold no rendered table', edge.length === 4, edge.map((e) => e.first));
 		const [heading, a, b] = edge;
 		await caretOnLine(cm, heading.first - 1, 0);
 		const rows = [];
@@ -3080,6 +3081,36 @@
 				await sleep(500);
 				view = await open('Two report tables');
 				check('Own 11: with the switch off, Obsidian draws the tables again and the plugin\'s keys are back', obsidianBoxes(view).length > 0 && ownBoxes(view).length === 0 && view.dom.classList.contains('selectable-tables'));
+
+				// A theme changed with the switch off is taken up once it's turned on again: the plugin forgot its sizes
+				// only in notes it was drawing, so a table came back laid out with the theme before (STA-88's hand check).
+				if (app.customCss.themes.Baseline) {
+					const lookWas = app.customCss.theme;
+					const widthOf = (v) => v.contentDOM.querySelector(':scope > .cm-table-widget table')?.getBoundingClientRect().width ?? 0;
+					try {
+						app.customCss.setTheme('Baseline');
+						await sleep(1200);
+						preview.use(true);
+						view = await open('Markdown in cells');
+						await sleep(600);
+						preview.use(false);
+						await sleep(500);
+						app.customCss.setTheme('');
+						await sleep(1200);
+						view = await open('Markdown in cells');
+						await sleep(600);
+						const obsidian = widthOf(view);
+						preview.use(true);
+						view = await open('Markdown in cells');
+						await sleep(1000);
+						const own = widthOf(view);
+						check('Own 17: a theme changed with the switch off is taken up once it\'s on: the table is as wide as Obsidian\'s', obsidian > 0 && Math.abs(own - obsidian) <= 1, { obsidian, own });
+					} finally {
+						preview.use(false);
+						app.customCss.setTheme(lookWas);
+						await sleep(800);
+					}
+				}
 			} finally {
 				preview.skew(0);
 				preview.use(false);

@@ -4,6 +4,8 @@
  * sizes are read once per editor (metrics.ts); text is measured by `Measure`, a canvas in Obsidian.
  */
 
+import { hasMark } from '../editor/freeze-mark';
+
 /** The width of some text in a CSS font. */
 export type Measure = (font: string, text: string) => number;
 
@@ -17,6 +19,12 @@ export interface Metrics {
 	padY: number;
 	/** A border's width. */
 	border: number;
+	/** The table's own borders, at its start and end, which a theme may draw beside its cells'. */
+	tableBorder: number;
+	/** Joined, the halves of the table's outer borders that lie outside its columns. */
+	outer: number;
+	/** Drawn by its cells, the room the first column's borders take beyond what they take joined: half of each. */
+	firstExtra: number;
 	lineHeight: number;
 	headLineHeight: number;
 	/** The narrowest a column can be. */
@@ -29,12 +37,22 @@ export interface Metrics {
 	padTop: number;
 	/** The theme collapses the table's borders. */
 	collapsed: boolean;
+	/** The space a theme that keeps borders apart puts between cells, and around them. */
+	spacing: number;
+	/** The theme keeps every space in a cell (`break-spaces`), so spaces take room and lines break only after them. */
+	keepSpaces: boolean;
+	/** The theme makes every table as wide as the room it has, as Typewriter and Baseline do. */
+	stretch: boolean;
+	/** Obsidian runs in WebKit, on an iPhone or iPad, which shares a table's room by its own rule. */
+	webkit: boolean;
 }
 
 /** A cell's text as it will show: its words, with their widths. */
 export interface Words {
-	/** Each word's width then the width of a space after it, line by line; NaN ends a line. */
+	/** Each word's width then the width of the spaces after it, line by line; NaN ends a line. */
 	runs: number[];
+	/** Its spaces take room at a line's end, so a word that isn't last on its line needs its spaces' room too. */
+	keep: boolean;
 	/** It holds something that takes room only once loaded, such as a picture. */
 	embed: boolean;
 	/** Its widest word, and its widest line kept on one line. */
@@ -47,9 +65,16 @@ const STYLED = /(`+)(.+?)\1|!\[\[([^\]]+)\]\]|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\
 /** HTML that draws something with a size of its own. */
 const PLAYER = /<(audio|video|img|iframe)\b/i;
 
-/** Measures a cell's Markdown, a header cell's in the header's font. */
+/**
+ * Measures a cell's Markdown, a header cell's in the header's font. A word runs on across styled spans until a
+ * space: `**bold**,` is one word. Where the theme keeps every space (`break-spaces`, as the default theme does), each
+ * space takes room and a line breaks only after its spaces, so a word not last on its line takes its spaces with it,
+ * which is what sets a column's narrowest width there. A header cell holding a freeze mark drops its spaces
+ * (styles.css), as a theme with `normal` does for every cell: a run of spaces is one, and none ends a line.
+ */
 export function measureCell(text: string, metrics: Metrics, header: boolean, measure: Measure): Words {
 	const base = header ? metrics.fonts.head : metrics.fonts.body;
+	const keep = metrics.keepSpaces && !(header && hasMark(text));
 	const runs: number[] = [];
 	let embed = PLAYER.test(text);
 	let min = 0;
@@ -57,36 +82,65 @@ export function measureCell(text: string, metrics: Metrics, header: boolean, mea
 	// A comment draws nothing: the freeze mark is one. An escaped pipe shows as a pipe.
 	const shown = text.replace(/%%.*?%%/g, '').replace(/\\\|/g, '|');
 	for (const line of shown.split(/<br\s*\/?>/i)) {
-		let width = 0;
-		let words = 0;
-		const push = (part: string, font: string, extra: number) => {
-			const space = measure(font, ' ');
-			const parts = part.split(/ +/).filter(Boolean);
-			parts.forEach((word, i) => {
-				const w = measure(font, word) + (i === 0 ? extra / 2 : 0) + (i === parts.length - 1 ? extra / 2 : 0);
-				if (words) width += runs[runs.length - 1]!;
-				runs.push(w, space);
-				width += w;
-				words++;
-				min = Math.max(min, w);
-			});
+		const words: number[] = [];
+		const gaps: number[] = [];
+		/** The word being built, or -1 before the line's first word. */
+		let word = -1;
+		/** The room the spaces since the word being built take, waiting for the next word. */
+		let gap = 0;
+		let spaced = false;
+		/** Adds text in one font, with room at its start and end, such as a styled span's padding. */
+		const add = (part: string, font: string, start = 0, end = 0) => {
+			let lead = start;
+			for (const token of part.split(/( +)/)) {
+				if (!token) continue;
+				if (token.startsWith(' ')) {
+					if (word < 0) continue;
+					const space = measure(font, ' ');
+					gap += keep ? space * token.length : spaced ? 0 : space;
+					spaced = true;
+					continue;
+				}
+				if (spaced) {
+					words.push(word);
+					gaps.push(gap);
+					word = 0;
+					gap = 0;
+					spaced = false;
+				}
+				word = Math.max(0, word) + lead + measure(font, token);
+				lead = 0;
+			}
+			if (word >= 0 && !spaced) word += lead + end;
 		};
 		STYLED.lastIndex = 0;
 		let at = 0;
 		for (let match = STYLED.exec(line); match; match = STYLED.exec(line)) {
 			const before = line.slice(at, match.index) + (match[12] ?? '');
-			if (before) push(before.replace(/[*_]/g, ''), base, 0);
-			if (match[2] !== undefined) push(match[2], metrics.fonts.code, metrics.extra.code);
+			if (before) add(before.replace(/[*_]/g, ''), base);
+			const half = (extra: number) => [extra / 2, extra / 2] as const;
+			if (match[2] !== undefined) add(match[2], metrics.fonts.code, ...half(metrics.extra.code));
 			else if (match[3] !== undefined) embed = true;
-			else if (match[4] !== undefined) push(match[5] ?? match[4], base, 0);
-			else if (match[6] !== undefined) push(match[6], base, /^[a-z][a-z0-9+.-]*:/i.test(match[7] ?? '') ? metrics.extra.link : 0);
-			else if (match[8] !== undefined || match[9] !== undefined) push(match[8] ?? match[9] ?? '', header ? base : metrics.fonts.bold, 0);
-			else if (match[10] !== undefined) push(match[10], base, metrics.extra.mark);
-			else if (match[11] !== undefined) push(match[11], base, 0);
-			else if (match[13] !== undefined) push(match[13], metrics.fonts.tag, metrics.extra.tag);
+			else if (match[4] !== undefined) add(match[5] ?? match[4], base);
+			else if (match[6] !== undefined) add(match[6], base, 0, /^[a-z][a-z0-9+.-]*:/i.test(match[7] ?? '') ? metrics.extra.link : 0);
+			else if (match[8] !== undefined || match[9] !== undefined) add(match[8] ?? match[9] ?? '', header ? base : metrics.fonts.bold);
+			else if (match[10] !== undefined) add(match[10], base, ...half(metrics.extra.mark));
+			else if (match[11] !== undefined) add(match[11], base);
+			else if (match[13] !== undefined) add(match[13], metrics.fonts.tag, ...half(metrics.extra.tag));
 			at = match.index + match[0].length;
 		}
-		if (at < line.length) push(line.slice(at).replace(/[*_]/g, ''), base, 0);
+		if (at < line.length) add(line.slice(at).replace(/[*_]/g, ''), base);
+		if (word >= 0) {
+			words.push(word);
+			gaps.push(gap);
+		}
+		let width = 0;
+		words.forEach((w, i) => {
+			const last = i === words.length - 1;
+			width += w + (last ? 0 : gaps[i]!);
+			min = Math.max(min, w + (keep && !last ? gaps[i]! : 0));
+			runs.push(w, gaps[i]!);
+		});
 		max = Math.max(max, width);
 		runs.push(NaN);
 	}
@@ -94,7 +148,7 @@ export function measureCell(text: string, metrics: Metrics, header: boolean, mea
 		min = Math.max(min, EMBED_WIDTH);
 		max = Math.max(max, EMBED_WIDTH);
 	}
-	return { runs, embed, min, max };
+	return { runs, keep, embed, min, max };
 }
 
 /** Room taken by something that loads later, until it does. */
@@ -108,7 +162,7 @@ export function linesAt(words: Words, width: number): number {
 	let used = 0;
 	let wrapped = 1;
 	let space = 0;
-	const { runs } = words;
+	const { runs, keep } = words;
 	for (let i = 0; i < runs.length; i += 2) {
 		const w = runs[i]!;
 		if (Number.isNaN(w)) {
@@ -118,7 +172,9 @@ export function linesAt(words: Words, width: number): number {
 			i--;
 			continue;
 		}
-		if (used && used + space + w > width + 0.5) {
+		// Where spaces take room, a word that isn't last on its line breaks only after its spaces.
+		const need = w + (keep && !Number.isNaN(runs[i + 2]!) ? runs[i + 1]! : 0);
+		if (used && used + space + need > width + 0.5) {
 			wrapped++;
 			used = w;
 		} else used += (used ? space : 0) + w;
@@ -138,7 +194,8 @@ export function sideOf(column: number, columns: number, metrics: Metrics): numbe
 /**
  * Column widths for a table, much as a browser lays out a table on its own: every column as wide as its longest
  * line when that fits, as narrow as its widest word when even that doesn't, and in between the room shared out by
- * how much more each column wants. Whole pixels, so they don't move between renders.
+ * how much more each column wants. To a 64th of a pixel, as a browser lays out a table: whole pixels moved
+ * the lines after each column, by up to a pixel a column.
  */
 export function fitColumns(mins: readonly number[], maxs: readonly number[], metrics: Metrics): number[] {
 	const count = mins.length;
@@ -147,12 +204,42 @@ export function fitColumns(mins: readonly number[], maxs: readonly number[], met
 	const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 	const sumLeast = sum(least);
 	const sumMost = sum(most);
-	const room = metrics.available - metrics.border;
+	// Joined, a table's outer borders lie half outside its columns; apart, its own borders and the space between cells do.
+	const room = metrics.available - (metrics.collapsed ? metrics.outer : metrics.tableBorder + metrics.spacing * (count + 1));
 	let widths: number[];
-	if (sumMost <= room) widths = most;
+	// A table the theme stretches shares the room left over by how much each column wants, as a browser does.
+	if (sumMost <= room) widths = metrics.stretch ? most.map((w) => w + ((room - sumMost) * w) / Math.max(1, sumMost)) : most;
 	else if (sumLeast >= room) widths = least;
+	else if (metrics.webkit) widths = shareAsWebKit(least, most, room);
 	else widths = least.map((w, c) => w + ((room - sumLeast) * (most[c]! - w)) / Math.max(1, sumMost - sumLeast));
-	return widths.map((w) => Math.ceil(w));
+	return widths.map((w) => Math.ceil(w * 64) / 64);
+}
+
+/**
+ * WebKit's share of a table's room, between its columns' narrowest and widest (AutoTableLayout): column by column,
+ * each its part of the room left by how wide it wants to be, but no narrower than it can be; then what that gave
+ * beyond the room is taken back from the last columns first, by how far each is above its narrowest.
+ */
+function shareAsWebKit(least: readonly number[], most: readonly number[], room: number): number[] {
+	const widths = [...least];
+	let left = room;
+	let wanted = most.reduce((total, value) => total + value, 0);
+	most.forEach((want, c) => {
+		const width = Math.max(least[c]!, wanted > 0 ? (left * want) / wanted : 0);
+		left -= width;
+		wanted -= want;
+		widths[c] = width;
+	});
+	let beyond = widths.reduce((total, width, c) => total + width - least[c]!, 0);
+	for (let c = widths.length - 1; c >= 0 && left < 0; c--) {
+		const above = widths[c]! - least[c]!;
+		if (above <= 0 || beyond <= 0) continue;
+		const back = (left * above) / beyond;
+		widths[c]! += back;
+		left -= back;
+		beyond -= above;
+	}
+	return widths;
 }
 
 /** A row's height, from its cells at the columns' widths. */

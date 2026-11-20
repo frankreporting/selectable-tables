@@ -11,7 +11,7 @@ import { OBSIDIAN_ROW, ROW_CLASS } from './hide-rows';
 import { isCopy, knownLanguages, languageCopy } from './language';
 import { blockSpans } from './blocks';
 import { BOX_CLASS, BOX_ID, type BoxRange, boxes } from './boxes';
-import { availableWidth, forgetMetrics, knownMetrics, metricsFor } from './metrics';
+import { availableWidth, forgetMetrics, knownMetrics, lookChanged, metricsFor } from './metrics';
 import { Model, skewEstimates } from './model';
 import { profile, timed } from './profile';
 import { linesOf } from './shape';
@@ -383,8 +383,12 @@ export function ownTables(app: App, failed: () => void) {
 
 	return {
 		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, keepSelectedTable, Prec.highest(tableEvents)] : unsupported) as Extension,
-		/** Obsidian's `css-change`: a new theme, font or snippet, so every table is laid out again. */
+		/**
+		 * Obsidian's `css-change`, a new theme, font or snippet, or a font that finished loading: every table is laid
+		 * out again, with text measured anew, since a font that loads measures differently under the same name.
+		 */
 		themeChanged() {
+			lookChanged();
 			for (const editor of editors) editor.resize(editor.view);
 		},
 		/** For the check script: an editor's tables, every table found from scratch, and where each parser puts tables. */

@@ -2606,8 +2606,12 @@
 			const crashed = (view) => view.plugins.filter((plugin) => !plugin.spec).length;
 			const spansOf = (list) => (list ?? []).map(({ from, to }) => `${from}-${to}`).join(' ');
 			const models = (view) => preview.models(view);
-			const ownBoxes = (view) => view.contentDOM.querySelectorAll(':scope > .cm-table-widget.selectable-tables-own');
-			const obsidianBoxes = (view) => view.contentDOM.querySelectorAll(':scope > .cm-table-widget:not(.selectable-tables-own)');
+			// The plugin's blocks: a table's one block, or the blocks in the box around a longer table's.
+			const ownBoxes = (view) => view.contentDOM.querySelectorAll(':scope > .cm-table-widget.selectable-tables-own, :scope > .selectable-tables-blocks > .selectable-tables-own');
+			const obsidianBoxes = (view) => view.contentDOM.querySelectorAll(':scope > .cm-table-widget:not(.selectable-tables-own, .selectable-tables-blocks)');
+			// A table's first block, which holds its header, and the blocks in the page.
+			const firstBox = (model) => model.boxes[0];
+			const shownBoxes = (model) => model.boxes.filter((box) => box.isConnected);
 			// Obsidian's own table objects among the editor's decorations, its Live Preview's included.
 			const obsidianObjects = (view) => {
 				let found = 0;
@@ -2694,7 +2698,11 @@
 				// The large table: rows land right and columns hold, at its top, its middle and its end.
 				let view = await open('Table 2000 by 12');
 				let [big] = models(view);
-				const widthsAt = () => [...big.box.querySelectorAll('thead th')].map((th) => Math.round(th.getBoundingClientRect().width * 100) / 100).join(',');
+				// The columns' widths, from a row drawn near the pane: the header's block is in the page only at the table's top.
+				const widthsAt = () => {
+					const drawn = big.drawnRows().find(({ tr }) => tr.isConnected);
+					return drawn ? [...drawn.tr.cells].map((cell) => Math.round(cell.getBoundingClientRect().width * 100) / 100).join(',') : '';
+				};
 				const places = {};
 				for (const [place, row] of [['top', 0], ['middle', 1000], ['end', 1997]]) {
 					const line = view.state.doc.lineAt(big.from).number + 2 + row;
@@ -2709,9 +2717,9 @@
 					const onScreen = target && target.tr.getBoundingClientRect().bottom > pane.top && target.tr.getBoundingClientRect().top < pane.bottom;
 					// A screen reader hears each drawn row's place in the whole table, and skips the rows that only hold room.
 					const numbered = drawn.every(({ row, tr }) => tr.getAttribute('aria-rowindex') === String(row + 2));
-					const spacers = [...big.box.querySelectorAll('tbody tr.selectable-tables-spacer')];
+					const spacers = shownBoxes(big).flatMap((box) => [...box.querySelectorAll('tbody tr.selectable-tables-spacer')]);
 					const hidden = spacers.every((tr) => tr.getAttribute('aria-hidden') === 'true');
-					const count = big.box.querySelector('table').getAttribute('aria-rowcount') === String(big.count + 1) && big.box.querySelector('thead tr')?.getAttribute('aria-rowindex') === '1';
+					const count = shownBoxes(big).every((box) => box.querySelector('table').getAttribute('aria-rowcount') === String(big.count + 1)) && firstBox(big).querySelector('thead tr')?.getAttribute('aria-rowindex') === '1';
 					places[place] = { rows: drawn.length, labels, wrong: rowsRight(view), onScreen: !!onScreen, widths: widthsAt(), numbered, hidden, count };
 				}
 				check('Own 2: the rows drawn at the large table\'s top, middle and end show their own lines', Object.values(places).every((p) => p.rows > 0 && p.labels && !p.wrong.length && p.onScreen), places);
@@ -2726,8 +2734,8 @@
 					probe.remove();
 					return value === 'collapse';
 				})();
-				const ownTable = big.box.querySelector('table');
-				check('Own 2: where the theme joins borders, the cells draw their own, as a frozen table\'s do', !joined || (big.box.classList.contains('selectable-tables-own-borders') && getComputedStyle(ownTable).borderCollapse === 'separate'), { joined, classes: big.box.className, collapse: getComputedStyle(ownTable).borderCollapse });
+				const ownTable = shownBoxes(big)[0].querySelector('table');
+				check('Own 2: where the theme joins borders, the cells draw their own, as a frozen table\'s do', !joined || (big.boxes.every((box) => box.classList.contains('selectable-tables-own-borders')) && getComputedStyle(ownTable).borderCollapse === 'separate'), { joined, classes: shownBoxes(big)[0].className, collapse: getComputedStyle(ownTable).borderCollapse });
 
 				// The note holds while rows above the pane take their real heights, scrolling up through rows not drawn.
 				for (const skew of [0, 0.4]) {
@@ -2740,6 +2748,7 @@
 					await sleep(800);
 					let worst = 0;
 					const moves = [];
+					const seams = new Set();
 					for (let step = 0; step < 40; step++) {
 						[big] = models(view);
 						const pane = view.scrollDOM.getBoundingClientRect();
@@ -2757,8 +2766,10 @@
 						const moved = middle.tr.getBoundingClientRect().top - before;
 						moves.push(Math.round(moved * 10) / 10);
 						worst = Math.max(worst, Math.abs(moved - 300));
+						seams.add(Math.floor(middle.row / 100));
 					}
-					check(`Own 3 scrolling up through rows not yet drawn, estimates off by ${skew * 100}%: a row on screen moves at most 1.5 px more than the scroll`, moves.length > 20 && worst <= 1.5, { worst, moves });
+					// Part B's limit is 1 px, across the seams between blocks of 100 rows.
+					check(`Own 3 scrolling up through rows not yet drawn and across seams, estimates off by ${skew * 100}%: a row on screen moves at most 1 px more than the scroll`, moves.length > 20 && seams.size > 2 && worst <= 1, { worst, seams: [...seams], moves });
 				}
 				preview.skew(0);
 				await open('Blank');
@@ -2770,16 +2781,16 @@
 				view.dispatch({ effects: view.constructor.scrollIntoView(table.from, { y: 'start' }) });
 				await sleep(400);
 				[table] = models(view);
-				const cell = table.box.querySelector('tbody tr:not(.selectable-tables-spacer) td:nth-child(3)');
+				const cell = firstBox(table).querySelector('tbody tr:not(.selectable-tables-spacer) td:nth-child(3)');
 				await click(cell);
 				const chosen = view.state.selection.main;
-				check('Own 4: a press on a cell selects the whole table, tinted, framed, with no caret', chosen.from === table.from && chosen.to === table.to && table.box.classList.contains('is-selected') && view.dom.classList.contains('selectable-tables-selected') && getComputedStyle(view.dom.querySelector('.cm-cursorLayer')).display === 'none', { chosen: [chosen.from, chosen.to], table: [table.from, table.to] });
+				check('Own 4: a press on a cell selects the whole table, tinted, framed, with no caret', chosen.from === table.from && chosen.to === table.to && firstBox(table).classList.contains('is-selected') && view.dom.classList.contains('selectable-tables-selected') && getComputedStyle(view.dom.querySelector('.cm-cursorLayer')).display === 'none', { chosen: [chosen.from, chosen.to], table: [table.from, table.to] });
 				view.dispatch({ ...view.state.replaceSelection('x'), userEvent: 'input.type' });
 				await settle();
 				check('Own 4: typing over the selected table does nothing', view.state.doc.toString() === original);
 				view.dispatch({ selection: { anchor: 0 } });
 				await settle();
-				check('Own 4: the tint goes with the selection', !table.box.classList.contains('is-selected') && !view.dom.classList.contains('selectable-tables-selected'));
+				check('Own 4: the tint goes with the selection', !firstBox(table).classList.contains('is-selected') && !view.dom.classList.contains('selectable-tables-selected'));
 
 				// A key typed on the selected table starts a paragraph below it, with the text, and leaves the table.
 				await click(cell);
@@ -2793,7 +2804,7 @@
 				// A link in a cell opens its note, and the table stays as it is.
 				view = await open('Markdown in cells');
 				[table] = models(view);
-				const link = table.box.querySelector('a.internal-link');
+				const link = firstBox(table).querySelector('a.internal-link');
 				link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, view: window }));
 				await sleep(500);
 				check('Own 5: a link in a cell opens its note', app.workspace.getActiveFile()?.basename === 'Watering schedule', app.workspace.getActiveFile()?.basename);
@@ -2884,7 +2895,7 @@
 				const rowTen = view.state.doc.lineAt(table.from).number + 2 + 9;
 				view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(rowTen).from, { y: 'center' }) });
 				await sleep(500);
-				const widthBefore = models(view)[0].box.querySelector('thead th:nth-child(1)').getBoundingClientRect().width;
+				const widthBefore = firstBox(models(view)[0]).querySelector('thead th:nth-child(1)').getBoundingClientRect().width;
 				const at = other.state.doc.line(rowTen);
 				const pipe = at.text.indexOf('|', 1);
 				// A long word, since this table's columns are already as narrow as their longest words.
@@ -2893,7 +2904,7 @@
 				await frames(3);
 				[table] = models(view);
 				const drawnTen = table.drawnRows().find(({ row }) => row === 9);
-				check('Own 7: an edit in a second pane shows in this pane\'s table as it\'s typed, and its column widens', drawnTen?.tr.isConnected && drawnTen.tr.cells[0].innerText.includes('widensitscolumn') && table.box.querySelector('thead th:nth-child(1)').getBoundingClientRect().width > widthBefore && !rowsRight(view).length, { text: drawnTen?.tr.cells[0].innerText });
+				check('Own 7: an edit in a second pane shows in this pane\'s table as it\'s typed, and its column widens', drawnTen?.tr.isConnected && drawnTen.tr.cells[0].innerText.includes('widensitscolumn') && firstBox(table).querySelector('thead th:nth-child(1)').getBoundingClientRect().width > widthBefore && !rowsRight(view).length, { text: drawnTen?.tr.cells[0].innerText });
 				const count = table.count;
 				other.dispatch({ changes: { from: other.state.doc.line(view.state.doc.lineAt(table.to).number).to, insert: '\n| Row 50 | added | in | the | other | pane | x | y |' }, userEvent: 'input.type' });
 				await sleep(400);
@@ -2904,7 +2915,7 @@
 
 				// A narrower pane refits the columns, and a wider one brings them back: two more panes beside this one.
 				view = await open('Markdown in cells');
-				const widths = () => models(view).map((model) => model.box?.querySelector('table')?.style.width).join(' ');
+				const widths = () => models(view).map((model) => firstBox(model)?.querySelector('table')?.style.width).join(' ');
 				const wide = widths();
 				const panes = [app.workspace.getLeaf('split', 'vertical'), app.workspace.getLeaf('split', 'vertical')];
 				await sleep(800);
@@ -2919,9 +2930,142 @@
 				view.dispatch({ effects: view.constructor.scrollIntoView(table.from, { y: 'start' }) });
 				await sleep(400);
 				[table] = models(view);
-				const head = table.box.querySelector('thead tr');
-				const body = table.box.querySelector('tbody tr:not(.selectable-tables-spacer)');
-				check('Own 9: a frozen table draws unfrozen, its marked header cell keeps the mark\'s class, and the header row is no taller than a body row', !table.box.classList.contains('selectable-tables-frozen') && head.querySelector('.selectable-tables-mark-cell') && !head.innerText.includes('%%') && head.getBoundingClientRect().height <= body.getBoundingClientRect().height + 1, { head: head.getBoundingClientRect().height, body: body.getBoundingClientRect().height });
+				const head = firstBox(table).querySelector('thead tr');
+				const body = firstBox(table).querySelector('tbody tr:not(.selectable-tables-spacer)');
+				check('Own 9: a frozen table draws unfrozen, its marked header cell keeps the mark\'s class, and the header row is no taller than a body row', !firstBox(table).classList.contains('selectable-tables-frozen') && head.querySelector('.selectable-tables-mark-cell') && !head.innerText.includes('%%') && head.getBoundingClientRect().height <= body.getBoundingClientRect().height + 1, { head: head.getBoundingClientRect().height, body: body.getBoundingClientRect().height });
+
+				// Part B: a table of more than 100 rows is drawn as a block per 100 rows, in one box around them.
+				view = await open('Table 2000 by 12');
+				[big] = models(view);
+				const lineOfRow = (row) => view.state.doc.lineAt(big.from).number + 2 + row;
+				const toRow = async (row, y = 'center') => {
+					view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(lineOfRow(row)).from, { y }) });
+					await sleep(600);
+					await frames(3);
+					[big] = models(view);
+				};
+				const drawnRow = (row) => big.drawnRows().find((entry) => entry.row === row && entry.tr.isConnected)?.tr;
+				await toRow(100);
+				const blockBox = shownBoxes(big)[0]?.parentElement;
+				const layout = {
+					blocks: big.blockCount,
+					inOneBox: shownBoxes(big).every((box) => box.parentElement === blockBox),
+					boxClasses: !!blockBox && ['cm-embed-block', 'cm-table-widget', 'markdown-rendered', 'selectable-tables-blocks'].every((name) => blockBox.classList.contains(name)),
+					shown: shownBoxes(big).length,
+					boxes: view.contentDOM.querySelectorAll(':scope > .selectable-tables-blocks').length,
+				};
+				check('Own 12: the large table is drawn as a block per 100 rows, in one box with the classes of Obsidian\'s table box, and only the blocks near the pane are in the page', layout.blocks === 20 && layout.inOneBox && layout.boxClasses && layout.shown >= 1 && layout.shown < 6 && layout.boxes === 1, layout);
+
+				// Seams: rows on either side of a seam meet as rows within a block do, their cells line up, and every row
+				// keeps its odd or even place, and the table's first and last rows theirs, in each theme there is.
+				const seamAt = (seam) => {
+					const [a, b, c, d] = [seam - 2, seam - 1, seam, seam + 1].map(drawnRow);
+					if (!a || !b || !c || !d) return { missing: true };
+					const box = (tr) => tr.getBoundingClientRect();
+					const within = box(b).top - box(a).bottom;
+					const across = box(c).top - box(b).bottom;
+					const after = box(d).top - box(c).bottom;
+					const cells = [...b.cells].every((cell, i) => Math.abs(cell.getBoundingClientRect().left - c.cells[i].getBoundingClientRect().left) <= 1 && Math.abs(cell.getBoundingClientRect().right - c.cells[i].getBoundingClientRect().right) <= 1);
+					const style = (tr, side) => getComputedStyle(tr.cells[1])[`border${side}Width`];
+					const borders = style(b, 'Bottom') === style(a, 'Bottom') && style(c, 'Top') === style(d, 'Top');
+					const shade = (tr) => getComputedStyle(tr.cells[1]).backgroundColor;
+					const stripes = shade(a) === shade(c) && shade(b) === shade(d);
+					return { ok: Math.abs(across - within) <= 1 && Math.abs(after - within) <= 1 && cells && borders && stripes, within, across, after, cells, borders, stripes };
+				};
+				const inPlace = () => big.drawnRows().filter(({ tr }) => tr.isConnected).every(({ row, tr }) => tr.matches(':nth-child(odd)') === (row % 2 === 0) && tr.matches(':first-child') === (row === 0) && tr.matches(':last-child') === (row === big.count - 1));
+				const themeWas = app.customCss.theme;
+				// Baseline's Table width setting at Auto (Center) makes a table's box a flex row; its blocks still stack.
+				const themes = [['', ''], ['Minimal', ''], ['Baseline', ''], ['Baseline', 'table-width-fit-center']].filter(([name]) => !name || app.customCss.themes[name]);
+				const stacked = () => {
+					const boxes = shownBoxes(big).map((box) => box.getBoundingClientRect());
+					return boxes.every((box, i) => i === 0 || (box.top >= boxes[i - 1].bottom - 1 && Math.abs(box.left - boxes[i - 1].left) < 1));
+				};
+				const seams = {};
+				try {
+					for (const [name, setting] of themes) {
+						app.customCss.setTheme(name);
+						document.body.toggleClass('table-width-fit-center', !!setting);
+						await sleep(1200);
+						view = await open('Table 2000 by 12');
+						const found = {};
+						for (const seam of [100, 200, 1900]) {
+							await toRow(seam);
+							found[seam] = { ...seamAt(seam), places: inPlace(), stacked: stacked() };
+						}
+						await toRow(0, 'start');
+						found.ends = inPlace();
+						await toRow(big.count - 1, 'end');
+						found.ends = found.ends && inPlace();
+						seams[[name || 'default', setting].filter(Boolean).join(' ')] = found;
+					}
+				} finally {
+					document.body.removeClass('table-width-fit-center');
+					app.customCss.setTheme(themeWas);
+					await sleep(800);
+				}
+				check(`Own 13: seams between blocks look as rows within one block do, in ${Object.keys(seams).join(', ')}`, Object.values(seams).every((found) => found.ends && [100, 200, 1900].every((seam) => found[seam].ok && found[seam].places && found[seam].stacked)), seams);
+
+				// Sideways: the box scrolls every block together, and keeps the table's place after the note scrolls far and back.
+				view = await open('Table 2000 by 12');
+				await toRow(100);
+				let sideBox = shownBoxes(big)[0].parentElement;
+				const reach = sideBox.scrollWidth - sideBox.clientWidth;
+				sideBox.scrollLeft = Math.min(200, reach);
+				await sleep(200);
+				const left = sideBox.scrollLeft;
+				const together = Math.abs(drawnRow(99).cells[0].getBoundingClientRect().left - drawnRow(100).cells[0].getBoundingClientRect().left) <= 0.5;
+				await toRow(1500);
+				await toRow(100);
+				sideBox = shownBoxes(big)[0].parentElement;
+				check('Own 14: the box scrolls every block sideways together, and keeps the table\'s place after scrolling far down and back', reach > 0 && left > 0 && together && Math.abs(sideBox.scrollLeft - left) < 0.5, { reach, left, together, after: sideBox.scrollLeft });
+				sideBox.scrollLeft = 0;
+
+				// A press on the box beside the large table selects it whole, and a key typed then starts a paragraph below it.
+				view = await open('Table 2000 by 12');
+				await toRow(150);
+				const besideText = view.state.doc.toString();
+				const besideBox = shownBoxes(big)[0].parentElement;
+				const row150 = drawnRow(150).getBoundingClientRect();
+				const atPadding = { clientX: besideBox.getBoundingClientRect().left + 4, clientY: row150.top + row150.height / 2 };
+				besideBox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, view: window, ...atPadding }));
+				besideBox.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, view: window, ...atPadding }));
+				await settle();
+				const beside = view.state.selection.main;
+				const besideSelected = beside.from === big.from && beside.to === big.to && view.state.doc.toString() === besideText;
+				await realType('y');
+				await sleep(300);
+				const typedAfter = view.state.doc.toString().slice(big.to);
+				check('Own 16: a press beside the large table, on its box, selects it whole, and a key typed then starts a paragraph below it', besideSelected && view.state.doc.toString().slice(0, big.to) === besideText.slice(0, big.to) && /^\n\ny\n/.test(typedAfter), { selection: [beside.from, beside.to], table: [big.from, big.to], after: JSON.stringify(typedAfter.slice(0, 12)) });
+				await restore(view, besideText);
+
+				// The parser's jump: at the note's end, an edit above the table (as Sync makes one) has the parser start
+				// again near the screen, inside the table, and read its rows there as text. It reads the header again a
+				// moment later. The table stays drawn all the while, at both ends, never as lines of text.
+				const asText = () => [...view.contentDOM.querySelectorAll(':scope > .cm-line')].filter((line) => line.textContent.startsWith('| Row')).length;
+				const drawnRight = () => {
+					const [model] = models(view);
+					return !!model && model.from === big.from && view.state.doc.lineAt(model.to).text.startsWith('| Row') && !rowsRight(view).length && shownBoxes(model).length > 0 && asText() === 0;
+				};
+				view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+				await sleep(800);
+				await frames(3);
+				const atEnd = drawnRight();
+				const bigOriginal = view.state.doc.toString();
+				view.dispatch({ changes: { from: view.state.doc.line(1).to, insert: ' edited' } });
+				[big] = models(view);
+				let skipped = 0;
+				let wrong = 0;
+				for (let frame = 0; frame < 90; frame++) {
+					await frames(1);
+					if (!preview.scan(view.state).some((found) => found.from === big.from)) skipped++;
+					if (!drawnRight()) wrong++;
+				}
+				view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
+				await sleep(800);
+				await frames(3);
+				const atStart = drawnRight() && !!firstBox(models(view)[0])?.isConnected;
+				check('Own 15: Cmd+End, an edit above the table, then Cmd+Home: the parser skips the table\'s header, and the table stays drawn at both ends, never as text', atEnd && skipped > 0 && wrong === 0 && atStart, { atEnd, framesSkipped: skipped, framesWrong: wrong, atStart });
+				await restore(view, bigOriginal);
 
 				// Reading view keeps Obsidian's tables.
 				const leaf = app.workspace.getLeaf(false);

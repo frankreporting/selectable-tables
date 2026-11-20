@@ -83,6 +83,7 @@ function read(view: EditorView): Metrics {
 			minColumn: Math.max(px(tdStyle.minWidth), px(thStyle.minWidth)),
 			available: view.contentDOM.clientWidth - px(content.paddingLeft) - px(content.paddingRight),
 			pad: px(box.paddingTop) + px(box.paddingBottom),
+			padTop: px(box.paddingTop),
 			collapsed: style(probe.querySelector('table')).borderCollapse === 'collapse',
 		};
 	} finally {

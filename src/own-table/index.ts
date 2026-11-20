@@ -1,14 +1,16 @@
 import { ensureSyntaxTree, forceParsing, type Language, language, syntaxTree } from '@codemirror/language';
-import { EditorSelection, EditorState, type Extension, Prec, StateField, type Text, type Transaction } from '@codemirror/state';
+import { EditorSelection, EditorState, type Extension, Prec, RangeSet, StateEffect, StateField, type Text, type Transaction } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, type PluginValue, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
 import { type App, editorEditorField, Platform } from 'obsidian';
 import { noCells, stopsEdit, typeBelow, typesText } from '../editor/decide';
-import { viewLayout } from '../editor/layout';
+import { type Layout, viewLayout } from '../editor/layout';
 import { frontmatterEnd, type Span } from '../editor/table-text';
 import { endOfNextLine, findTables, type Found, lineChange, updateTables } from './find';
 import { OBSIDIAN_ROW, ROW_CLASS } from './hide-rows';
 import { isCopy, knownLanguages, languageCopy } from './language';
+import { blockSpans } from './blocks';
+import { BOX_CLASS, BOX_ID, type BoxRange, boxes } from './boxes';
 import { availableWidth, forgetMetrics, knownMetrics, metricsFor } from './metrics';
 import { Model, skewEstimates } from './model';
 import { profile, timed } from './profile';
@@ -37,27 +39,44 @@ interface Tables {
 	models: readonly Model[];
 	spans: readonly Span[];
 	decorations: DecorationSet;
+	/** The box around each table drawn as more than one block. */
+	wrappers: RangeSet<BoxRange>;
 	tree: Tree | null;
 }
 
-const EMPTY: Tables = { models: [], spans: [], decorations: Decoration.none, tree: null };
+const NO_BOXES = RangeSet.empty as RangeSet<BoxRange>;
 
-/** A table drawn by the plugin, over the table's whole text. */
+const EMPTY: Tables = { models: [], spans: [], decorations: Decoration.none, wrappers: NO_BOXES, tree: null };
+
+/** Asks the tables field to decorate the tables again, so CodeMirror takes their blocks' heights from their new shapes. */
+const reshaped = StateEffect.define<null>();
+
+/** One block of a table drawn by the plugin: the whole table, or a run of its rows in a table of more than 100. */
 class TableBlock extends WidgetType {
-	constructor(readonly model: Model) {
+	constructor(
+		readonly model: Model,
+		readonly index: number,
+		/** The table's shape when decorated, which gave CodeMirror the block's estimated height. */
+		readonly shape: number,
+	) {
 		super();
 	}
 
 	eq(other: TableBlock): boolean {
-		return other.model === this.model;
+		return other.model === this.model && other.index === this.index && other.shape === this.shape;
 	}
 
 	toDOM(view: EditorView): HTMLElement {
-		return this.model.mount(view, metricsFor(view));
+		return this.model.mount(view, metricsFor(view), this.index);
+	}
+
+	/** The same block with a new shape keeps its element: CodeMirror only takes its new height. */
+	updateDOM(dom: HTMLElement): boolean {
+		return this.model.isBlock(dom, this.index);
 	}
 
 	get estimatedHeight(): number {
-		return this.model.shaped ? this.model.height : -1;
+		return this.model.shaped ? this.model.blockHeight(this.index) : -1;
 	}
 
 	/** Every event in the table is the table's: CodeMirror moves no caret for it. */
@@ -66,7 +85,7 @@ class TableBlock extends WidgetType {
 	}
 
 	coordsAt(dom: HTMLElement, pos: number) {
-		return this.model.coordsAt(pos);
+		return this.model.coordsAt(this.index, pos);
 	}
 }
 
@@ -74,22 +93,31 @@ class TableBlock extends WidgetType {
 const drawsTables = (state: EditorState) => !!lineClassProp && isCopy(state.facet(language));
 
 /**
- * One block per table, over the same text as Obsidian's. A table at the note's start or right below the frontmatter
- * starts exclusively, as Obsidian's does, and one at the note's end ends so.
+ * A block per table, over the same text as Obsidian's, or a block per 100 rows in a longer table, with a box around
+ * them all. A table at the note's start or right below the frontmatter starts exclusively, as Obsidian's does, and
+ * one at the note's end ends so. The blocks of a table come from its text, so they're right before it has a shape.
  */
-function decorate(doc: Text, models: readonly Model[]): DecorationSet {
-	if (!models.length) return Decoration.none;
+function decorate(doc: Text, models: readonly Model[]): Pick<Tables, 'decorations' | 'wrappers'> {
+	if (!models.length) return { decorations: Decoration.none, wrappers: NO_BOXES };
 	const frontmatter = frontmatterEnd(doc);
-	return Decoration.set(
-		models.map((model) =>
-			Decoration.replace({
-				widget: new TableBlock(model),
-				block: true,
-				inclusiveStart: model.from > 0 && model.from > frontmatter + 1,
-				inclusiveEnd: model.to < doc.length,
-			}).range(model.from, model.to),
-		),
-	);
+	const ranges = [];
+	const wrappers = [];
+	for (const model of models) {
+		const spans = blockSpans(doc, model);
+		model.decoratedShape = model.shapeId;
+		for (const [index, span] of spans.entries()) {
+			ranges.push(
+				Decoration.replace({
+					widget: new TableBlock(model, index, model.shapeId),
+					block: true,
+					inclusiveStart: index > 0 || (model.from > 0 && model.from > frontmatter + 1),
+					inclusiveEnd: span.to < doc.length,
+				}).range(span.from, span.to),
+			);
+		}
+		if (spans.length > 1) wrappers.push(boxes!.box(model.id).range(model.from, model.to));
+	}
+	return { decorations: Decoration.set(ranges), wrappers: wrappers.length ? boxes!.set(wrappers) : NO_BOXES };
 }
 
 /** The runs of lines a language marks with a line class, in a text parsed whole: where it puts tables. */
@@ -151,13 +179,13 @@ export function ownTables(app: App, failed: () => void) {
 		const tree = timed('tree', () => syntaxTree(state));
 		const found = findTables(state.doc, treeRows(tree, lineClassProp!));
 		const models = modelsFor(state, found, []);
-		return { models, spans: spansOf(found), decorations: decorate(state.doc, models), tree };
+		return { models, spans: spansOf(found), ...decorate(state.doc, models), tree };
 	};
 
 	const tables = StateField.define<Tables>({
 		create: (state) => timed('field', () => create(state)),
 		update: (value, tr) => timed('field', () => updateTablesField(value, tr)),
-		provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
+		provide: (field) => [EditorView.decorations.from(field, (value) => value.decorations), boxes ? boxes.facet.from(field, (value) => value.wrappers) : []],
 	});
 
 	/** The tables after a transaction: the same models where the tables are the same, and new ones for new tables. */
@@ -172,7 +200,7 @@ export function ownTables(app: App, failed: () => void) {
 			return create(state);
 		}
 		const tree = timed('tree', () => syntaxTree(state));
-		if (!tr.docChanged && tree === value.tree) return value;
+		if (!tr.docChanged && tree === value.tree) return tr.effects.some((effect) => effect.is(reshaped)) ? { ...value, ...decorate(state.doc, value.models) } : value;
 		const before = value.models;
 		const found = updateTables(value.spans, tr.docChanged ? tr.changes : null, value.tree.length, startState.doc, state.doc, treeRows(tree, lineClassProp!));
 		// Each table that was there before follows the change: a change in it takes the new text, row by row.
@@ -191,8 +219,8 @@ export function ownTables(app: App, failed: () => void) {
 		const spans = spansOf(found);
 		// Mapped, a block that ends where text is inserted would take in the new text: drawn anew on any change.
 		const same = !tr.docChanged && models.length === before.length && models.every((model, i) => model === before[i] && spans[i]!.from === value.spans[i]!.from && spans[i]!.to === value.spans[i]!.to);
-		const decorations = same ? value.decorations : decorate(state.doc, models);
-		return { models, spans, decorations, tree };
+		const drawn = same && !tr.effects.some((effect) => effect.is(reshaped)) ? value : decorate(state.doc, models);
+		return { models, spans, decorations: drawn.decorations, wrappers: drawn.wrappers, tree };
 	}
 
 	/** Whether the selection is exactly one of the tables, as a press or Backspace below a table leaves it. */
@@ -220,12 +248,30 @@ export function ownTables(app: App, failed: () => void) {
 	 * its text goes there: the caret moves on the key's keydown, before the text, and before an input method's
 	 * composition starts, which mustn't be touched once it runs.
 	 */
-	const typing = EditorView.domEventHandlers({
+	const tableEvents = EditorView.domEventHandlers({
 		keydown(event, view) {
-			if (event.defaultPrevented || event.isComposing || !typesText(event, APPLE) || !selectedModel(view.state)) return false;
-			const action = typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells });
+			const model = event.defaultPrevented || event.isComposing || !typesText(event, APPLE) ? null : selectedModel(view.state);
+			if (!model) return false;
+			// The table as a whole: CodeMirror's layout holds a table of more than 100 rows as several blocks.
+			const layout: Layout = { ...viewLayout(view), tableAt: (pos) => (pos >= model.from && pos <= model.to ? { from: model.from, to: model.to } : null) };
+			const action = typeBelow({ state: view.state, layout, cells: noCells });
 			if (action?.type === 'below') view.dispatch({ changes: { from: action.from, to: action.to, insert: action.insert }, selection: EditorSelection.cursor(action.pos), scrollIntoView: true });
 			return false;
+		},
+		/**
+		 * A press on the box around a table's blocks, beside the table, selects it, as a press on a table's one block
+		 * does. CodeMirror would put the caret at a block's edge, in the table's text. Not on the box's scrollbar.
+		 */
+		mousedown(event, view) {
+			const box = event.target as Node | null;
+			if (event.button !== 0 || !box?.instanceOf(HTMLElement) || !box.hasClass(BOX_CLASS)) return false;
+			if (event.offsetX >= box.clientWidth || event.offsetY >= box.clientHeight) return false;
+			const id = Number(box.getAttribute(BOX_ID));
+			const model = view.state.field(tables, false)?.models.find((each) => each.id === id);
+			if (!model) return false;
+			event.preventDefault();
+			select(model);
+			return true;
 		},
 	});
 
@@ -234,11 +280,27 @@ export function ownTables(app: App, failed: () => void) {
 	class Editor implements PluginValue {
 		private models: readonly Model[];
 		private width: number;
+		/** Boxes CodeMirror puts around a table's blocks, as it puts them in the page. */
+		private readonly boxes: MutationObserver;
+		private redecorating = false;
 
 		constructor(readonly view: EditorView) {
 			this.models = view.state.field(tables, false)?.models ?? [];
 			this.width = -1;
 			view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
+			// CodeMirror makes a new box around a table's blocks whenever the first block it draws changes, and the new
+			// one starts scrolled to the table's left edge: it's put back here, right after CodeMirror's update and
+			// before the frame is drawn.
+			this.boxes = new MutationObserver((records) => {
+				for (const record of records) {
+					for (const node of Array.from(record.addedNodes)) {
+						if (!node.instanceOf(HTMLElement) || !node.hasClass(BOX_CLASS)) continue;
+						const id = Number(node.getAttribute(BOX_ID));
+						this.models.find((model) => model.id === id && model.view === view)?.placeBox(node);
+					}
+				}
+			});
+			this.boxes.observe(view.contentDOM, { childList: true });
 			editors.add(this);
 		}
 
@@ -260,9 +322,10 @@ export function ownTables(app: App, failed: () => void) {
 				model.ensureShape(update.state.doc, metrics);
 				if (model.behind) model.refresh();
 			}
+			this.redecorate();
 			if (update.selectionSet || update.docChanged) {
 				const selected = selectedModel(update.state);
-				for (const model of this.models) model.box?.toggleClass('is-selected', model === selected);
+				for (const model of this.models) model.setSelected(model === selected);
 			}
 			if (update.geometryChanged) {
 				update.view.requestMeasure({
@@ -286,17 +349,40 @@ export function ownTables(app: App, failed: () => void) {
 				model.ensureShape(view.state.doc, metrics);
 				if (model.view === view) model.refresh();
 			}
+			this.redecorate();
+		}
+
+		/**
+		 * Tables shaped since they were decorated, before they had sizes or after the pane or the theme changed, are
+		 * decorated again, after this update: CodeMirror keeps a block's height until it's drawn, and takes a block's
+		 * estimated height only from a new decoration.
+		 */
+		private redecorate() {
+			if (this.redecorating || !this.models.some((model) => model.shapeId !== model.decoratedShape)) return;
+			this.redecorating = true;
+			queueMicrotask(() => {
+				this.redecorating = false;
+				if (this.view.dom.isConnected) this.view.dispatch({ effects: reshaped.of(null) });
+			});
 		}
 
 		destroy() {
 			this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
+			this.boxes.disconnect();
 			editors.delete(this);
 			retire(this.models);
 		}
 	}
 
+	// Without CodeMirror's boxes around blocks, in an older Obsidian, a large table can't be drawn as blocks: tables
+	// stay Obsidian's, and the plugin says so once.
+	const unsupported = ViewPlugin.define(() => {
+		queueMicrotask(failed);
+		return {};
+	});
+
 	return {
-		extension: [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, keepSelectedTable, Prec.highest(typing)] as Extension,
+		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, keepSelectedTable, Prec.highest(tableEvents)] : unsupported) as Extension,
 		/** Obsidian's `css-change`: a new theme, font or snippet, so every table is laid out again. */
 		themeChanged() {
 			for (const editor of editors) editor.resize(editor.view);

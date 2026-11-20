@@ -17,6 +17,7 @@ const metrics: Metrics = {
 	minColumn: 30,
 	available: 600,
 	pad: 32,
+	padTop: 16,
 	collapsed: true,
 };
 const measure = (font: string, text: string) => (text === ' ' ? 5 : text.length * 10);

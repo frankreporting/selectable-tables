@@ -120,6 +120,21 @@ test('a table in a stretch the parser skipped is kept while its text still opens
 	assert.deepEqual(updateTables(old, null, 0, broken, broken, skippedIn(broken)), []);
 });
 
+test('a table whose header the parser skipped, starting again on one of its rows, is kept', () => {
+	const row = (n: number) => `| Row ${n} | some text in a cell, to make the row a little longer than a short one |`;
+	const before = doc('Text', '', '| Name | Notes |', '| - | - |', ...Array.from({ length: 2000 }, (_, n) => row(n + 1)), '', 'End');
+	const old = findTables(before, parsed(before));
+	// The parser jumped from the note's start to row 1,500, and read the rows from there as text: they have nodes, but
+	// none is a table row.
+	const restart = before.line(4 + 1500).from;
+	const restarted: Rows = {
+		length: before.length,
+		next: () => -1,
+		gap: (from, to) => (to > restart ? 0 : restart),
+	};
+	assert.deepEqual(at(updateTables(old, null, 0, before, before, restarted)), at(old));
+});
+
 test('deleting everything leaves no table, even past what the parser has read', () => {
 	const before = doc('Text', '', '| a |', '| - |', '| 1 |', '', '| b |', '| - |', '| 2 |');
 	const changes = ChangeSet.of({ from: 0, to: before.length }, before.length);

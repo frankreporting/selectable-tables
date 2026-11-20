@@ -5,6 +5,8 @@ import { OWN_BORDERS_CLASS } from '../editor/freeze';
 import { markedCells } from '../editor/freeze-mark';
 import { rowCells, type Span } from '../editor/table-text';
 import { fitColumns, measureCell, type Metrics, rowHeight, type Words } from './estimate';
+import { blockCount, blockHeight, blockOf, blockRows, blockSpans, bodyLayout, topInBlock } from './blocks';
+import { BOX_CLASS } from './boxes';
 import { covers, Heights, type RowRange, type Visible, wanted } from './heights';
 import { measure } from './metrics';
 import { timed } from './profile';
@@ -24,12 +26,18 @@ const WHOLE = 100;
 /** Rows that leave the page are kept, to put back without rendering again; past this many, the oldest go. */
 const SPARE = 400;
 
-/** On the plugin's table's box, beside Obsidian's own classes for its table. */
+/** On each of the plugin's table's blocks, beside Obsidian's own classes for its table. */
 export const OWN_CLASS = 'selectable-tables-own';
+/** On a table's first block and its last; a table of one block has both. */
+const FIRST_CLASS = 'selectable-tables-first';
+const LAST_CLASS = 'selectable-tables-last';
 /** On rows that stand in for rows not drawn, above and below those that are. */
 const SPACER_CLASS = 'selectable-tables-spacer';
 /** On a hidden row that only keeps the drawn rows odd or even, for themes that stripe rows. */
 const PARITY_CLASS = 'selectable-tables-parity';
+/** On a block's hidden first and last rows, which only count for a theme's rules for a table's first and last rows. */
+const EDGE_CLASS = 'selectable-tables-edge';
+
 /** On a header cell holding a freeze mark: styles.css has it drop the space beside the mark. */
 const MARK_CELL_CLASS = 'selectable-tables-mark-cell';
 
@@ -77,6 +85,32 @@ interface Measured {
 	head: number;
 }
 
+/** What part of the table is on screen, and the block CodeMirror keeps still as heights change, or -1. */
+interface Window extends Visible {
+	anchorBlock: number;
+}
+
+/**
+ * One block of a table, as CodeMirror holds it: a table of its own, with the same columns as the others. Block 0
+ * holds the header. Its body holds the block's rows near the pane, with spacers for the rest, and hidden rows for
+ * a theme's rules on a table's first and last rows and on odd and even rows.
+ */
+interface Block {
+	readonly index: number;
+	readonly dom: HTMLElement;
+	readonly table: HTMLTableElement;
+	readonly colgroup: HTMLTableColElement;
+	readonly thead: HTMLTableSectionElement | null;
+	readonly tbody: HTMLTableSectionElement;
+	readonly lead: HTMLTableRowElement;
+	readonly above: HTMLTableRowElement;
+	readonly parity: HTMLTableRowElement;
+	readonly below: HTMLTableRowElement;
+	readonly tail: HTMLTableRowElement;
+	/** The widths and columns on the page, to tell when the shape's differ. */
+	applied: string;
+}
+
 /**
  * One table in one editor, drawn by the plugin: the note's text decides what it shows, and only the rows near the
  * pane are in the page, with spacers standing in for the rest. It lives as long as the table does, across changes
@@ -100,18 +134,18 @@ export class Model implements Span {
 	private stale = true;
 	/** The note's text the shape holds for. A change from any other text works the shape out again. */
 	private text: Text | null = null;
+	/** Counts the shapes worked out from the whole text, so the blocks' decorations can tell their heights are old. */
+	private generation = 0;
+	/** The shape the blocks' decorations were made with, which gave CodeMirror their estimated heights. */
+	decoratedShape = -1;
 
 	// The page.
-	private dom: HTMLElement | null = null;
-	private table: HTMLTableElement | null = null;
-	private colgroup: HTMLTableColElement | null = null;
-	private thead: HTMLTableSectionElement | null = null;
-	private tbody: HTMLTableSectionElement | null = null;
-	private readonly above = spacer();
-	private readonly parity = spacer(PARITY_CLASS);
-	private readonly below = spacer();
-	/** The widths and columns on the page, to tell when the shape's differ. */
-	private applied = '';
+	/** The blocks built, by index, kept while the table lives, as CodeMirror puts them in the page and takes them out. */
+	private readonly blocks: (Block | undefined)[] = [];
+	private selected = false;
+	/** How far the table is scrolled sideways, which the box around its blocks takes back when CodeMirror makes it anew. */
+	private scrollX = 0;
+	private sideBox: HTMLElement | null = null;
 	private readonly rendered = new Map<number, HTMLTableRowElement>();
 	private readonly spare = new Map<number, HTMLTableRowElement>();
 	/** The text each drawn row was drawn from. */
@@ -145,18 +179,31 @@ export class Model implements Span {
 		return this.heights.count;
 	}
 
-	/** Whether the table's box is in the page now. */
-	get shown(): boolean {
-		return !!this.dom?.isConnected;
+	/** How many blocks the table is drawn as. */
+	get blockCount(): number {
+		return blockCount(this.count);
 	}
 
-	/** The table's box, if built. */
-	get box(): HTMLElement | null {
-		return this.dom;
+	/** Whether any of the table's blocks is in the page now. */
+	get shown(): boolean {
+		return this.blocks.some((block) => block?.dom.isConnected);
+	}
+
+	/** The blocks' elements built so far, by block, for the check script. */
+	get boxes(): HTMLElement[] {
+		return this.blocks.flatMap((block) => (block ? [block.dom] : []));
+	}
+
+	/** Tints the table as selected whole, or takes the tint off. */
+	setSelected(on: boolean): void {
+		this.selected = on;
+		for (const block of this.blocks) block?.dom.toggleClass('is-selected', on);
 	}
 
 	destroy(): void {
 		this.component.unload();
+		this.sideBox?.removeEventListener('scroll', this.onSideways);
+		this.sideBox = null;
 		this.view = null;
 	}
 
@@ -173,9 +220,15 @@ export class Model implements Span {
 		return !this.stale && !!this.metrics;
 	}
 
-	/** The table's height with its box's padding, as estimated. */
-	get height(): number {
-		return (this.metrics?.pad ?? 0) + this.headHeight + this.heights.total();
+	/** Which shape the table has, or 0 for none yet. */
+	get shapeId(): number {
+		return this.shaped ? this.generation : 0;
+	}
+
+	/** A block's height, with the box's padding above the first and below the last, as estimated. */
+	blockHeight(block: number): number {
+		const padTop = this.metrics?.padTop ?? 0;
+		return blockHeight(this.heights, block, this.headHeight, padTop, (this.metrics?.pad ?? 0) - padTop);
 	}
 
 	private shape(doc: Text, metrics: Metrics): void {
@@ -195,6 +248,7 @@ export class Model implements Span {
 		this.headHeight = rowHeight(this.headWords, this.widths, metrics, true);
 		this.heights.splice(0, this.heights.count, this.rowWords.map((cells, r) => skewed(rowHeight(cells, this.widths, metrics, false), r)));
 		this.stale = false;
+		this.generation++;
 		this.text = doc;
 		if (changedColumns) this.redrawAll();
 		this.checkRows = true;
@@ -261,6 +315,8 @@ export class Model implements Span {
 		}
 		const widths = this.fit();
 		if (widths.join(',') !== this.widths.join(',')) {
+			// Every row's estimate changes, so the blocks are decorated again for CodeMirror to take their heights.
+			this.generation++;
 			this.widths = widths;
 			this.headHeight = rowHeight(this.headWords, widths, this.metrics, true);
 			this.rowWords.forEach((cells, r) => this.heights.set(r, rowHeight(cells, widths, this.metrics!, false), false));
@@ -306,25 +362,32 @@ export class Model implements Span {
 
 	// The page ---------------------------------------------------------------------------------------------------
 
-	/** The table's box for CodeMirror, built the first time and kept. Without sizes yet, its rows come later. */
-	mount(view: EditorView, metrics: Metrics | null): HTMLElement {
-		return timed('mount', () => this.mountNow(view, metrics));
+	/** A block's element for CodeMirror, built the first time and kept. Without sizes yet, its rows come later. */
+	mount(view: EditorView, metrics: Metrics | null, block: number): HTMLElement {
+		return timed('mount', () => this.mountNow(view, metrics, block));
 	}
 
-	private mountNow(view: EditorView, metrics: Metrics | null): HTMLElement {
+	private mountNow(view: EditorView, metrics: Metrics | null, index: number): HTMLElement {
 		this.view = view;
 		this.ensureShape(view.state.doc, metrics);
-		if (!this.dom) this.build();
+		const block = this.blocks[index] ?? this.build(index);
 		this.refresh();
-		return this.dom!;
+		// A block coming into the page may hold rows near the pane that weren't drawn while it was out.
+		if (this.blockCount > 1) this.schedule(true);
+		return block.dom;
 	}
 
-	private build(): void {
+	/** Whether an element is one of this table's blocks, the one at `index`. */
+	isBlock(dom: HTMLElement, index: number): boolean {
+		return this.blocks[index]?.dom === dom;
+	}
+
+	private build(index: number): Block {
 		const dom = createDiv({ cls: ['cm-embed-block', 'cm-table-widget', 'markdown-rendered', OWN_CLASS] });
 		const table = dom.createDiv('table-wrapper').createEl('table', { cls: 'table-editor' });
-		this.colgroup = table.createEl('colgroup');
-		this.thead = table.createEl('thead');
-		this.tbody = table.createEl('tbody');
+		const colgroup = table.createEl('colgroup');
+		const thead = index === 0 ? table.createEl('thead') : null;
+		const tbody = table.createEl('tbody');
 		// A press anywhere but a link selects the whole table. The browser moves no caret and starts no selection:
 		// the press's default is prevented, apart from the table's own scrollbar.
 		const onScrollbar = (event: MouseEvent) => event.target === dom && (event.offsetX >= dom.clientWidth || event.offsetY >= dom.clientHeight);
@@ -341,14 +404,16 @@ export class Model implements Span {
 		});
 		// A picture that loads changes its row's height.
 		dom.addEventListener('load', () => this.schedule(true), true);
-		this.dom = dom;
-		this.table = table;
+		dom.toggleClass('is-selected', this.selected);
+		const block: Block = { index, dom, table, colgroup, thead, tbody, lead: spacer(PARITY_CLASS, EDGE_CLASS), above: spacer(), parity: spacer(PARITY_CLASS), below: spacer(), tail: spacer(PARITY_CLASS, EDGE_CLASS), applied: '' };
+		this.blocks[index] = block;
+		return block;
 	}
 
 	/** Puts what changed on the page: new widths, the header, rows whose text changed, then the rows near the pane. */
 	refresh(): void {
 		const view = this.view;
-		if (!view || !this.dom || !this.metrics || this.stale) return;
+		if (!view || !this.blocks.some(Boolean) || !this.metrics || this.stale) return;
 		this.todo = false;
 		this.apply();
 		const doc = view.state.doc;
@@ -379,68 +444,83 @@ export class Model implements Span {
 		this.todo = true;
 	}
 
-	/** The columns' widths on the page. Fixed widths keep columns still as rows come and go. */
+	/** The columns' widths on each block. Fixed widths keep columns still as rows come and go, and blocks lined up. */
 	private apply(): void {
 		// Collapsed borders belong to the whole table, so every row added would repaint all of it on screen, and a
 		// hard flick would outrun that: the cells draw their own instead, as a frozen table's do.
 		const own = !!this.metrics?.collapsed;
-		this.dom?.toggleClass(OWN_BORDERS_CLASS, own);
 		// Joined, a column holds half of each line beside it. Drawn by its cells, the first column holds both its lines
 		// whole, one line's width more, so it gets that width back and its text has the same room as in Obsidian's.
 		const widths = own ? this.widths.map((width, column) => (column === 0 ? width + this.metrics!.border : width)) : this.widths;
 		const key = `${this.columns}:${widths.join(',')}`;
-		if (key === this.applied || !this.colgroup || !this.table) return;
-		this.colgroup.empty();
-		for (const width of widths) this.colgroup.createEl('col').style.width = `${width}px`;
-		this.table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
-		for (const row of [this.above, this.parity, this.below]) (row.firstChild as HTMLTableCellElement).colSpan = Math.max(1, this.columns);
-		if (this.applied) this.schedule(true);
-		this.applied = key;
+		const count = this.blockCount;
+		let changed = false;
+		for (const [index, block] of this.blocks.entries()) {
+			if (!block) continue;
+			// A block past the table's end, after rows were taken out: CodeMirror drops it.
+			if (index >= count && !block.dom.isConnected) {
+				this.blocks[index] = undefined;
+				continue;
+			}
+			block.dom.toggleClass(OWN_BORDERS_CLASS, own);
+			block.dom.toggleClass(FIRST_CLASS, index === 0);
+			block.dom.toggleClass(LAST_CLASS, index === count - 1);
+			if (key === block.applied) continue;
+			block.colgroup.empty();
+			for (const width of widths) block.colgroup.createEl('col').style.width = `${width}px`;
+			block.table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
+			for (const row of [block.lead, block.above, block.parity, block.below, block.tail]) (row.firstChild as HTMLTableCellElement).colSpan = Math.max(1, this.columns);
+			if (block.applied) changed = true;
+			block.applied = key;
+		}
+		while (this.blocks.length && !this.blocks[this.blocks.length - 1]) this.blocks.pop();
+		if (changed) this.schedule(true);
 	}
 
 	/**
-	 * The body's rows in order: a spacer for the rows above those drawn, a hidden row when needed to keep each
-	 * drawn row odd or even as in the whole table, the drawn rows, and a spacer for the rows below.
+	 * Each block's body rows in order: a hidden first row after the first block, a spacer for the block's rows above
+	 * those drawn, a hidden row when needed to keep each drawn row odd or even as in the whole table, the drawn rows,
+	 * a spacer for the rows below, and a hidden last row before the last block. Only what changed moves.
 	 */
 	private arrange(): void {
-		const body = this.tbody;
-		if (!body) return;
-		let { first, end } = this.drawn;
-		while (first < end && !this.rendered.has(first)) first++;
-		while (end > first && !this.rendered.has(end - 1)) end--;
-		const want: HTMLTableRowElement[] = [];
-		const above = first > 0 ? 1 : 0;
-		if (above) want.push(this.above);
-		if ((first - above) % 2 !== 0) want.push(this.parity);
-		// A row an edit added isn't drawn until the next measure: until then, the rows around it close up.
-		for (let row = first; row < end; row++) {
-			const tr = this.rendered.get(row);
-			if (!tr) continue;
-			// Only rows near the pane are in the page, so each says which row of the table it is, the header being 1.
-			const index = String(row + 2);
-			if (tr.getAttribute('aria-rowindex') !== index) tr.setAttribute('aria-rowindex', index);
-			want.push(tr);
-		}
 		const rows = String(this.count + 1);
-		if (this.table && this.table.getAttribute('aria-rowcount') !== rows) this.table.setAttribute('aria-rowcount', rows);
-		if (end < this.count) want.push(this.below);
-		const height = (row: HTMLTableRowElement, px: number) => {
-			const cell = row.firstChild as HTMLTableCellElement;
-			const value = `${Math.max(0, px)}px`;
-			if (cell.style.height !== value) cell.style.height = value;
-		};
-		height(this.above, this.heights.top(first));
-		height(this.below, this.heights.total() - this.heights.top(end));
-		const keep = new Set<Node>(want);
-		for (let node = body.firstChild; node; ) {
-			const next = node.nextSibling;
-			if (!keep.has(node)) node.remove();
-			node = next;
-		}
-		let at = body.firstChild;
-		for (const row of want) {
-			if (row === at) at = at.nextSibling;
-			else body.insertBefore(row, at);
+		for (const block of this.blocks) {
+			if (!block || block.index >= this.blockCount) continue;
+			const body = bodyLayout(this.heights, block.index, this.drawn, (row) => this.rendered.has(row));
+			const want: HTMLTableRowElement[] = [];
+			if (body.lead) want.push(block.lead);
+			if (body.above !== null) want.push(block.above);
+			if (body.parity) want.push(block.parity);
+			// A row an edit added isn't drawn until the next measure: until then, the rows around it close up.
+			for (let row = body.rows.first; row < body.rows.end; row++) {
+				const tr = this.rendered.get(row);
+				if (!tr) continue;
+				// Only rows near the pane are in the page, so each says which row of the table it is, the header being 1.
+				const index = String(row + 2);
+				if (tr.getAttribute('aria-rowindex') !== index) tr.setAttribute('aria-rowindex', index);
+				want.push(tr);
+			}
+			if (body.below !== null) want.push(block.below);
+			if (body.tail) want.push(block.tail);
+			if (block.table.getAttribute('aria-rowcount') !== rows) block.table.setAttribute('aria-rowcount', rows);
+			const height = (row: HTMLTableRowElement, px: number | null) => {
+				const cell = row.firstChild as HTMLTableCellElement;
+				const value = `${Math.max(0, px ?? 0)}px`;
+				if (cell.style.height !== value) cell.style.height = value;
+			};
+			height(block.above, body.above);
+			height(block.below, body.below);
+			const keep = new Set<Node>(want);
+			for (let node = block.tbody.firstChild; node; ) {
+				const next = node.nextSibling;
+				if (!keep.has(node)) node.remove();
+				node = next;
+			}
+			let at = block.tbody.firstChild;
+			for (const row of want) {
+				if (row === at) at = at.nextSibling;
+				else block.tbody.insertBefore(row, at);
+			}
 		}
 	}
 
@@ -515,7 +595,7 @@ export class Model implements Span {
 	}
 
 	private renderHead(): void {
-		const thead = this.thead;
+		const thead = this.blocks[0]?.thead;
 		const view = this.view;
 		if (!thead || !view) return;
 		const text = view.state.doc.lineAt(this.from).text;
@@ -595,25 +675,64 @@ export class Model implements Span {
 		});
 	}
 
-	/** What part of the body is on screen. */
-	private visible(): Visible | null {
+	/**
+	 * What part of the body is on screen, from any block in the page, and which block CodeMirror keeps still when
+	 * heights change: the block its scroll anchor is on, picked as CodeMirror picks it, from its own heights.
+	 */
+	private visible(): Window | null {
 		const view = this.view;
-		if (!view || !this.tbody?.isConnected) return null;
+		if (!view) return null;
 		const scroller = view.scrollDOM;
 		const pane = scroller.getBoundingClientRect().top;
-		const body = this.tbody.getBoundingClientRect().top;
-		return { top: pane - body, bottom: pane + scroller.clientHeight - body };
+		// From the block in the page nearest the pane's top: CodeMirror keeps the blocks holding the selection in the
+		// page too, and its heights for the blocks between can differ from the table's.
+		let block: Block | undefined;
+		let nearest = Infinity;
+		for (const each of this.blocks) {
+			if (!each?.dom.isConnected) continue;
+			const box = each.dom.getBoundingClientRect();
+			const distance = box.top > pane ? box.top - pane : box.bottom < pane ? pane - box.bottom : 0;
+			if (distance < nearest) {
+				nearest = distance;
+				block = each;
+			}
+		}
+		if (!block) return null;
+		// Where body row 0 starts on the page: a block's body starts at its first row.
+		const body = block.tbody.getBoundingClientRect().top - this.heights.top(blockRows(this.count, block.index).first);
+		const scrollTop = scroller.scrollTop * view.scaleY;
+		let line = view.lineBlockAtHeight(scrollTop + 8);
+		const first = view.viewportLineBlocks[0];
+		if (first && line.from < view.viewport.from && first.top - scrollTop <= 200) line = first;
+		// Scrolled to the bottom, CodeMirror keeps the bottom still instead.
+		const bottom = scroller.scrollTop > Math.max(1, scroller.scrollHeight - scroller.clientHeight - 4);
+		const anchorBlock = !bottom && line.from >= this.from && line.from <= this.to ? blockSpans(view.state.doc, this).findIndex((span) => span.from === line.from) : -1;
+		return { top: pane - body, bottom: pane + scroller.clientHeight - body, anchorBlock };
 	}
 
-	private draw(visible: Visible | null, force: boolean): void {
+	/**
+	 * Draws the rows within OVER px of the pane, unless those drawn already reach MARGIN past it, in their blocks, built
+	 * here if CodeMirror hasn't asked for them yet. CodeMirror puts the next block in the page only once the screen is
+	 * about 250 px from its edge, so a block that came in empty and had its rows drawn then made that frame long, and a
+	 * hard flick ran past it into blank space. Drawn ahead, a block comes in with its rows.
+	 */
+	private draw(visible: Window | null, force: boolean): void {
 		const view = this.view;
 		if (!visible || !view || this.stale) return;
+		this.placeBox(null);
 		const whole = this.count <= WHOLE;
 		if (!force && !this.dirty.size && (whole ? this.drawn.first === 0 && this.drawn.end === this.count : covers(this.heights, this.drawn, visible, MARGIN))) return;
 		const { first, end } = whole ? { first: 0, end: this.count } : wanted(this.heights, visible, OVER);
-		// The row at the pane's top stays still while rows above it take their real heights.
-		const anchor = visible.top > 0 && visible.top < this.heights.total() ? this.heights.rowAt(visible.top) : -1;
-		const anchorTop = anchor >= 0 ? this.headHeight + this.heights.top(anchor) : 0;
+		// The row at the pane's top stays still while rows above it take their real heights. CodeMirror keeps the top
+		// of the block it anchors on still, and moves the note for any change in the blocks above it, so the anchor is
+		// kept in that block: by the estimates alone, near a seam, it could fall in the block above, and both would move
+		// the note for the same rows (STA-74). With CodeMirror's anchor outside the table, CodeMirror moves the note.
+		let anchor = visible.anchorBlock >= 0 && visible.top > 0 && visible.top < this.heights.total() ? this.heights.rowAt(visible.top) : -1;
+		if (anchor >= 0) {
+			const range = blockRows(this.count, visible.anchorBlock);
+			anchor = range.end > range.first ? Math.max(range.first, Math.min(range.end - 1, anchor)) : -1;
+		}
+		const anchorTop = anchor >= 0 ? topInBlock(this.heights, anchor, this.headHeight) : 0;
 		for (const [row, tr] of this.rendered) {
 			const changed = this.dirty.has(row);
 			if (row >= first && row < end && !changed) continue;
@@ -630,6 +749,17 @@ export class Model implements Span {
 		this.dirty.clear();
 		const need: number[] = [];
 		for (let row = first; row < end; row++) if (!this.rendered.has(row)) need.push(row);
+		let built = false;
+		for (const row of need) {
+			const index = blockOf(this.count, row);
+			if (this.blocks[index]) continue;
+			this.build(index);
+			built = true;
+		}
+		if (built) {
+			this.apply();
+			if (view.state.doc.lineAt(this.from).text !== this.headText) this.renderHead();
+		}
 		const fresh = this.renderRows(need);
 		need.forEach((row, i) => this.rendered.set(row, fresh[i]!));
 		this.drawn = { first, end };
@@ -640,7 +770,8 @@ export class Model implements Span {
 	private readHeights(): Measured {
 		const rows: [number, number][] = [];
 		for (const [row, tr] of this.rendered) if (tr.isConnected) rows.push([row, tr.getBoundingClientRect().height]);
-		const head = this.thead?.isConnected ? (this.thead.firstElementChild?.getBoundingClientRect().height ?? 0) : 0;
+		const thead = this.blocks[0]?.thead;
+		const head = thead?.isConnected ? (thead.firstElementChild?.getBoundingClientRect().height ?? 0) : 0;
 		return { rows, head };
 	}
 
@@ -657,46 +788,78 @@ export class Model implements Span {
 		if (!changed) return;
 		this.arrange();
 		if (anchor >= 0 && anchor < this.count) {
-			const delta = this.headHeight + this.heights.top(anchor) - anchorTop;
+			const delta = topInBlock(this.heights, anchor, this.headHeight) - anchorTop;
 			if (Math.abs(delta) > 0.01) view.scrollDOM.scrollTop += delta;
 		}
 	}
 
 	/**
-	 * Where a place in the table's text is drawn, `offset` from its start. Without this CodeMirror scrolls the whole
-	 * table into view for a place in it, which for a table taller than the pane is its end. A row not drawn yet
+	 * The box CodeMirror puts around a table's blocks scrolls them sideways together, as Obsidian's table box does. It
+	 * makes the box anew whenever the first block it draws changes, and a new box, or one it moved, starts at the
+	 * table's left edge: that one is put back where the table was. The box already there keeps its own place, which a
+	 * swipe or a cell brought into view gave it. `added` is a box CodeMirror has just put in the page; with null, the
+	 * box the blocks are in now.
+	 */
+	placeBox(added: HTMLElement | null): void {
+		if (this.blockCount < 2) {
+			// A table back to one block has no box, and starts again at its left edge if it grows past 100 rows.
+			this.sideBox?.removeEventListener('scroll', this.onSideways);
+			this.sideBox = null;
+			this.scrollX = 0;
+			return;
+		}
+		const box = added ?? this.blocks.find((block) => block?.dom.isConnected)?.dom.parentElement ?? null;
+		if (!box?.hasClass(BOX_CLASS)) return;
+		if (!added && box === this.sideBox) return;
+		if (box !== this.sideBox) {
+			this.sideBox?.removeEventListener('scroll', this.onSideways);
+			this.sideBox = box;
+			box.addEventListener('scroll', this.onSideways, { passive: true });
+		}
+		if (Math.abs(box.scrollLeft - this.scrollX) > 0.5) box.scrollLeft = this.scrollX;
+	}
+
+	private readonly onSideways = () => {
+		if (this.sideBox) this.scrollX = this.sideBox.scrollLeft;
+	};
+
+	/**
+	 * Where a place in a block's text is drawn, `offset` from the block's start. Without this CodeMirror scrolls the
+	 * whole block into view for a place in it, which for a block taller than the pane is its end. A row not drawn yet
 	 * takes its place from its estimated height.
 	 */
-	coordsAt(offset: number): Rect | null {
+	coordsAt(index: number, offset: number): Rect | null {
 		const view = this.view;
-		if (!view || !this.table?.isConnected || !this.tbody) return null;
+		const block = this.blocks[index];
+		if (!view || !block?.table.isConnected) return null;
 		const doc = view.state.doc;
-		const line = doc.lineAt(Math.min(doc.length, this.from + offset));
-		const index = line.number - doc.lineAt(this.from).number;
-		const table = this.table.getBoundingClientRect();
+		const start = index === 0 ? this.from : (blockSpans(doc, this)[index]?.from ?? this.from);
+		const line = doc.lineAt(Math.min(doc.length, start + offset));
+		const lineIndex = line.number - doc.lineAt(this.from).number;
+		const table = block.table.getBoundingClientRect();
 		let tr: HTMLTableRowElement | null | undefined;
 		let top: number;
 		let bottom: number;
-		if (index <= 1) {
-			tr = this.thead?.firstElementChild as HTMLTableRowElement | null;
+		if (lineIndex <= 1) {
+			tr = block.thead?.firstElementChild as HTMLTableRowElement | null;
 			const rect = tr?.getBoundingClientRect();
 			top = rect?.top ?? table.top;
 			bottom = rect?.bottom ?? table.top + this.headHeight;
 		} else {
-			const row = Math.min(this.count - 1, index - 2);
+			const row = Math.min(this.count - 1, lineIndex - 2);
 			tr = this.rendered.get(row);
 			if (tr?.isConnected) {
 				const rect = tr.getBoundingClientRect();
 				top = rect.top;
 				bottom = rect.bottom;
 			} else {
-				top = this.tbody.getBoundingClientRect().top + this.heights.top(row);
+				top = block.tbody.getBoundingClientRect().top + this.heights.top(row) - this.heights.top(blockRows(this.count, index).first);
 				bottom = top + this.heights.get(row);
 			}
 		}
 		let { left, right } = table;
-		if (tr?.isConnected && index !== 1) {
-			const cell = tr.cells[Math.min(columnAt(line.text, this.from + offset - line.from), tr.cells.length - 1)];
+		if (tr?.isConnected && lineIndex !== 1) {
+			const cell = tr.cells[Math.min(columnAt(line.text, start + offset - line.from), tr.cells.length - 1)];
 			if (cell) ({ left, right } = cell.getBoundingClientRect());
 		}
 		return { left, right, top, bottom };

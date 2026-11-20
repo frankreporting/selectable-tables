@@ -1321,7 +1321,8 @@
 		const edge = [...top, ...tables(cm)].filter((t, i, all) => all.findIndex((u) => u.from === t.from) === i).sort((x, y) => x.from - y.from);
 		cm.dispatch({ effects: cm.constructor.scrollIntoView(0, { y: 'start' }) });
 		await sleep(300);
-		check('G26/27 the callout and the list item hold no rendered table', edge.length === 3, edge.map((e) => e.first));
+		// Drawn: the table under the long heading, the two a blank line apart, and the right-to-left one (STA-88).
+		check('G26/27 the callout and the list item hold no rendered table', edge.length === 4, edge.map((e) => e.first));
 		const [heading, a, b] = edge;
 		await caretOnLine(cm, heading.first - 1, 0);
 		const rows = [];

@@ -412,11 +412,13 @@ const ownRule = (tr: Transaction) => tr.isUserEvent('select.pointer') || tr.anno
 const cellsFromCarets = ViewPlugin.define((view) => ({
 	update(update) {
 		if (!update.selectionSet || update.transactions.some(ownRule) || view.compositionStarted || vimDriving(view)) return;
-		const found = caretInTable(update.state, viewLayout(view));
-		if (!found) return;
-		const { state } = update;
+		if (!caretInTable(update.state, viewLayout(view))) return;
+		// Read again once the task's other dispatches are in: Find's close and a Search pane result each dispatch again
+		// right after putting the selection there.
 		queueMicrotask(() => {
-			if (view.state !== state || view.compositionStarted) return;
+			if (view.compositionStarted || vimDriving(view)) return;
+			const found = caretInTable(view.state, viewLayout(view));
+			if (!found) return;
 			view.dispatch({ selection: wholeTable(found.table, true) });
 			view.plugin(cellSelection)?.select(found.cell);
 		});

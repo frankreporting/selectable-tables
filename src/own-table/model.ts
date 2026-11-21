@@ -320,6 +320,7 @@ export class Model implements Span, DrawnTable {
 
 	markCell(cell: Cell | null): void {
 		this.cell = cell;
+		if (!cell) this.showing = null;
 		for (const block of this.blocks) block?.table.toggleClass(HOLDS_CELL_CLASS, !!cell);
 		this.paintCell();
 	}
@@ -419,7 +420,7 @@ export class Model implements Span, DrawnTable {
 	private paintRowMatches(row: number): void {
 		const tr = row < 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(row);
 		const view = this.view;
-		if (!view || !tr?.instanceOf(HTMLTableRowElement)) return;
+		if (!view || row >= this.count || !tr?.instanceOf(HTMLTableRowElement)) return;
 		const { header } = linesOf(view.state.doc, this);
 		paintMatches(tr, view.state.doc.line(row < 0 ? header : header + 2 + row).text, this.matches.get(row) ?? []);
 	}

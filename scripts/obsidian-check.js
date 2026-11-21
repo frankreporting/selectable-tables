@@ -3006,20 +3006,187 @@
 				}
 				check(`Own 13: seams between blocks look as rows within one block do, in ${Object.keys(seams).join(', ')}`, Object.values(seams).every((found) => found.ends && [100, 200, 1900].every((seam) => found[seam].ok && found[seam].places && found[seam].stacked)), seams);
 
-				// Sideways: the box scrolls every block together, and keeps the table's place after the note scrolls far and back.
+				// Sideways, on a computer (STA-79): no box scrolls the table. A scrollbar of the plugin's own, in the note's
+				// scroller, moves every block's table by a transform, and a sideways swipe over the table is passed on to it.
 				view = await open('Table 2000 by 12');
 				await toRow(100);
-				let sideBox = shownBoxes(big)[0].parentElement;
-				const reach = sideBox.scrollWidth - sideBox.clientWidth;
-				sideBox.scrollLeft = Math.min(200, reach);
-				await sleep(200);
-				const left = sideBox.scrollLeft;
-				const together = Math.abs(drawnRow(99).cells[0].getBoundingClientRect().left - drawnRow(100).cells[0].getBoundingClientRect().left) <= 0.5;
+				const pane = () => view.scrollDOM.getBoundingClientRect();
+				const barOf = () => big.sideways().bar;
+				// Where row 100's first cell sits against its box: how far the table is moved.
+				const rawMoved = (row = 100) => {
+					const tr = drawnRow(row);
+					const box = shownBoxes(big)[0].parentElement;
+					return tr ? box.getBoundingClientRect().left - tr.cells[0].getBoundingClientRect().left : NaN;
+				};
+				let rest = 0;
+				const moved = (row = 100) => rawMoved(row) - rest;
+				const swipe = async (dx, dy = 0, at = null) => {
+					const r = at ?? drawnRow(100).getBoundingClientRect();
+					await cdp.sendCommand('Input.synthesizeScrollGesture', { x: Math.round(r.left + Math.min(300, r.width / 2)), y: Math.round(r.top + r.height / 2), xDistance: -dx, yDistance: -dy, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
+					await sleep(250);
+					await frames(3);
+				};
+				const wheelAt = async (el, deltaX, deltaY, modifiers = 0) => {
+					const r = el.getBoundingClientRect();
+					await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(r.left + Math.min(300, r.width / 2)), y: Math.round(r.top + r.height / 2), deltaX, deltaY, modifiers });
+					await sleep(200);
+					await frames(3);
+				};
+				const bar0 = barOf();
+				if (bar0) bar0.scrollLeft = 0;
+				await frames(3);
+				rest = rawMoved();
+				const sideBox0 = shownBoxes(big)[0].parentElement;
+				check('Own 14: a wide table gets a scrollbar of the plugin\'s own in the note\'s scroller, as wide as its box, and its box clips it instead of scrolling it', !!bar0 && bar0.parentElement === view.scrollDOM && getComputedStyle(sideBox0).overflowX === 'clip' && Math.abs(bar0.getBoundingClientRect().width - sideBox0.clientWidth) <= 1 && Math.abs(bar0.getBoundingClientRect().left - sideBox0.getBoundingClientRect().left - sideBox0.clientLeft) <= 1 && big.sideways().slide > 0, { bar: !!bar0, overflow: getComputedStyle(sideBox0).overflowX, slide: big.sideways().slide });
+				check('Own 18: the scrollbar takes no keyboard focus and screen readers skip it', bar0?.tabIndex === -1 && bar0?.getAttribute('aria-hidden') === 'true');
+				// The bar at the pane's bottom while the table crosses it, clear of the status bar.
+				const status = document.querySelector('.status-bar')?.getBoundingClientRect();
+				const paneBottom = pane().top + view.scrollDOM.clientTop + view.scrollDOM.clientHeight;
+				const inset = status && status.height && status.top < paneBottom && status.bottom >= paneBottom - 1 ? paneBottom - status.top : 0;
+				const atBottom = bar0.getBoundingClientRect().bottom;
+				check('Own 18: while the table crosses the pane\'s bottom, the bar sits there, clear of the status bar', Math.abs(atBottom - (paneBottom - inset)) <= 1, { bar: atBottom, paneBottom, inset });
+
+				// A swipe passed on: the table moves as far as the bar, every block together, and the note doesn't move.
+				const topBefore = view.scrollDOM.scrollTop;
+				await swipe(300, 12);
+				const after = { scroll: bar0.scrollLeft, moved: moved(), seam: Math.abs(drawnRow(99).cells[0].getBoundingClientRect().left - drawnRow(100).cells[0].getBoundingClientRect().left), top: view.scrollDOM.scrollTop - topBefore };
+				check('Own 19: a mostly sideways swipe over the table moves it as far as its bar, every block together, and the note not at all', after.scroll > 150 && Math.abs(after.moved - after.scroll) <= 1 && after.seam <= 0.5 && Math.abs(after.top) <= 1, after);
+				// A mostly vertical scroll moves the note, and leaves the table where it is sideways.
+				await swipe(10, 300);
+				const vertical = { scroll: bar0.scrollLeft, top: view.scrollDOM.scrollTop - topBefore };
+				check('Own 19: a mostly vertical scroll over the table moves the note and not the table', Math.abs(vertical.scroll - after.scroll) <= 0.5 && vertical.top > 100, vertical);
+				await toRow(100);
+				// Shift with a mouse wheel moves the table sideways and not the note; Ctrl with the wheel is left to Obsidian.
+				const shiftFrom = { scroll: bar0.scrollLeft, top: view.scrollDOM.scrollTop };
+				await wheelAt(drawnRow(100), 0, 120, 8);
+				const shifted = { by: bar0.scrollLeft - shiftFrom.scroll, top: view.scrollDOM.scrollTop - shiftFrom.top };
+				check('Own 19: Shift with a mouse wheel moves the table sideways, and the note not at all', shifted.by > 50 && Math.abs(shifted.top) <= 1, shifted);
+				await sleep(150);
+				const zoom = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 80, ctrlKey: true });
+				const zoomFrom = bar0.scrollLeft;
+				drawnRow(100).cells[1].dispatchEvent(zoom);
+				await frames(2);
+				check('Own 19: Ctrl with the wheel, as a pinch arrives, is left to Obsidian: the table doesn\'t move and the plugin doesn\'t stop it', !zoom.defaultPrevented && bar0.scrollLeft === zoomFrom, { prevented: zoom.defaultPrevented, by: bar0.scrollLeft - zoomFrom });
+
+				// The place is kept: scrolling far down and back, an edit elsewhere, and CodeMirror building the box anew.
+				const placeAt = bar0.scrollLeft;
+				const movedAt = moved();
 				await toRow(1500);
 				await toRow(100);
-				sideBox = shownBoxes(big)[0].parentElement;
-				check('Own 14: the box scrolls every block sideways together, and keeps the table\'s place after scrolling far down and back', reach > 0 && left > 0 && together && Math.abs(sideBox.scrollLeft - left) < 0.5, { reach, left, together, after: sideBox.scrollLeft });
-				sideBox.scrollLeft = 0;
+				const keptFar = { scroll: barOf()?.scrollLeft, moved: moved(), same: barOf() === bar0 };
+				const editText = view.state.doc.toString();
+				view.dispatch({ changes: { from: 0, insert: 'An edit above. ' } });
+				await sleep(300);
+				await frames(3);
+				const keptEdit = { scroll: barOf()?.scrollLeft, moved: moved() };
+				await restore(view, editText);
+				await toRow(100);
+				check('Own 20: the table keeps its place sideways after scrolling far down and back, and after an edit above it', keptFar.same && Math.abs(keptFar.scroll - placeAt) <= 0.5 && Math.abs(keptFar.moved - movedAt) <= 1 && Math.abs(keptEdit.scroll - placeAt) <= 0.5 && Math.abs(keptEdit.moved - movedAt) <= 1, { placeAt, movedAt, keptFar, keptEdit });
+
+				// A vertical scroll with the pointer over the bar scrolls the note.
+				const overBar = bar0.getBoundingClientRect();
+				const beforeBar = view.scrollDOM.scrollTop;
+				await swipe(0, 200, { left: overBar.left, top: overBar.top + overBar.height / 2 - 0.5, width: overBar.width, height: 1 });
+				check('Own 20: scrolling up and down with the pointer over the bar scrolls the note', view.scrollDOM.scrollTop - beforeBar > 100, { by: view.scrollDOM.scrollTop - beforeBar });
+
+				// The table's end: the bar right under the last row. Before the table: no bar in the pane.
+				view.dispatch({ effects: view.constructor.scrollIntoView(big.to, { y: 'center' }) });
+				await sleep(700);
+				await frames(4);
+				[big] = models(view);
+				const lastTable = big.boxes[big.blockCount - 1]?.querySelector('table');
+				const endGap = lastTable?.isConnected ? barOf().getBoundingClientRect().top - lastTable.getBoundingClientRect().bottom : NaN;
+				check('Own 21: once the last row is in the pane, the bar sits right under it', Math.abs(endGap) <= 1, { endGap });
+				view.scrollDOM.scrollTop = 0;
+				await sleep(500);
+				await frames(4);
+				const headTop = big.boxes[0]?.querySelector('thead')?.getBoundingClientRect().top ?? 0;
+				const beforeTable = { barTop: barOf().getBoundingClientRect().top, paneBottom: pane().bottom, headTop };
+				check('Own 21: before the table\'s first rows reach the pane\'s bottom, no bar shows in the pane', headTop < pane().bottom || beforeTable.barTop >= pane().bottom, beforeTable);
+				barOf().scrollLeft = 0;
+
+				// A table no wider than its box gets no bar and doesn't move.
+				view = await open('Two report tables');
+				await sleep(300);
+				check('Own 22: a table no wider than its box gets no scrollbar and doesn\'t move', !view.scrollDOM.querySelector('.selectable-tables-bar') && !view.contentDOM.querySelector('.selectable-tables-slides'), { bars: view.scrollDOM.querySelectorAll('.selectable-tables-bar').length });
+
+				// A selected table, moved to its middle: tinted, and its box clips the table and the tint.
+				view = await open('Table 2000 by 12');
+				await toRow(100);
+				await realClick(drawnRow(100).cells[1]);
+				await swipe(250, 0);
+				const tintBox = shownBoxes(big)[0].parentElement;
+				const tinted = shownBoxes(big).filter((b) => b.classList.contains('is-selected')).length;
+				const tintOk = tinted === shownBoxes(big).length && getComputedStyle(tintBox).overflowX === 'clip' && getComputedStyle(shownBoxes(big)[0].querySelector('table'), '::after').content !== 'none';
+				check('Own 22: a selected table, moved sideways, is tinted in every block in the page, inside its box', tintOk, { tinted, shown: shownBoxes(big).length });
+				await caretOnLine(view, 1);
+				barOf().scrollLeft = 0;
+
+				// A phone or tablet, and the box timing runs compare against: the box scrolls every block together, and keeps
+				// the table's place after the note scrolls far and back.
+				for (const [label, on, off] of [['a phone\'s layout', () => document.body.classList.add('is-mobile'), () => document.body.classList.remove('is-mobile')], ['the box', () => preview.boxes(true), () => preview.boxes(false)]]) {
+					on();
+					try {
+						view = await open('Table 2000 by 12');
+						view.dispatch({});
+						for (const model of models(view)) model.placeBar();
+						await toRow(100);
+						let sideBox = shownBoxes(big)[0].parentElement;
+						const reach = sideBox.scrollWidth - sideBox.clientWidth;
+						sideBox.scrollLeft = Math.min(200, reach);
+						await sleep(200);
+						const left = sideBox.scrollLeft;
+						const together = Math.abs(drawnRow(99).cells[0].getBoundingClientRect().left - drawnRow(100).cells[0].getBoundingClientRect().left) <= 0.5;
+						await toRow(1500);
+						await toRow(100);
+						sideBox = shownBoxes(big)[0].parentElement;
+						check(`Own 14, ${label}: no scrollbar, the box scrolls every block sideways together, and keeps the table's place after scrolling far down and back`, !view.scrollDOM.querySelector('.selectable-tables-bar') && reach > 0 && left > 0 && together && Math.abs(sideBox.scrollLeft - left) < 0.5, { reach, left, together, after: sideBox.scrollLeft });
+						sideBox.scrollLeft = 0;
+					} finally {
+						off();
+						view.dispatch({});
+						for (const model of models(view)) model.placeBar();
+						await sleep(200);
+					}
+				}
+
+				// 30 seeded random steps: swipes, scrolls, edits and a narrower pane. After each, nothing crashed, every drawn
+				// row shows its line, and the table sits where its bar says.
+				{
+					view = await open('Table 2000 by 12');
+					const randomText = view.state.doc.toString();
+					let seed = 79;
+					const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+					const pick = (list) => list[Math.floor(random() * list.length)];
+					const sizer = view.dom.closest('.workspace-leaf-content');
+					let bad = null;
+					try {
+						for (let step = 0; step < 30 && !bad; step++) {
+							await toRow(Math.floor(random() * 1990));
+							const action = pick(['swipe', 'swipe', 'scroll', 'edit', 'narrow']);
+							if (action === 'swipe') await swipe(pick([-400, -120, 120, 400]), pick([0, 8]));
+							else if (action === 'scroll') await swipe(0, pick([-900, 900]));
+							else if (action === 'edit') {
+								const line = view.state.doc.line(view.state.doc.lineAt(big.from).number + 2 + Math.floor(random() * big.count));
+								view.dispatch({ changes: { from: line.from + 2, insert: pick(['x', 'a longer cell text ', 'y']) } });
+								await sleep(300);
+							} else {
+								sizer.style.width = sizer.style.width ? '' : '70%';
+								await sleep(500);
+							}
+							await frames(3);
+							[big] = models(view);
+							const bar = barOf();
+							const row = big.drawnRows().find((entry) => entry.tr.isConnected)?.row;
+							const offBy = bar && row !== undefined ? Math.abs(moved(row) - bar.scrollLeft) : 0;
+							if (crashed(view) || rowsRight(view).length || !keptRight(view) || offBy > 1) bad = { step, action, crashed: crashed(view), wrong: rowsRight(view).slice(0, 5), kept: keptRight(view), offBy };
+						}
+					} finally {
+						sizer.style.width = '';
+						await restore(view, randomText);
+					}
+					check('Own 23: after each of 30 seeded random swipes, scrolls, edits and pane resizes, nothing crashed, the drawing matches the text, and the table sits where its bar says', !bad, bad);
+				}
 
 				// A press on the box beside the large table selects it whole, and a key typed then starts a paragraph below it.
 				view = await open('Table 2000 by 12');

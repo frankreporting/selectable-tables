@@ -2,9 +2,9 @@ import { EditorSelection, EditorState, Extension, Prec, SelectionRange, Transact
 import { EditorView, KeyBinding, keymap, ViewPlugin } from '@codemirror/view';
 import { type Editor, editorEditorField, editorInfoField, editorLivePreviewField, Notice, Platform } from 'obsidian';
 import { cellFollowsCaret, cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, backspace, blankLinesAbove, caretInTable, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText } from './decide';
+import { Action, arrow, backspace, blankLinesAbove, caretInTable, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText, writesCell } from './decide';
 import { frozenTables } from './freeze';
-import { ownSpans, viewLayout } from './layout';
+import { openCells, type OwnCell, ownSpans, ownTables, viewLayout } from './layout';
 import type { Span } from './table-text';
 
 /** On the editor while a table is selected; styles.css hides the caret then, as Obsidian does for images. */
@@ -141,6 +141,14 @@ function run(view: EditorView, action: Action | null): boolean {
 			// Obsidian scrolls the cell into view as it opens. Scrolling to a caret in a tall table wouldn't.
 			view.dispatch({ selection: EditorSelection.cursor(action.pos), userEvent: 'select', annotations: opensCell.of(true) });
 			return true;
+		case 'edit': {
+			const table = selectedTable(view.state, viewLayout(view));
+			const own = table && view.state.facet(ownTables)?.table(view, table.from);
+			if (!own) return true;
+			view.plugin(cellSelection)?.opening();
+			own.openCell(action.cell);
+			return true;
+		}
 		case 'refuse':
 			view.plugin(cellSelection)?.refuse();
 			new Notice('This table can\'t open from the keyboard. Click a cell to edit it.');
@@ -191,6 +199,8 @@ export function wholeTable({ from, to }: Span, fromAbove: boolean, goal?: number
  * when this isn't a cell's editor.
  */
 export function escapeCell(view: EditorView): EditorView | null {
+	const own = openCells.get(view);
+	if (own && own.view === view) return escapeOwnCell(own);
 	const widget = cellWidget(view);
 	const outer = widget?.parentElement?.closest<HTMLElement>('.cm-editor');
 	const main = outer ? EditorView.findFromDOM(outer) : null;
@@ -216,6 +226,25 @@ export function escapeCell(view: EditorView): EditorView | null {
 		main.dispatch({ selection: wholeTable(now, fromAbove), userEvent: 'select' });
 	}
 	if (cell && row) cells?.select({ row: row.rowIndex, column: cell.cellIndex });
+	return main;
+}
+
+/**
+ * The same for an open cell of the plugin's own table: it closes, and the cell is selected, with its table selected
+ * whole from the side it was selected from. The note takes the keyboard first, or CodeMirror would read the browser's
+ * old selection back right after.
+ */
+function escapeOwnCell(own: OwnCell): EditorView {
+	const main = own.note;
+	const table = own.table();
+	const { cell } = own;
+	const cells = main.plugin(cellSelection);
+	const fromAbove = table ? (cells?.fromAbove(table) ?? false) : false;
+	own.close();
+	main.contentDOM.focus({ preventScroll: true });
+	if (!table) return main;
+	main.dispatch({ selection: wholeTable(table, fromAbove), userEvent: 'select' });
+	cells?.select(cell);
 	return main;
 }
 
@@ -402,8 +431,14 @@ const keepLineAbove = EditorState.transactionFilter.of((tr) => {
 	return breaks.length ? [tr, { changes: breaks.map((from) => ({ from, insert: '\n' })), sequential: true }] : tr;
 });
 
-/** A move that comes with its own rule: a press, and Enter's caret that opens a cell. */
-const ownRule = (tr: Transaction) => tr.isUserEvent('select.pointer') || tr.annotation(opensCell) === true;
+/** A move that comes with its own rule: a press, Enter's caret that opens a cell, and an open cell's write. */
+const ownRule = (tr: Transaction) => tr.isUserEvent('select.pointer') || tr.annotation(opensCell) === true || tr.annotation(writesCell) === true;
+
+/** Whether the note's selection is in its open cell's text, where the open cell takes it, as an undo puts it back. */
+function inOpenCell(view: EditorView): boolean {
+	const { main } = view.state.selection;
+	return !!openCells.get(view)?.holds(Math.min(main.anchor, main.head), Math.max(main.anchor, main.head));
+}
 
 /**
  * The caret rule, with its decision in decide.ts: a selection put inside the plugin's own table by anything but a key
@@ -413,11 +448,11 @@ const ownRule = (tr: Transaction) => tr.isUserEvent('select.pointer') || tr.anno
 const cellsFromCarets = ViewPlugin.define((view) => ({
 	update(update) {
 		if (!update.selectionSet || update.transactions.some(ownRule) || view.compositionStarted || vimDriving(view)) return;
-		if (!caretInTable(update.state, viewLayout(view))) return;
+		if (inOpenCell(view) || !caretInTable(update.state, viewLayout(view))) return;
 		// Read again once the task's other dispatches are in: Find's close and a Search pane result each dispatch again
 		// right after putting the selection there.
 		queueMicrotask(() => {
-			if (view.compositionStarted || vimDriving(view)) return;
+			if (view.compositionStarted || vimDriving(view) || inOpenCell(view)) return;
 			const found = caretInTable(view.state, viewLayout(view));
 			if (!found) return;
 			view.dispatch({ selection: wholeTable(found.table, true) });

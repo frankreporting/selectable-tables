@@ -1,6 +1,7 @@
 import type { Extension } from '@codemirror/state';
 import { Notice, type Plugin } from 'obsidian';
-import { selectableTables } from './editor/extension';
+import { escapeCell, selectableTables } from './editor/extension';
+import { forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
 
 /** Set on the body by the preview's stylesheet, src/own-table/styles.css. */
@@ -46,15 +47,21 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	let on = false;
 	let given = false;
 
-	const own = ownTables(app, () => {
-		// The copy of Obsidian's language can't be made, after an Obsidian update say: tables stay Obsidian's.
-		if (given) return;
-		given = true;
-		new Notice("Selectable Tables can't draw tables in this version of Obsidian, so it leaves them to Obsidian.");
-		queueMicrotask(() => use(false));
-	});
-
 	const keys = selectableTables({ frozen: false });
+	const own = ownTables(
+		app,
+		() => {
+			// The copy of Obsidian's language can't be made, after an Obsidian update say: tables stay Obsidian's.
+			if (given) return;
+			given = true;
+			new Notice("Selectable Tables can't draw tables in this version of Obsidian, so it leaves them to Obsidian.");
+			queueMicrotask(() => use(false));
+		},
+		// The plain cell editor gets the plugin's keys, as Obsidian gives its own editor every plugin's extensions.
+		{ plain: () => keys, escape: (view) => void escapeCell(view) },
+	);
+	// The note's editors answer for an open cell while it's open; their own answers come back as the plugin unloads.
+	plugin.register(stopAnsweringAll);
 	const use = (drawing: boolean) => {
 		on = drawing;
 		extensions.length = 0;
@@ -78,6 +85,15 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 			saved.ownTables = drawing;
 			await plugin.saveData(saved);
 			new Notice(drawing ? 'Selectable Tables now draws tables itself (preview).' : 'Obsidian draws tables again.');
+		},
+	});
+	plugin.addCommand({
+		id: 'plain-cells-preview',
+		name: 'Open cells in the plain editor (preview)',
+		callback: () => {
+			const plain = !plainForced();
+			forcePlain(plain);
+			new Notice(plain ? 'Selectable Tables: cells open in a simpler editor, for the preview.' : "Selectable Tables: cells open in Obsidian's editor again.");
 		},
 	});
 	// For the check script and timing runs, on the plugin: whether the switch is on, and the tables' insides.

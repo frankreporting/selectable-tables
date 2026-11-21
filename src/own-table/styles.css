@@ -16,6 +16,12 @@ body {
 	table-layout: fixed;
 }
 
+/* An open cell's drawn text, while its editor shows in its place. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own td > .table-cell-wrapper.selectable-tables-open-text,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own th > .table-cell-wrapper.selectable-tables-open-text {
+	display: none;
+}
+
 /* Rows that stand in for the rows not drawn take only their height: no padding, border, color or shadow of a theme's. */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-own tr.selectable-tables-spacer > td {
 	padding: 0;

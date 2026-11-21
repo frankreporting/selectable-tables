@@ -66,10 +66,15 @@ describe('↑ and ↓ on the plugin\'s table', () => {
 describe('Enter, Delete and Backspace beside the plugin\'s table', () => {
 	const cells = (selected: Cells['selected']): Cells => ({ selected, left: null, grid: { rows: 3, columns: () => 2 } });
 
-	test('Enter on a selected table selects its first cell, and on a selected cell does nothing yet', () => {
+	test('Enter on a selected table selects its first cell, and on a selected cell opens it', () => {
 		const state = note(`Intro\n\n⟨${TABLE}⟩\n\nAfter`);
 		assert.deepEqual(enter({ state, layout: layoutOf(state, own), cells: noCells }), { type: 'cell', cell: { row: 0, column: 0 } });
-		assert.deepEqual(enter({ state, layout: layoutOf(state, own), cells: cells({ row: 1, column: 1 }) }), { type: 'stay' });
+		assert.deepEqual(enter({ state, layout: layoutOf(state, own), cells: cells({ row: 1, column: 1 }) }), { type: 'edit', cell: { row: 1, column: 1 } });
+	});
+
+	test('Enter opens a cell of a table Obsidian did not write, which the plugin writes itself', () => {
+		const state = note(`Intro\n\n⟨|a|b|\n|-|-|\n|1|⟩\n\nAfter`);
+		assert.deepEqual(enter({ state, layout: layoutOf(state, own), cells: cells({ row: 1, column: 1 }) }), { type: 'edit', cell: { row: 1, column: 1 } });
 	});
 
 	test('Delete at the end of the line above does nothing', () => {

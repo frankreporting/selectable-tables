@@ -23,7 +23,30 @@ export interface DrawnTable {
 	markCell(cell: Cell | null): void;
 	/** Brings a cell into view, down the note and sideways, drawing its row first if it isn't drawn. */
 	showCell(cell: Cell): void;
+	/** Opens a cell for editing, with the caret at the end of its text. */
+	openCell(cell: Cell): void;
 }
+
+/** On the editor of an open cell of the plugin's own table: the plugin's other editor extensions stand aside in it. */
+export const inOwnCell = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
+
+/** An open cell of the plugin's own table, for the keys: Escape and the jump keys close it from its editor. */
+export interface OwnCell {
+	/** The note's editor. */
+	readonly note: EditorView;
+	/** The cell's editor. */
+	readonly view: EditorView;
+	readonly cell: Cell;
+	/** The table, where it is now. */
+	table(): Span | null;
+	/** Closes the cell, keeping the focus where it is. */
+	close(): void;
+	/** Whether a range of the note's text is in the cell's text, as the cell's caret puts the note's selection. */
+	holds(from: number, to: number): boolean;
+}
+
+/** The open cell of each note's editor, and of each cell's editor. */
+export const openCells = new WeakMap<EditorView, OwnCell>();
 
 /** The plugin's own tables, in an editor that draws them: a preview build's renderer gives these (src/own-table). */
 export interface OwnTables {

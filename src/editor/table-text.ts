@@ -1,4 +1,4 @@
-import type { Line, Text } from '@codemirror/state';
+import { ChangeSet, type Line, Text } from '@codemirror/state';
 
 /** A range of the note's text, from its first character to its last. */
 export interface Span {
@@ -49,7 +49,7 @@ function rowLine(doc: Text, table: Span, row: number): Line {
 }
 
 /** What lies between the pipes of a row, cell by cell, padding included. */
-function segmentsIn(text: string): Span[] {
+export function segmentsIn(text: string): Span[] {
 	const row = text.trimEnd();
 	const segments: Span[] = [];
 	let from = row.length - row.trimStart().length;
@@ -71,28 +71,29 @@ function cellsIn(text: string): Span[] {
 }
 
 /** The narrowest column Obsidian's table editor writes. */
-const MIN_COLUMN_WIDTH = 5;
+export const MIN_COLUMN_WIDTH = 5;
 /** A cell's text sits between one space on each side, and the longest text sets its column's width. */
-const CELL_PADDING = 2;
+export const CELL_PADDING = 2;
 /** A row of only such cells isn't a row to Obsidian's table editor. */
 const dashCell = /^\s*:?\s*-+\s*:?\s*$/;
 
-type Alignment = 'left' | 'center' | 'right' | null;
+export type Alignment = 'left' | 'center' | 'right' | null;
 
-function alignmentOf(delimiter: string): Alignment {
+export function alignmentOf(delimiter: string): Alignment {
 	const cell = delimiter.trim();
 	if (cell.startsWith(':')) return cell.endsWith(':') ? 'center' : 'left';
 	return cell.endsWith(':') ? 'right' : null;
 }
 
-function padded(text: string, width: number, alignment: Alignment): string {
+/** A cell's text padded to its column's width, as Obsidian's table editor writes it. */
+export function padded(text: string, width: number, alignment: Alignment): string {
 	const space = width - text.length;
 	const before = alignment === 'right' ? space - 1 : alignment === 'center' ? Math.floor(space / 2) : 1;
 	return ' '.repeat(before) + text + ' '.repeat(space - before);
 }
 
 /** A delimiter row's cell as Obsidian's table editor writes it: dashes across the column, and colons for its alignment. */
-function delimiter(width: number, alignment: Alignment): string {
+export function delimiter(width: number, alignment: Alignment): string {
 	if (alignment === 'left') return ` :${'-'.repeat(width - 3)} `;
 	if (alignment === 'center') return ` :${'-'.repeat(width - 4)}: `;
 	if (alignment === 'right') return ` ${'-'.repeat(width - 3)}: `;
@@ -204,13 +205,51 @@ export function cellAt(doc: Text, table: Span, pos: number): Cell {
 	return { row: index <= 1 ? 0 : index - 1, column: Math.max(0, column < 0 ? segments.length - 1 : column) };
 }
 
+/** Text rewritten, and the changes that rewrote it, to map places in the old text to the new. */
+export interface Rewritten {
+	text: string;
+	changes: ChangeSet;
+}
+
+function rewrite(text: string, pattern: RegExp, replace: (match: RegExpExecArray) => { from: number; to: number; insert: string } | null): Rewritten {
+	const changes: { from: number; to: number; insert: string }[] = [];
+	for (const match of text.matchAll(pattern)) {
+		const change = replace(match);
+		if (change) changes.push(change);
+	}
+	const set = ChangeSet.of(changes, text.length);
+	return { text: changes.length ? set.apply(Text.of(text.split('\n'))).toString() : text, changes: set };
+}
+
+/**
+ * A cell's Markdown the way its editor shows it, as Obsidian's cell has it: an odd run of backslashes before a pipe
+ * ends in an escaped pipe, which is a pipe, and `<br>` outside code is a line break.
+ */
+export function toCellEditor(source: string): Rewritten {
+	const code = Array.from(source.matchAll(/(`+)[^`]+\1/g), (match) => ({ from: match.index, to: match.index + match[0].length }));
+	return rewrite(source, /(\\+)\||<br>/gi, (match) => {
+		const at = match.index;
+		const slashes = match[1];
+		if (slashes) return slashes.length % 2 === 1 ? { from: at + slashes.length - 1, to: at + slashes.length + 1, insert: '|' } : null;
+		return code.some(({ from, to }) => from < at && to > at + match[0].length) ? null : { from: at, to: at + match[0].length, insert: '\n' };
+	});
+}
+
+/** The reverse, for writing what a cell's editor holds to the note: a pipe not already escaped is `\|`, and a line break `<br>`. */
+export function toCellSource(text: string): Rewritten {
+	return rewrite(text, /\r?\n|(\\*)\|/g, (match) => {
+		const at = match.index;
+		if (match[0].endsWith('|')) {
+			const slashes = match[1] ?? '';
+			return slashes.length % 2 === 1 ? null : { from: at + slashes.length, to: at + slashes.length + 1, insert: '\\|' };
+		}
+		return { from: at, to: at + match[0].length, insert: '<br>' };
+	});
+}
+
 /** A cell's text the way its editor shows it: `\|` is a pipe, and `<br>` outside code is a line break. */
 function unescaped(text: string): string {
-	const code = Array.from(text.matchAll(/(`+)[^`]+\1/g), (match) => ({ from: match.index, to: match.index + match[0].length }));
-	return text.replace(/(\\+)\||<br>/gi, (match: string, slashes: string | undefined, at: number) => {
-		if (slashes) return slashes.length % 2 === 1 ? `${slashes.slice(1)}|` : match;
-		return code.some(({ from, to }) => from < at && to > at + match.length) ? match : '\n';
-	});
+	return toCellEditor(text).text;
 }
 
 /** A cell's Markdown, without its padding. A cell Obsidian drew to fill a short row has none. */

@@ -112,8 +112,10 @@ export function writeCell(doc: Text, table: Span, cell: Cell, text: string, padd
 		const trail = old.length - lead - trimmed.length;
 		const right = padding.align === 'right';
 		const room = old.length - text.length;
+		// A backslash at the text's end would escape the pipe after it, and the row would lose a cell: a space keeps it apart.
+		const apart = /(^|[^\\])(\\\\)*\\$/.test(text) ? 1 : 0;
 		const before = right ? Math.max(lead ? 1 : 0, room - trail) : lead;
-		const after = right ? trail : Math.max(trail ? 1 : 0, room - lead);
+		const after = Math.max(apart, right ? trail : Math.max(trail ? 1 : 0, room - lead));
 		const next = ' '.repeat(before) + text + ' '.repeat(after);
 		const change = difference(old, next, line.from + segment.from);
 		return { changes: change ? [change] : [], from: line.from + segment.from + before, padding };

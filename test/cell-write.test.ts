@@ -86,3 +86,10 @@ test('a line break and a pipe typed in a cell are written escaped, as Obsidian\'
 	const { lines } = type(['| a | b |', '| - | - |', '| 1 | 2 |'], { row: 1, column: 0 }, toCellSource('1 | 2\n3').text);
 	assert.deepEqual(lines, ['| a | b |', '| - | - |', '| 1 \\| 2<br>3 | 2 |']);
 });
+
+test('a backslash typed at a cell\'s end keeps a space after it, so it can\'t escape the pipe and merge two cells', () => {
+	assert.deepEqual(type(['|a|b|', '|-|-|'], { row: 0, column: 0 }, 'a\\').lines, ['|a\\ |b|', '|-|-|']);
+	assert.deepEqual(type(['|  c|b|', '|--:|-|'], { row: 0, column: 0 }, 'cd\\').lines, ['| cd\\ |b|', '|--:|-|']);
+	// An escaped backslash, two of them, escapes nothing.
+	assert.deepEqual(type(['|a|b|', '|-|-|'], { row: 0, column: 0 }, 'a\\\\').lines, ['|a\\\\|b|', '|-|-|']);
+});

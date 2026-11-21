@@ -374,8 +374,10 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 				const selected = selectedModel(update.state);
 				for (const model of this.models) model.setSelected(model === selected);
 			}
-			// Find and the Search pane mark their matches with effects; an edit moves them.
-			if (update.docChanged || update.transactions.some((tr) => tr.effects.length > 0)) {
+			// Find and the Search pane mark their matches with effects; an edit moves those already in a table. Typing in a
+			// cell, with no match anywhere, looks for none.
+			const marked = update.transactions.some((tr) => tr.effects.length > 0);
+			if (marked || (update.docChanged && this.models.some((model) => model.hasMatches))) {
 				const spans = update.state.field(tables, false)?.spans ?? [];
 				const matches = matchesIn(update.state, spans);
 				// A table not drawn yet takes them too, for when Find's scroll brings it into view.
@@ -459,6 +461,8 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 			forcePlain,
 			resetFallback,
 			missingPiece: (view: EditorView) => missingPiece(app, view.state.field(editorInfoField, false) as never),
+			/** Which piece the borrowed editor would miss with this owner, as with one an Obsidian update changed. */
+			missingPieceOf: (owner: object) => missingPiece(app, owner),
 			scan: (state: EditorState) => (lineClassProp && drawsTables(state) ? findTables(state.doc, treeRows(syntaxTree(state), lineClassProp)) : []),
 			drawsTables,
 			forceParse: (view: EditorView) => forceParsing(view, view.state.doc.length, 10000),

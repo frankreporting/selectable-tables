@@ -416,9 +416,13 @@ export class Model implements Span, DrawnTable {
 	 */
 	holdOpen(tr: HTMLTableRowElement | null, column: number): void {
 		const was = this.rowOfOpen();
+		const wasRow = this.openRow;
 		this.openRow = tr;
 		this.openColumn = column;
 		if (tr || was === null) return;
+		// The cell that closed still shows its text from before it opened, so the row is drawn again, in place if another
+		// of its cells opens before then.
+		if (wasRow) this.drawnFrom.delete(wasRow);
 		if (was === 0) this.headText = null;
 		else this.dirty.add(was - 1);
 		this.todo = true;
@@ -440,7 +444,7 @@ export class Model implements Span, DrawnTable {
 		return null;
 	}
 
-	/** The open cell's editor changed its height: its row is measured again. */
+	/** The open cell's editor changed its height: the rows are measured again. */
 	cellResized(): void {
 		this.schedule(true);
 	}
@@ -521,6 +525,11 @@ export class Model implements Span, DrawnTable {
 		if (byRow.size) this.painted = true;
 		for (const row of touched) this.paintRowMatches(row);
 		this.requestMatch();
+	}
+
+	/** Whether the table holds any of Find's matches, or the Search pane's. */
+	get hasMatches(): boolean {
+		return this.matches.size > 0;
 	}
 
 	/** Draws a drawn row's matches, -1 being the header, and takes off those it had. */
@@ -832,7 +841,13 @@ export class Model implements Span, DrawnTable {
 			const { header } = linesOf(doc, this);
 			for (const [row, tr] of this.rendered) {
 				if (row >= this.count) this.dirty.add(row);
-				else if (!this.drawnAs(tr, doc.line(header + 2 + row).text)) this.dirty.add(row);
+				else if (tr === this.openRow) {
+					// Only the open cell's text changed, as typing in it does: its editor already shows it, and nothing is drawn.
+					const text = doc.line(header + 2 + row).text;
+					const was = this.drawnFrom.get(tr);
+					if (was !== undefined && sameCells(was, text, this.columns, this.openColumn)) this.drawnFrom.set(tr, text);
+					else this.dirty.add(row);
+				} else if (!this.drawnAs(tr, doc.line(header + 2 + row).text)) this.dirty.add(row);
 			}
 		}
 		if (doc.lineAt(this.from).text !== this.headText) this.renderHead();

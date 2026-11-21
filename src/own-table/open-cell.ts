@@ -1,5 +1,5 @@
 import { redo, undo } from '@codemirror/commands';
-import { Annotation, EditorSelection, type Extension, type SelectionRange, Transaction } from '@codemirror/state';
+import { Annotation, EditorSelection, type Extension, type SelectionRange, Transaction, type TransactionSpec } from '@codemirror/state';
 import { Direction, type EditorView, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { type App, editorInfoField, MarkdownView, Notice } from 'obsidian';
 import { writesCell } from '../editor/decide';
@@ -8,6 +8,7 @@ import { type Cell, type Span, toCellEditor, toCellSource } from '../editor/tabl
 import { type CellEditor, type CellHooks, makeCellEditor, suggesting } from './cell-editor';
 import { cellPlace, type Padding, paddingFor, writeCell } from './cell-write';
 import type { Click, Model } from './model';
+import { timed } from './profile';
 
 /**
  * An open cell of the plugin's table: an editor in the drawn cell, holding the cell's text as Obsidian's own cell holds
@@ -71,6 +72,11 @@ export class OpenCell implements OwnCell {
 	private closed = false;
 	/** A change from elsewhere waits while a composition runs in the cell. */
 	private waiting = false;
+	/**
+	 * Whether the cell's editor has the keyboard, kept by its focus events: an editor whose element a rewrite took out
+	 * of the page no longer says it has the focus, and the note should take it then.
+	 */
+	private focused = false;
 
 	private constructor(
 		private readonly setup: CellSetup,
@@ -93,6 +99,26 @@ export class OpenCell implements OwnCell {
 			new Notice('Selectable Tables: cells open in a simpler editor for now, after an Obsidian update. Markdown shows as text until you leave the cell.');
 		});
 		element.closest('.cm-table-widget')?.addClass('has-focus');
+		const content = this.editor.view.contentDOM;
+		content.addEventListener('focusin', () => (this.focused = true));
+		// Focus that goes nowhere, as when the element leaves the page, still counts as the cell's. CodeMirror can move the
+		// cell's block into a new box around a table's blocks as the note scrolls, without drawing it again, which takes the
+		// keyboard from the editor: it takes it back, without scrolling, if nothing else has it.
+		const boxOf = () => element.closest('.cm-table-widget')?.parentElement ?? null;
+		let box = boxOf();
+		content.addEventListener('focusin', () => (box = boxOf()));
+		content.addEventListener('focusout', (event) => {
+			if (event.relatedTarget) {
+				this.focused = false;
+				return;
+			}
+			queueMicrotask(() => {
+				const page = content.ownerDocument;
+				const active = page.activeElement;
+				const moved = boxOf() !== box;
+				if (!this.closed && moved && content.isConnected && (!active || active === page.body)) content.focus({ preventScroll: true });
+			});
+		});
 		openCells.set(note, this);
 		openCells.set(this.editor.view, this);
 	}
@@ -130,6 +156,12 @@ export class OpenCell implements OwnCell {
 
 	table(): Span | null {
 		return this.model.view === this.note ? { from: this.model.from, to: this.model.to } : null;
+	}
+
+	/** For the check script: the cell's text as the note has it, unescaped, and as its editor has it. */
+	texts(): { note: string | null; cell: string } {
+		const place = cellPlace(this.note.state.doc, this.model, this.cell);
+		return { note: place ? toCellEditor(place.source).text : null, cell: this.editor.view.state.doc.toString() };
 	}
 
 	holds(from: number, to: number): boolean {
@@ -269,7 +301,8 @@ export class OpenCell implements OwnCell {
 			this.write(tr);
 			if (this.closed) return;
 		}
-		if (update.heightChanged || update.geometryChanged) this.model.cellResized();
+		// Only a change of the cell's height moves rows: a wider line, or a caret move, doesn't.
+		if (update.heightChanged) this.model.cellResized();
 		if (update.docChanged || update.selectionSet) this.followCaret();
 	}
 
@@ -279,6 +312,12 @@ export class OpenCell implements OwnCell {
 	 * in the cell's text, without scrolling.
 	 */
 	private write(tr: Transaction): void {
+		const spec = timed('cell', () => this.writing(tr));
+		if (spec) this.note.dispatch(spec);
+	}
+
+	/** What a write sends the note, or null when the cell is gone and closes. */
+	private writing(tr: Transaction): TransactionSpec | null {
 		const { note, model, cell } = this;
 		const { doc } = note.state;
 		const source = toCellSource(tr.newDoc.toString());
@@ -288,14 +327,14 @@ export class OpenCell implements OwnCell {
 			const written = writeCell(doc, model, cell, source.text, this.padding);
 			if (!written) {
 				this.close();
-				return;
+				return null;
 			}
 			changes = written.changes;
 			from = written.from;
 			this.padding = written.padding;
 		} else {
 			const place = cellPlace(doc, model, cell);
-			if (!place) return;
+			if (!place) return null;
 			from = place.from;
 		}
 		const length = source.text.length;
@@ -308,7 +347,16 @@ export class OpenCell implements OwnCell {
 		const annotations: Annotation<unknown>[] = [writesCell.of(true)];
 		const event = tr.annotation(Transaction.userEvent);
 		if (event && !event.startsWith('select')) annotations.push(Transaction.userEvent.of(event));
-		note.dispatch({ changes, selection, annotations, scrollIntoView: false });
+		return { changes, selection, annotations, scrollIntoView: false };
+	}
+
+	/** Puts the note's selection where the cell's caret is, after the note's update that moved it. */
+	private mirrorSoon(): void {
+		queueMicrotask(() => {
+			if (this.closed || this.editor.view.composing) return;
+			const { state } = this.editor.view;
+			this.write(state.update({ selection: state.selection }));
+		});
 	}
 
 	/** Keeps the caret in view sideways as it moves or the text grows: no box scrolls the table on a computer. */
@@ -332,6 +380,10 @@ export class OpenCell implements OwnCell {
 	 * row and column while those exist.
 	 */
 	noteUpdate(update: ViewUpdate, before: readonly Model[], after: readonly Model[]): void {
+		timed('cell', () => this.taking(update, before, after));
+	}
+
+	private taking(update: ViewUpdate, before: readonly Model[], after: readonly Model[]): void {
 		if (this.closed) return;
 		const others = update.transactions.filter((tr) => !tr.annotation(writesCell));
 		if (!others.length) return;
@@ -384,6 +436,9 @@ export class OpenCell implements OwnCell {
 			this.close(true);
 			return;
 		} else if (changes) next = EditorSelection.single(Math.min(view.state.selection.main.head, shown.text.length));
+		// A change that took the note's selection out of the cell without setting one, as a rewrite of the whole table
+		// does, has the note's selection put back where the cell's caret is, so commands still act there.
+		if (!inside && !selection) this.mirrorSoon();
 		if (!changes && !next) return;
 		this.syncing = true;
 		try {
@@ -413,7 +468,7 @@ export class OpenCell implements OwnCell {
 	 * row and column, with the caret where the note's selection is, if the table still has them.
 	 */
 	private reopen(model: Model | null): void {
-		const focused = this.editor.view.hasFocus;
+		const focused = this.editor.view.hasFocus || this.focused;
 		const { cell, setup, note } = this;
 		this.close(focused);
 		if (!model || model.view !== note) return;
@@ -434,7 +489,7 @@ export class OpenCell implements OwnCell {
 	close(keepKeys = false): void {
 		if (this.closed) return;
 		this.closed = true;
-		const hadFocus = this.editor.view.hasFocus;
+		const hadFocus = this.editor.view.hasFocus || this.focused;
 		if (openCells.get(this.note) === this) openCells.delete(this.note);
 		openCells.delete(this.editor.view);
 		this.editor.destroy();

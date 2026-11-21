@@ -5,7 +5,7 @@ import { CELL_CLASS, HOLDS_CELL_CLASS } from '../editor/cells';
 import type { Grid } from '../editor/decide';
 import { OWN_BORDERS_CLASS } from '../editor/freeze';
 import { markedCells } from '../editor/freeze-mark';
-import type { DrawnTable } from '../editor/layout';
+import { type DrawnTable, openCells } from '../editor/layout';
 import { type Cell, rowCells, type Span } from '../editor/table-text';
 import { fitColumns, measureCell, type Metrics, rowHeight, type Words } from './estimate';
 import { Bar, SLIDE_VARIABLE, SLIDES_CLASS, TIMELINE_VARIABLE, usesBars } from './bar';
@@ -62,6 +62,41 @@ function mediaCells(rows: Iterable<HTMLTableRowElement>): HTMLTableCellElement[]
 		}
 	}
 	return [...cells];
+}
+
+/** A press on a cell: where it landed, and how many of the cell's drawn characters come before that place. */
+export interface Click {
+	x: number;
+	y: number;
+	visible: number | null;
+}
+
+type Caret = { offsetNode: Node; offset: number } | null;
+
+/**
+ * How many characters of a cell's drawn text, a `<br>` counting as one, come before the place a press landed, so the
+ * open cell's caret can go to the same place in its own drawn text, where Live Preview hides the Markdown the same way.
+ */
+function visibleAt(td: HTMLTableCellElement, x: number, y: number): number | null {
+	const doc = td.ownerDocument;
+	const root = td.querySelector(':scope > .table-cell-wrapper') ?? td;
+	let at: Caret = (doc as unknown as { caretPositionFromPoint?: (x: number, y: number) => Caret }).caretPositionFromPoint?.(x, y) ?? null;
+	if (!at) {
+		const range = (doc as { caretRangeFromPoint?: (x: number, y: number) => Range | null }).caretRangeFromPoint?.(x, y);
+		at = range ? { offsetNode: range.startContainer, offset: range.startOffset } : null;
+	}
+	if (!at || !root.contains(at.offsetNode)) return null;
+	const range = doc.createRange();
+	range.setStart(root, 0);
+	range.setEnd(at.offsetNode, at.offset);
+	return range.toString().length + range.cloneContents().querySelectorAll('br').length;
+}
+
+/** Whether two lines of a table have the same cells, padding aside, but for one column, -1 for none. */
+function sameCells(a: string, b: string, columns: number, except: number): boolean {
+	const before = cellsOf(a, columns);
+	const after = cellsOf(b, columns);
+	return before.every((cell, column) => column === except || cell === after[column]);
 }
 
 /** How narrow and wide a cell's content can be, measured. */
@@ -140,6 +175,8 @@ interface Block {
 	readonly above: HTMLTableRowElement;
 	readonly parity: HTMLTableRowElement;
 	readonly below: HTMLTableRowElement;
+	/** Between the open cell's row and the rows drawn, while it's kept far from them. */
+	readonly gap: HTMLTableRowElement;
 	readonly tail: HTMLTableRowElement;
 	/** The widths and columns on the page, to tell when the shape's differ. */
 	applied: string;
@@ -278,12 +315,21 @@ export class Model implements Span, DrawnTable {
 	/** Whether rows may hold matches drawn before, which a row kept out of the page brings back. */
 	private painted = false;
 
+	// The open cell.
+	/** The row of the open cell, kept in the page however far the note scrolls from it, and its column. */
+	private openRow: HTMLTableRowElement | null = null;
+	private openColumn = -1;
+	/** A cell to open once its row is drawn. */
+	private toOpen: { cell: Cell; run: () => void } | null = null;
+
 	constructor(
 		private readonly app: App,
 		public from: number,
 		public to: number,
 		/** Selects the table whole. */
 		private readonly select: (model: Model) => void,
+		/** Opens a cell for editing, at a click in it, or at its text's end. */
+		private readonly open: (model: Model, cell: Cell, at: Click | null) => void,
 	) {
 		this.component.load();
 	}
@@ -328,8 +374,13 @@ export class Model implements Span, DrawnTable {
 		this.paintCell();
 	}
 
+	/** Opens a cell for editing, with the caret at the end of its text: Enter on the selected cell. */
+	openCell(cell: Cell): void {
+		this.open(this, cell, null);
+	}
+
 	/** A cell's element, if its row is drawn: row 0 is the header. */
-	private cellElement({ row, column }: Cell): HTMLTableCellElement | null {
+	cellElement({ row, column }: Cell): HTMLTableCellElement | null {
 		const tr = row === 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(row - 1);
 		return tr?.instanceOf(HTMLTableRowElement) ? (tr.cells[column] ?? null) : null;
 	}
@@ -341,6 +392,57 @@ export class Model implements Span, DrawnTable {
 		this.cellEl?.removeClass(CELL_CLASS);
 		el?.addClass(CELL_CLASS);
 		this.cellEl = el;
+	}
+
+	/** The cell a drawn cell element is, or null for a filler row's. */
+	private cellOf(el: HTMLTableCellElement): Cell | null {
+		const tr = el.parentElement;
+		if (!tr?.instanceOf(HTMLTableRowElement)) return null;
+		if (tr === this.blocks[0]?.thead?.firstElementChild) return { row: 0, column: el.cellIndex };
+		for (const [row, drawn] of this.rendered) if (drawn === tr) return { row: row + 1, column: el.cellIndex };
+		return null;
+	}
+
+	/** Runs `run` once a cell's row is drawn, bringing it into view: a cell to open that isn't drawn yet. */
+	whenDrawn(cell: Cell, run: () => void): void {
+		this.toOpen = { cell, run };
+		this.showCell(cell);
+	}
+
+	/**
+	 * Keeps the open cell's row in the page while it's open, however far the note scrolls, so typing still reaches its
+	 * editor: CodeMirror keeps the block holding the note's selection in the page, and the selection follows the cell's
+	 * caret. Its other cells are drawn again in place as they change. Closed, the row is drawn again whole.
+	 */
+	holdOpen(tr: HTMLTableRowElement | null, column: number): void {
+		const was = this.rowOfOpen();
+		this.openRow = tr;
+		this.openColumn = column;
+		if (tr || was === null) return;
+		if (was === 0) this.headText = null;
+		else this.dirty.add(was - 1);
+		this.todo = true;
+		this.refresh();
+		this.schedule(true);
+	}
+
+	/** Whether the open cell's element is still in its row, and that row still one of the table's. */
+	holdsOpen(el: HTMLTableCellElement): boolean {
+		return !!this.openRow && this.openRow.cells[this.openColumn] === el && this.rowOfOpen() !== null;
+	}
+
+	/** The open cell's row, 0 being the header, or null. */
+	rowOfOpen(): number | null {
+		const tr = this.openRow;
+		if (!tr) return null;
+		if (tr === this.blocks[0]?.thead?.firstElementChild) return 0;
+		for (const [row, drawn] of this.rendered) if (drawn === tr) return row + 1;
+		return null;
+	}
+
+	/** The open cell's editor changed its height: its row is measured again. */
+	cellResized(): void {
+		this.schedule(true);
 	}
 
 	/**
@@ -456,6 +558,7 @@ export class Model implements Span, DrawnTable {
 	}
 
 	destroy(): void {
+		this.toOpen = null;
 		this.component.unload();
 		this.bar?.destroy();
 		this.bar = null;
@@ -641,6 +744,13 @@ export class Model implements Span, DrawnTable {
 		this.view = view;
 		this.ensureShape(view.state.doc, metrics);
 		const block = this.blocks[index] ?? this.build(index);
+		// CodeMirror puts a block it draws again back in the page, which takes the keyboard from an open cell in it.
+		const open = openCells.get(view);
+		if (open && open.view.hasFocus && block.dom.contains(open.view.dom)) {
+			queueMicrotask(() => {
+				if (openCells.get(view) === open && !open.view.hasFocus && open.view.dom.isConnected) open.view.focus();
+			});
+		}
 		this.refresh();
 		// A block coming into the page may hold rows near the pane that weren't drawn while it was out.
 		if (this.blockCount > 1) this.schedule(true);
@@ -659,10 +769,18 @@ export class Model implements Span, DrawnTable {
 		const colgroup = table.createEl('colgroup');
 		const thead = index === 0 ? table.createEl('thead') : null;
 		const tbody = table.createEl('tbody');
-		// A press anywhere but a link selects the whole table. The browser moves no caret and starts no selection:
-		// the press's default is prevented, apart from the table's own scrollbar.
+		// A press on a cell opens it, with the caret where it landed, and a press beside the cells selects the whole
+		// table. The browser moves no caret and starts no selection: the press's default is prevented, apart from a
+		// link's, the table's own scrollbar's, and the open cell's editor's.
 		const onScrollbar = (event: MouseEvent) => event.target === dom && (event.offsetX >= dom.clientWidth || event.offsetY >= dom.clientHeight);
-		const leftAlone = (event: MouseEvent) => event.button !== 0 || onScrollbar(event) || !!(event.target as Element).closest('a');
+		const inEditor = (target: Element) => {
+			const editor = target.closest('.cm-editor');
+			return !!editor && dom.contains(editor);
+		};
+		const leftAlone = (event: MouseEvent) => {
+			const target = event.target as Element;
+			return event.button !== 0 || onScrollbar(event) || !!target.closest('a') || inEditor(target);
+		};
 		const hold = (event: MouseEvent) => {
 			if (!leftAlone(event)) event.preventDefault();
 		};
@@ -671,7 +789,15 @@ export class Model implements Span, DrawnTable {
 		});
 		dom.addEventListener('mousedown', hold);
 		dom.addEventListener('click', (event) => {
-			if (!leftAlone(event)) this.select(this);
+			if (leftAlone(event)) return;
+			const el = (event.target as Element).closest('td, th');
+			const cell = el?.instanceOf(HTMLTableCellElement) && dom.contains(el) ? this.cellOf(el) : null;
+			if (!cell || !el) {
+				this.select(this);
+				return;
+			}
+			event.preventDefault();
+			this.open(this, cell, { x: event.clientX, y: event.clientY, visible: visibleAt(el as HTMLTableCellElement, event.clientX, event.clientY) });
 		});
 		// A picture that loads changes its row's height, and can widen its column, as in Obsidian's table, where the
 		// browser lays the table out again. A video does once it knows its size.
@@ -687,7 +813,7 @@ export class Model implements Span, DrawnTable {
 		if (this.dir) dom.dir = this.dir;
 		// Which table a swipe over the block is for.
 		dom.setAttribute(BOX_ID, String(this.id));
-		const block: Block = { index, dom, table, colgroup, thead, tbody, lead: spacer(PARITY_CLASS, EDGE_CLASS), above: spacer(), parity: spacer(PARITY_CLASS), below: spacer(), tail: spacer(PARITY_CLASS, EDGE_CLASS), applied: '', dressed: '' };
+		const block: Block = { index, dom, table, colgroup, thead, tbody, lead: spacer(PARITY_CLASS, EDGE_CLASS), above: spacer(), parity: spacer(PARITY_CLASS), below: spacer(), gap: spacer(), tail: spacer(PARITY_CLASS, EDGE_CLASS), applied: '', dressed: '' };
 		this.blocks[index] = block;
 		// A block that comes into the page is drawn where the table is sideways, in its first frame.
 		this.dress(block);
@@ -705,7 +831,8 @@ export class Model implements Span, DrawnTable {
 			this.checkRows = false;
 			const { header } = linesOf(doc, this);
 			for (const [row, tr] of this.rendered) {
-				if (row >= this.count || doc.line(header + 2 + row).text !== this.drawnFrom.get(tr)) this.dirty.add(row);
+				if (row >= this.count) this.dirty.add(row);
+				else if (!this.drawnAs(tr, doc.line(header + 2 + row).text)) this.dirty.add(row);
 			}
 		}
 		if (doc.lineAt(this.from).text !== this.headText) this.renderHead();
@@ -713,6 +840,19 @@ export class Model implements Span, DrawnTable {
 		this.schedule(this.dirty.size > 0 || this.remeasure);
 		this.remeasure = false;
 		this.placeBar();
+	}
+
+	/**
+	 * Whether a drawn row shows a line's text: it was drawn from that text, or from one with the same cells, which only
+	 * pads them otherwise, as a column padded again for an open cell's text does to every row. That one is taken as
+	 * drawn from the new text.
+	 */
+	private drawnAs(tr: HTMLTableRowElement, text: string): boolean {
+		const was = this.drawnFrom.get(tr);
+		if (was === text) return true;
+		if (was === undefined || !sameCells(was, text, this.columns, -1)) return false;
+		this.drawnFrom.set(tr, text);
+		return true;
 	}
 
 	/** Every row drawn again, after the columns changed. */
@@ -756,7 +896,7 @@ export class Model implements Span, DrawnTable {
 			// A table's width holds its own borders, which a theme may set beside its cells', and the space between cells.
 			const { tableBorder, spacing } = this.metrics!;
 			block.table.style.width = `${widths.reduce((sum, width) => sum + width, tableBorder + spacing * (this.columns + 1))}px`;
-			for (const row of [block.lead, block.above, block.parity, block.below, block.tail]) (row.firstChild as HTMLTableCellElement).colSpan = Math.max(1, this.columns);
+			for (const row of [block.lead, block.above, block.parity, block.below, block.gap, block.tail]) (row.firstChild as HTMLTableCellElement).colSpan = Math.max(1, this.columns);
 			if (block.applied) changed = true;
 			block.applied = key;
 		}
@@ -771,15 +911,47 @@ export class Model implements Span, DrawnTable {
 	 */
 	private arrange(): void {
 		const rows = String(this.count + 1);
+		const openRow = this.rowOfOpen();
+		const open = openRow !== null && openRow > 0 ? openRow - 1 : -1;
+		const top = (row: number) => this.heights.top(row);
 		for (const block of this.blocks) {
 			if (!block || block.index >= this.blockCount) continue;
 			const body = bodyLayout(this.heights, block.index, this.drawn, (row) => this.rendered.has(row));
+			const { first, end } = blockRows(this.count, block.index);
+			const run = body.rows;
+			// The open cell's row, kept in the page away from the rows drawn, sits among spacers of its own. Its stripe may
+			// be off while it's out of view; the drawn rows' are right.
+			const apart = open >= first && open < end && (open < run.first || open >= run.end) ? this.openRow : null;
+			let above = body.above;
+			let below = body.below;
+			let gap: number | null = null;
+			let parity = body.parity;
+			let openFirst = false;
+			if (apart && run.end <= run.first) {
+				above = open > first ? top(open) - top(first) : null;
+				below = open + 1 < end ? top(end) - top(open + 1) : null;
+				parity = false;
+				openFirst = true;
+			} else if (apart && open < run.first) {
+				above = open > first ? top(open) - top(first) : null;
+				gap = run.first > open + 1 ? top(run.first) - top(open + 1) : null;
+				const before = (body.lead ? 1 : 0) + (above !== null ? 1 : 0) + 1 + (gap !== null ? 1 : 0);
+				parity = (((run.first - before) % 2) + 2) % 2 === 1;
+				openFirst = true;
+			} else if (apart) {
+				gap = open > run.end ? top(open) - top(run.end) : null;
+				below = open + 1 < end ? top(end) - top(open + 1) : null;
+			}
 			const want: HTMLTableRowElement[] = [];
 			if (body.lead) want.push(block.lead);
-			if (body.above !== null) want.push(block.above);
-			if (body.parity) want.push(block.parity);
+			if (above !== null) want.push(block.above);
+			if (apart && openFirst) {
+				want.push(apart);
+				if (gap !== null) want.push(block.gap);
+			}
+			if (parity) want.push(block.parity);
 			// A row an edit added isn't drawn until the next measure: until then, the rows around it close up.
-			for (let row = body.rows.first; row < body.rows.end; row++) {
+			for (let row = run.first; row < run.end; row++) {
 				const tr = this.rendered.get(row);
 				if (!tr) continue;
 				// Only rows near the pane are in the page, so each says which row of the table it is, the header being 1.
@@ -787,7 +959,11 @@ export class Model implements Span, DrawnTable {
 				if (tr.getAttribute('aria-rowindex') !== index) tr.setAttribute('aria-rowindex', index);
 				want.push(tr);
 			}
-			if (body.below !== null) want.push(block.below);
+			if (apart && !openFirst) {
+				if (gap !== null) want.push(block.gap);
+				want.push(apart);
+			}
+			if (below !== null) want.push(block.below);
 			if (body.tail) want.push(block.tail);
 			if (block.table.getAttribute('aria-rowcount') !== rows) block.table.setAttribute('aria-rowcount', rows);
 			const height = (row: HTMLTableRowElement, px: number | null) => {
@@ -795,18 +971,26 @@ export class Model implements Span, DrawnTable {
 				const value = `${Math.max(0, px ?? 0)}px`;
 				if (cell.style.height !== value) cell.style.height = value;
 			};
-			height(block.above, body.above);
-			height(block.below, body.below);
+			height(block.above, above);
+			height(block.below, below);
+			height(block.gap, gap);
 			const keep = new Set<Node>(want);
 			for (let node = block.tbody.firstChild; node; ) {
 				const next = node.nextSibling;
 				if (!keep.has(node)) node.remove();
 				node = next;
 			}
+			// The open cell's row is never moved, which would take the keyboard from its editor: what's out of place
+			// around it moves instead.
 			let at = block.tbody.firstChild;
 			for (const row of want) {
 				if (row === at) at = at.nextSibling;
-				else block.tbody.insertBefore(row, at);
+				else if (row === this.openRow && row.parentNode === block.tbody) {
+					const between: Node[] = [];
+					for (let node = at; node && node !== row; node = node.nextSibling) between.push(node);
+					row.after(...between);
+					at = row.nextSibling;
+				} else block.tbody.insertBefore(row, at);
 			}
 		}
 		this.paintCell();
@@ -880,6 +1064,42 @@ export class Model implements Span, DrawnTable {
 		return out;
 	}
 
+	/**
+	 * The open cell's row has new text: its other cells are drawn again in it, in place, and the open cell is left as
+	 * it is. Moving the row, or the cell, would take the keyboard from the cell's editor. Nothing is drawn when only
+	 * the open cell's text or the padding changed.
+	 */
+	private patchOpen(row: number, tr: HTMLTableRowElement): void {
+		const doc = this.view!.state.doc;
+		const text = doc.line(linesOf(doc, this).header + 2 + row).text;
+		const was = this.drawnFrom.get(tr);
+		if (was === undefined || !sameCells(was, text, this.columns, this.openColumn)) {
+			const [head, fresh] = this.render([text]);
+			if (head) this.release(head);
+			if (fresh) this.patchRow(tr, fresh);
+			if (this.matches.size || this.painted) paintMatches(tr, text, this.matches.get(row) ?? []);
+		}
+		this.drawnFrom.set(tr, text);
+	}
+
+	/** Moves a freshly drawn row's cells into the open cell's row, all but the open cell, which keeps its own. */
+	private patchRow(tr: HTMLTableRowElement, fresh: HTMLTableRowElement): void {
+		const now = Array.from(fresh.cells);
+		const was = Array.from(tr.cells);
+		if (now.length !== was.length) {
+			this.release(fresh);
+			return;
+		}
+		now.forEach((cell, column) => {
+			if (column !== this.openColumn) tr.replaceChild(cell, was[column]!);
+		});
+		// The row's rendered pieces are the new batch's now: the old one goes once none of its rows is left.
+		const batch = this.batchOf.get(fresh);
+		this.batchOf.delete(fresh);
+		this.release(tr);
+		if (batch) this.batchOf.set(tr, batch);
+	}
+
 	/** A rendered row that's gone for good: its batch is unloaded once none of its rows is left. */
 	private release(tr: HTMLTableRowElement): void {
 		const batch = this.batchOf.get(tr);
@@ -893,10 +1113,22 @@ export class Model implements Span, DrawnTable {
 		const view = this.view;
 		if (!thead || !view) return;
 		const text = view.state.doc.lineAt(this.from).text;
+		const old = thead.firstElementChild;
+		// Padding alone changes nothing drawn, and an open header cell keeps its row: the others are drawn again in it.
+		const kept = old?.instanceOf(HTMLTableRowElement) && this.headText !== null ? old : null;
+		if (kept && sameCells(this.headText!, text, this.columns, kept === this.openRow ? this.openColumn : -1)) {
+			this.headText = text;
+			return;
+		}
 		const [row] = this.render([]);
 		for (const column of markedCells(text)) row?.cells[column]?.addClass(MARK_CELL_CLASS);
 		row?.setAttribute('aria-rowindex', '1');
-		const old = thead.firstElementChild;
+		if (kept && row && kept === this.openRow) {
+			this.patchRow(kept, row);
+			this.headText = text;
+			if (this.matches.has(-1)) this.paintRowMatches(-1);
+			return;
+		}
 		if (old?.instanceOf(HTMLTableRowElement)) this.release(old);
 		thead.empty();
 		if (row) thead.append(row);
@@ -1041,6 +1273,11 @@ export class Model implements Span, DrawnTable {
 		const anchorTop = anchor >= 0 ? topInBlock(this.heights, anchor, this.headHeight) : 0;
 		for (const [row, tr] of this.rendered) {
 			const changed = this.dirty.has(row);
+			// The open cell's row stays, wherever the pane is, and its other cells are drawn again in it.
+			if (tr === this.openRow) {
+				if (changed && row < this.count) this.patchOpen(row, tr);
+				continue;
+			}
 			if (row >= first && row < end && !changed) continue;
 			tr.remove();
 			this.rendered.delete(row);
@@ -1082,6 +1319,12 @@ export class Model implements Span, DrawnTable {
 	private drawnAll(): void {
 		this.requestShow();
 		this.requestMatch();
+		// A cell waiting to open, once its row is drawn: after this measure, since opening it writes to the note.
+		const waiting = this.toOpen;
+		if (waiting && this.cellElement(waiting.cell)?.isConnected) {
+			this.toOpen = null;
+			queueMicrotask(waiting.run);
+		}
 	}
 
 	/** Measures cells' pictures and players on the next measure, and widens their columns to fit, as Obsidian's table does. */

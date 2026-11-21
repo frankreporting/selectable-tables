@@ -2,14 +2,15 @@ import { ensureSyntaxTree, type Language, language, StreamLanguage } from '@code
 import { EditorState, Extension, Prec, StateEffect, StateField } from '@codemirror/state';
 import { EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { editorEditorField, editorInfoField, editorLivePreviewField, MarkdownView } from 'obsidian';
+import { inOwnCell } from '../editor/layout';
 import { hidingRows, type TokenParser } from './hide-rows';
 import { lineClassProp, treeRows } from './tree-rows';
 
 /**
  * Obsidian's own table is kept out of a note by a copy of its Markdown language, the plugin's one private change:
  * Obsidian finds a table only by the line class its Markdown mode puts on a table's rows, and the copy puts another
- * one there (hide-rows.ts). Each Live Preview note's editor gets the copy; Source mode and Obsidian's own editors
- * inside cells keep Obsidian's language, and so does everything outside a note, such as a canvas card.
+ * one there (hide-rows.ts). Each Live Preview note's editor gets the copy; Source mode and the editors inside cells,
+ * Obsidian's and the plugin's, keep their own language, and so does everything outside a note, such as a canvas card.
  */
 
 /** Obsidian's languages and their copies; null where one can't be copied. */
@@ -69,7 +70,8 @@ function copyOf(original: Language): Language | null {
  */
 function inNote(state: EditorState): boolean {
 	const view = state.field(editorEditorField, false);
-	return state.field(editorInfoField, false) instanceof MarkdownView && !!view && !view.dom.closest('.cm-table-widget');
+	// An open cell of the plugin's table is owned by the note too, and is made before it's in the page.
+	return state.field(editorInfoField, false) instanceof MarkdownView && !!view && !view.dom.closest('.cm-table-widget') && !state.facet(inOwnCell);
 }
 
 /** The copy an editor's state starts with: as the editor is made, once there's a note's language to copy. */

@@ -29,6 +29,8 @@ export type Action =
 	| { type: 'open'; pos: number }
 	/** Enter can't safely open a cell of this table, and shows that. */
 	| { type: 'refuse' }
+	/** Opens a selected cell of the plugin's own table for editing. */
+	| { type: 'edit'; cell: Cell }
 	/**
 	 * A key that types starts a new paragraph below the table: the text from `from` to `to` becomes `insert`,
 	 * which adds the line breaks the paragraph needs, and the caret goes to `pos`, in the note after that.
@@ -261,14 +263,15 @@ function extend({ state, layout, leavesLine }: Context, direction: Direction): A
 /**
  * Enter on a selected table selects a cell: the one Escape left, or else the first. On a selected cell,
  * it puts the caret at the end of the cell's text, and Obsidian opens that cell, as long as Obsidian wrote
- * the table. It refuses any other. A press still opens a cell there, and tidies a malformed table.
+ * the table. It refuses any other. A press still opens a cell there, and tidies a malformed table. The
+ * plugin's own table opens any of its cells, writing the cell's text itself.
  */
 export function enter({ state, layout, cells }: TableContext): Action | null {
 	const table = selectedTable(state, layout);
 	if (!table) return null;
 	if (!cells.selected) return { type: 'cell', cell: cells.left ?? { row: 0, column: 0 } };
-	// The plugin's own table opens no cell yet (STA-81).
-	if (layout.ownTables) return { type: 'stay' };
+	// The plugin's own table opens its cells itself, writing their text, so any table can open.
+	if (layout.ownTables) return { type: 'edit', cell: cells.selected };
 	if (!writtenByObsidian(state.doc, table)) return { type: 'refuse' };
 	return { type: 'open', pos: cellCaret(state.doc, table, cells.selected) };
 }
@@ -455,6 +458,12 @@ export function shiftedRowEnd(context: TableContext): Action | null {
 /** On Enter's caret: the one key move that means to open a cell. */
 export const opensCell = Annotation.define<boolean>();
 
+/**
+ * On an open cell's write to the note, of the plugin's own table: its text, and the note's selection put where the
+ * cell's caret is. The keys' checks and the caret rule leave it alone.
+ */
+export const writesCell = Annotation.define<boolean>();
+
 /** What the check on key moves needs to know about the editor a move is in. */
 export interface Landing {
 	layout: Layout;
@@ -495,7 +504,7 @@ function keyMove(tr: Transaction): boolean {
  * as it was: it enters a table with no line beyond it.
  */
 export function landing(tr: Transaction, { layout, active, vim, left, cellSelected }: Landing): Action | null {
-	if (!tr.selection || tr.docChanged || !keyMove(tr) || tr.annotation(opensCell)) return null;
+	if (!tr.selection || tr.docChanged || !keyMove(tr) || tr.annotation(opensCell) || tr.annotation(writesCell)) return null;
 	if (!active || vim || left === 'arrow') return null;
 	const { ranges, main } = tr.selection;
 	if (ranges.length !== 1 || !main.empty) return null;

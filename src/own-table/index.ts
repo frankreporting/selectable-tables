@@ -234,7 +234,7 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 			const change = tr.docChanged ? lineChange(tr.changes, startState.doc, state.doc, old.from, endOfNextLine(startState.doc, old.to)) : null;
 			model.from = table.from;
 			model.to = table.to;
-			model.track(startState.doc, state.doc, linesOf(startState.doc, old), change);
+			model.track(startState.doc, state.doc, linesOf(startState.doc, old), change, tr.docChanged ? tr.changes : null);
 		}
 		const used = new Set(found.map((table) => table.was));
 		retire(before.filter((_, index) => !used.has(index)));

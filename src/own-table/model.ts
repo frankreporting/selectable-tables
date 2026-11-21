@@ -1,4 +1,4 @@
-import type { Text } from '@codemirror/state';
+import type { ChangeSet, Text } from '@codemirror/state';
 import type { EditorView, Rect } from '@codemirror/view';
 import { type App, Component, editorInfoField, getLinkpath, MarkdownRenderer } from 'obsidian';
 import { CELL_CLASS, HOLDS_CELL_CLASS } from '../editor/cells';
@@ -91,6 +91,9 @@ function visibleAt(td: HTMLTableCellElement, x: number, y: number): number | nul
 	range.setEnd(at.offsetNode, at.offset);
 	return range.toString().length + range.cloneContents().querySelectorAll('br').length;
 }
+
+/** A table line without its padding: no spaces beside its pipes, and runs of spaces as one. */
+const unpadded = (line: string) => line.replace(/ *\| */g, '|').replace(/ {2,}/g, ' ').trim();
 
 /** Whether two lines of a table have the same cells, padding aside, but for one column, -1 for none. */
 function sameCells(a: string, b: string, columns: number, except: number): boolean {
@@ -654,12 +657,12 @@ export class Model implements Span, DrawnTable {
 	 * than the one the shape holds for, such as a transaction worked out and then replaced, starts again from the
 	 * whole text.
 	 */
-	track(oldDoc: Text, doc: Text, before: TableLines, change: LineChange | null): void {
+	track(oldDoc: Text, doc: Text, before: TableLines, change: LineChange | null, changes: ChangeSet | null = null): void {
 		if (this.text !== oldDoc) {
 			this.stale = true;
 			this.checkRows = true;
 			this.todo = true;
-		} else if (change || linesOf(doc, this).count !== before.count) this.edit(oldDoc, doc, before, change);
+		} else if (change || linesOf(doc, this).count !== before.count) this.edit(oldDoc, doc, before, change, changes);
 		this.text = doc;
 	}
 
@@ -667,12 +670,12 @@ export class Model implements Span, DrawnTable {
 	 * The table's text changed: rows a change touched are measured again, and the rest keep their sizes. A change
 	 * to the header, the delimiter or the number of columns works the whole shape out again.
 	 */
-	private edit(oldDoc: Text, doc: Text, before: TableLines, change: LineChange | null): void {
+	private edit(oldDoc: Text, doc: Text, before: TableLines, change: LineChange | null, changes: ChangeSet | null): void {
 		this.checkRows = true;
 		this.todo = true;
 		if (this.stale || !this.metrics) return;
 		const now = linesOf(doc, this);
-		if (change && now.count === before.count && this.repadded(oldDoc, doc, before, now, change)) return;
+		if (change && now.count === before.count && this.repadded(oldDoc, doc, before, now, change, changes)) return;
 		const splices = change ? rowSplices(before, now, change) : before.count === now.count ? [] : null;
 		if (!splices) {
 			this.stale = true;
@@ -699,7 +702,7 @@ export class Model implements Span, DrawnTable {
 	 * row measured on each key. So rows are compared, padding aside, and only those whose cells changed are measured.
 	 * Says whether it took the change: not when the columns or their alignment changed.
 	 */
-	private repadded(oldDoc: Text, doc: Text, before: TableLines, now: TableLines, change: LineChange): boolean {
+	private repadded(oldDoc: Text, doc: Text, before: TableLines, now: TableLines, change: LineChange, changes: ChangeSet | null): boolean {
 		if (change.first > now.header + 1 && change.oldFirst > before.header + 1) return false;
 		const delimiter = (text: Text, lines: TableLines) => (lines.header < text.lines ? rowCells(text.line(lines.header + 1).text) : []);
 		const was = delimiter(oldDoc, before);
@@ -710,11 +713,23 @@ export class Model implements Span, DrawnTable {
 		if (rowCells(head).length > this.columns) return false;
 		const first = Math.max(0, change.first - now.header - 2);
 		const last = Math.min(now.count - 1, change.last - now.header - 2);
+		// With the change itself, the rows it touched other than by padding: spaces put in or taken out beside a pipe, and
+		// dashes in the delimiter row, change no cell, so only the other changes' rows are compared.
+		const rows = changes ? new Set<number>() : null;
+		changes?.iterChanges((fromA, toA, fromB, toB, inserted) => {
+			const padding = /^[ -]*$/;
+			const byPipe = doc.sliceString(toB, toB + 1) === '|' || (fromB > 0 && doc.sliceString(fromB - 1, fromB) === '|');
+			if (padding.test(inserted.toString()) && padding.test(oldDoc.sliceString(fromA, toA)) && (byPipe || doc.lineAt(fromB).number === now.header + 1)) return;
+			for (let n = doc.lineAt(fromB).number; n <= doc.lineAt(toB).number; n++) rows?.add(n - now.header - 2);
+		});
 		const changed: number[] = [];
 		for (let row = first; row <= last; row++) {
+			if (rows && !rows.has(row)) continue;
 			const from = oldDoc.line(before.header + 2 + row).text;
 			const after = doc.line(now.header + 2 + row).text;
-			if (from === after || sameCells(from, after, this.columns, -1)) continue;
+			// Padding is spaces beside the pipes: lines equal without them have the same cells, but for runs of spaces
+			// inside a cell, which draw as one. Cheaper than reading each row's cells, on every key in a long table.
+			if (from === after || unpadded(from) === unpadded(after)) continue;
 			if (rowCells(after).length > this.columns) return false;
 			changed.push(row);
 		}

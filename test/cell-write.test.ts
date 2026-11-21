@@ -93,3 +93,13 @@ test('a backslash typed at a cell\'s end keeps a space after it, so it can\'t es
 	// An escaped backslash, two of them, escapes nothing.
 	assert.deepEqual(type(['|a|b|', '|-|-|'], { row: 0, column: 0 }, 'a\\\\').lines, ['|a\\\\|b|', '|-|-|']);
 });
+
+test('padding a right-aligned column again puts the spaces before each cell\'s text, as the rule writes them', () => {
+	const lines = ['| Plant | Room |', '| ----: | ---- |', '|  Fern | Hall |', '|  Moss | Shed |'];
+	assert.ok(writtenByObsidian(doc(...lines), whole(doc(...lines))));
+	const wide = type(lines, { row: 1, column: 0 }, 'Ferns and moss');
+	assert.deepEqual(wide.lines, ['|          Plant | Room |', '| -------------: | ---- |', '| Ferns and moss | Hall |', '|           Moss | Shed |']);
+	assert.ok(writtenByObsidian(wide.after, whole(wide.after)));
+	const narrow = writeCell(wide.after, whole(wide.after), { row: 1, column: 0 }, 'Fern', wide.written.padding)!;
+	assert.deepEqual(ChangeSet.of(narrow.changes, wide.after.length).apply(wide.after).toJSON(), lines);
+});

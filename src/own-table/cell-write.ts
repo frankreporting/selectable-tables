@@ -133,8 +133,27 @@ export function writeCell(doc: Text, table: Span, cell: Cell, text: string, padd
 	const last = doc.lineAt(table.to).number;
 	let shift = 0;
 	let textFrom = from;
+	// In a table Obsidian wrote, the column's pipes sit at the same place in every row, so a row's cell is padded again by
+	// spaces put in or taken out there, with no need to read the row: at the cell's end, or its start when it's aligned
+	// right. A row that doesn't fit that is written by the rule. Centered columns are always written by the rule.
+	const head = segmentsIn(doc.line(first).text)[cell.column];
+	const delta = width - padding.width;
+	const at = head && padding.align !== 'center' ? (padding.align === 'right' ? head.from : head.to) : -1;
+	const quick = (text: string): Change | null => {
+		if (at < 0 || !head || text.length < head.to + 1 || text.charCodeAt(head.to) !== 124 || (head.from > 0 && text.charCodeAt(head.from - 1) !== 124)) return null;
+		if (delta > 0) return { from: at, to: at, insert: ' '.repeat(delta) };
+		const from = padding.align === 'right' ? at : at + delta;
+		const to = padding.align === 'right' ? at - delta : at;
+		return /^ +$/.test(text.slice(from, to)) && text.slice(head.from, head.to).trim().length + CELL_PADDING <= width ? { from, to, insert: '' } : null;
+	};
 	for (let number = first; number <= last; number++) {
 		const each = doc.line(number);
+		const fast = number !== first + 1 && each.from !== line.from ? quick(each.text) : null;
+		if (fast) {
+			changes.push({ from: each.from + fast.from, to: each.from + fast.to, insert: fast.insert });
+			shift += fast.insert.length - (fast.to - fast.from);
+			continue;
+		}
 		let after: string | null;
 		if (number === first + 1) after = delimiterLine(doc.line(first).text, each.text, cell.column, width);
 		else {

@@ -1,5 +1,5 @@
 import { EditorSelection, EditorState, Text } from '@codemirror/state';
-import type { Layout } from '../src/editor/layout';
+import { type Layout, spansLayout } from '../src/editor/layout';
 import { frontmatterEnd, looksLikeTable, Span } from '../src/editor/table-text';
 
 /**
@@ -28,7 +28,16 @@ export interface Drawing {
 	widgets?: Span[];
 	/** Obsidian's parser hasn't reached the tables, so they're still lines of text. */
 	undrawn?: boolean;
+	/** The plugin draws the tables itself, with its own rules for the keys beside them. */
+	own?: boolean;
 }
+
+/**
+ * How every test's tables are drawn: whole, each one block, as Obsidian draws them, or split into a block at every
+ * row, as the plugin's own table draws a large one in blocks. Split, the keys read the plugin's list of whole tables,
+ * and CodeMirror's blocks only for the lines beside them, so they must give the same answers.
+ */
+export const drawn = { split: false };
 
 /**
  * Finds tables the way Obsidian's parser does: a row with a pipe after a blank line, a heading, the
@@ -58,8 +67,19 @@ export function layoutOf(state: EditorState, drawing: Drawing = {}): Layout {
 	const fmEnd = frontmatterEnd(state.doc);
 	if (drawing.properties && fmEnd >= 0) hidden.push({ from: 0, to: fmEnd });
 	const within = (spans: Span[], pos: number) => spans.find((span) => span.from <= pos && pos <= span.to) ?? null;
-	return {
-		tableAt: (pos) => within(tables, pos),
-		isTextLine: (pos) => !within(tables, pos) && !within(hidden, pos),
-	};
+	if (!drawn.split && !drawing.own) {
+		return {
+			tableAt: (pos) => within(tables, pos),
+			isTextLine: (pos) => !within(tables, pos) && !within(hidden, pos),
+		};
+	}
+	// CodeMirror's blocks: the header and the delimiter, then a block for each row.
+	const blocks = tables.flatMap(({ from, to }) => {
+		const first = state.doc.lineAt(from).number;
+		const last = state.doc.lineAt(to).number;
+		const parts = [{ from, to: state.doc.line(Math.min(first + 1, last)).to }];
+		for (let n = first + 2; n <= last; n++) parts.push({ from: state.doc.line(n).from, to: state.doc.line(n).to });
+		return parts;
+	});
+	return { ...spansLayout(tables, { isTextLine: (pos) => !within(blocks, pos) && !within(hidden, pos) }), ownTables: drawing.own === true };
 }

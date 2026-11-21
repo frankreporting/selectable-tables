@@ -1,7 +1,7 @@
-import { Annotation, EditorState, Line, Transaction } from '@codemirror/state';
+import { Annotation, EditorState, Line, MapMode, Transaction } from '@codemirror/state';
 import { withoutMark } from './freeze-mark';
 import type { Layout } from './layout';
-import { Cell, cellCaret, cellSource, frontmatterEnd, Span, tableInText, writtenByObsidian } from './table-text';
+import { Cell, cellAt, cellCaret, cellSource, frontmatterEnd, Span, tableInText, writtenByObsidian } from './table-text';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -11,6 +11,8 @@ export type Action =
 	| { type: 'pass'; table: Span; forward: boolean }
 	/** Selects exactly the table's text. Its direction records the side it was selected from. */
 	| { type: 'select'; table: Span; fromAbove: boolean }
+	/** The same from a tap of ↑ or ↓, keeping the caret's place across, for the next ↑ or ↓ to land at. */
+	| { type: 'stop'; table: Span; fromAbove: boolean }
 	/** A caret at `pos`. */
 	| { type: 'caret'; pos: number }
 	/** The selection's head passes the table onto the line beyond it, keeping its horizontal position. */
@@ -62,6 +64,11 @@ export interface Context extends TableContext {
 	 * wrapped line. Asked only when a table is next to the caret, since it measures the screen.
 	 */
 	leavesLine: (forward: boolean) => boolean;
+	/**
+	 * Whether ↑ and ↓ stop on a table beside the caret and select it, rather than pass it: a tap, not a held key's
+	 * repeat, on the plugin's own table, with Vim not driving. Selecting a table in Vim's normal mode starts Visual mode.
+	 */
+	stops?: boolean;
 }
 
 /** The table that is selected: one selection range over exactly a rendered table's text. */
@@ -71,6 +78,9 @@ export function selectedTable(state: EditorState, layout: Layout): Span | null {
 	const table = layout.tableAt(main.from);
 	return table && table.from === main.from && table.to === main.to ? table : null;
 }
+
+/** A line Markdown takes for a blank one: spaces and tabs at most. */
+const blank = (line: Line) => /^[ \t]*$/.test(line.text);
 
 /** The table that starts on the line right after `line`. */
 function tableBelow(state: EditorState, layout: Layout, line: Line): Span | null {
@@ -158,9 +168,14 @@ function tabCell(grid: Grid, cell: Cell, forward: boolean): Cell {
 	return row > 0 ? { row: row - 1, column: grid.columns(row - 1) - 1 } : cell;
 }
 
-function move({ state, layout, leavesLine }: Context, direction: Direction): Action | null {
+function move({ state, layout, leavesLine, stops }: Context, direction: Direction): Action | null {
 	const selected = selectedTable(state, layout);
-	if (selected) return beyond(state, layout, selected, direction === 'down' || direction === 'right');
+	if (selected) {
+		const forward = direction === 'down' || direction === 'right';
+		// Stopped on by ↑ or ↓, the table is one stop in the flow: the caret goes on to the line beyond at its place across.
+		const kept = (direction === 'down' || direction === 'up') && state.selection.main.goalColumn !== undefined;
+		return kept && textBeyond(state, layout, selected, forward) ? { type: 'pass', table: selected, forward } : beyond(state, layout, selected, forward);
+	}
 
 	const { main } = state.selection;
 	if (!main.empty) return collapse(state, layout, main.from, main.to, direction);
@@ -171,11 +186,13 @@ function move({ state, layout, leavesLine }: Context, direction: Direction): Act
 		case 'down': {
 			const table = tableBelow(state, layout, line);
 			if (!table || !leavesLine(true)) return null;
+			if (stops) return { type: 'stop', table, fromAbove: true };
 			return textBeyond(state, layout, table, true) ? { type: 'pass', table, forward: true } : beyond(state, layout, table, true);
 		}
 		case 'up': {
 			const table = tableAbove(layout, line);
 			if (!table || !leavesLine(false)) return null;
+			if (stops) return { type: 'stop', table, fromAbove: false };
 			return textBeyond(state, layout, table, false) ? { type: 'pass', table, forward: false } : beyond(state, layout, table, false);
 		}
 		case 'right': {
@@ -250,6 +267,8 @@ export function enter({ state, layout, cells }: TableContext): Action | null {
 	const table = selectedTable(state, layout);
 	if (!table) return null;
 	if (!cells.selected) return { type: 'cell', cell: cells.left ?? { row: 0, column: 0 } };
+	// The plugin's own table opens no cell yet (STA-81).
+	if (layout.ownTables) return { type: 'stay' };
 	if (!writtenByObsidian(state.doc, table)) return { type: 'refuse' };
 	return { type: 'open', pos: cellCaret(state.doc, table, cells.selected) };
 }
@@ -283,13 +302,34 @@ function escapeOntoTable(state: EditorState, layout: Layout): Action | null {
 /**
  * Delete at the end of the line above a table selects the table, as Obsidian does for Backspace from the
  * line below. Otherwise it would pull the table's first row up, or delete a blank line and open a cell.
+ * On the plugin's own table it does nothing, as Obsidian's own table looks without the plugin: Obsidian lets
+ * the Delete happen there and puts the blank line straight back. Delete at the end of a blank line usually
+ * means that line, not the table.
  */
 export function deleteForward(state: EditorState, layout: Layout): Action | null {
 	const { ranges, main } = state.selection;
 	if (ranges.length !== 1 || !main.empty) return null;
 	const line = state.doc.lineAt(main.head);
 	const table = main.head === line.to ? tableBelow(state, layout, line) : null;
+	if (table && layout.ownTables) return { type: 'stay' };
 	return table && { type: 'select', table, fromAbove: true };
+}
+
+/**
+ * Backspace beside the plugin's own table keeps Obsidian's rules for its own table, which look only for that one.
+ * At the start of the line below, it selects the table, exactly, with no caret (STA-50); a second Backspace then
+ * removes it. At the start of a blank line above a table, under a line of text, the caret moves up and nothing is
+ * deleted: the text would otherwise end up against the table. Obsidian's table keeps Obsidian's rules.
+ */
+export function backspace(state: EditorState, layout: Layout): Action | null {
+	const { ranges, main } = state.selection;
+	if (!layout.ownTables || ranges.length !== 1 || !main.empty) return null;
+	const line = state.doc.lineAt(main.head);
+	if (main.head !== line.from) return null;
+	const above = tableAbove(layout, line);
+	if (above) return { type: 'select', table: above, fromAbove: false };
+	if (!blank(line) || line.number === 1 || blank(state.doc.line(line.number - 1)) || !tableBelow(state, layout, line)) return null;
+	return { type: 'caret', pos: line.from - 1 };
 }
 
 /** A key that would put a line break or a tab over a selected table does nothing, so it can't change it. */
@@ -297,8 +337,6 @@ export function stay(state: EditorState, layout: Layout): Action | null {
 	return selectedTable(state, layout) && { type: 'stay' };
 }
 
-/** A line Markdown takes for a blank one: spaces and tabs at most. */
-const blank = (line: Line) => /^[ \t]*$/.test(line.text);
 
 /**
  * A key that types on a selected table or cell starts a new paragraph below the table, whichever side it
@@ -514,4 +552,40 @@ export function stopsEdit(tr: Transaction, table: Span, cellSelected: boolean): 
 	if (cellSelected) return !tr.annotation(Transaction.remote) && !['undo', 'redo', 'set', 'searchReplace'].some((event) => tr.isUserEvent(event));
 	if (tr.isUserEvent('input.paste') || tr.isUserEvent('input.drop')) return false;
 	return tr.isUserEvent('input') || tr.isUserEvent('indent');
+}
+
+/**
+ * The caret rule, on the plugin's own table: a selection put inside a table's text by anything but a key or a press,
+ * such as closing Find on a match, a search result, Undo or another plugin's command, would sit there unseen, and
+ * typing would change the table. So the table is selected, with the cell holding the selection's start. A caret on
+ * a table's edge, as a paste leaves it, keeps the keys' rules, and several selections are left as they are.
+ */
+export function caretInTable(state: EditorState, layout: Layout): { table: Span; cell: Cell } | null {
+	const { ranges, main } = state.selection;
+	if (!layout.ownTables || ranges.length !== 1) return null;
+	const table = layout.tableAt(main.from);
+	if (!table || main.to > table.to || (main.from === table.from && main.to === table.to)) return null;
+	if (main.empty && (main.head === table.from || main.head === table.to)) return null;
+	return { table, cell: cellAt(state.doc, table, main.from) };
+}
+
+/**
+ * Where a change left text right against one of the plugin's own tables that had a blank line above it, as typing on
+ * that line does: the places, in the new text, for a line break that puts the blank line back, at the table's start.
+ * Obsidian does this for its own table, which a line of text right above would end, and only for its own. `tables`
+ * are the tables before the change.
+ */
+export function blankLinesAbove(tr: Transaction, tables: readonly Span[]): number[] {
+	const { changes, newDoc } = tr;
+	const old = tr.startState.doc;
+	const breaks: number[] = [];
+	for (const table of tables) {
+		if (table.from === 0) continue;
+		const above = old.lineAt(table.from - 1);
+		if (!blank(above) || !changes.touchesRange(above.from, table.from)) continue;
+		const from = changes.mapPos(table.from, 1, MapMode.TrackDel);
+		if (from === null || from === 0 || newDoc.lineAt(from).from !== from) continue;
+		if (!blank(newDoc.lineAt(from - 1))) breaks.push(from);
+	}
+	return breaks;
 }

@@ -1,7 +1,7 @@
 import type { EditorState } from '@codemirror/state';
 import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { Cells, Grid, selectedTable } from './decide';
-import { viewLayout } from './layout';
+import { type DrawnTable, ownTables, viewLayout } from './layout';
 import type { Cell, Span } from './table-text';
 import { holdWidth } from './width-copy';
 
@@ -12,7 +12,7 @@ export const CELL_CLASS = 'selectable-tables-cell';
 /** On the selected cell when Enter can't open it; styles.css turns its border red. */
 const REFUSED_CLASS = 'selectable-tables-refused';
 /** On a table while one of its cells is selected; styles.css takes the table's own tint off then. */
-const HOLDS_CELL_CLASS = 'selectable-tables-holds-cell';
+export const HOLDS_CELL_CLASS = 'selectable-tables-holds-cell';
 
 /** What a frozen table has pinned: how many rows and columns, and the room they take. */
 export interface Pinned {
@@ -106,6 +106,8 @@ class CellSelection implements PluginValue, Cells {
 	private side: boolean | null = null;
 	private table: HTMLTableElement | null = null;
 	private cell: HTMLTableCellElement | null = null;
+	/** The plugin's own table drawing the selected cell, where the plugin draws the selected table. */
+	private drawing: DrawnTable | null = null;
 
 	constructor(private readonly view: EditorView) {
 		view.contentDOM.addEventListener('pointerdown', this.onLeave, true);
@@ -114,6 +116,8 @@ class CellSelection implements PluginValue, Cells {
 	}
 
 	get grid(): Grid {
+		const own = this.ownTable();
+		if (own) return own.grid;
 		const table = this.tableElement();
 		return { rows: table?.rows.length ?? 0, columns: (row) => table?.rows[row]?.cells.length ?? 0 };
 	}
@@ -124,6 +128,11 @@ class CellSelection implements PluginValue, Cells {
 		this.selected = cell;
 		this.left = null;
 		statesWithCell.add(view.state);
+		const own = this.ownTable();
+		if (own) {
+			if (this.draw(own)) own.showCell(cell);
+			return;
+		}
 		this.mark(this.tableElement());
 		view.requestMeasure(this.reveal);
 	}
@@ -156,7 +165,8 @@ class CellSelection implements PluginValue, Cells {
 
 	/** Shows the selected cell after its table's freeze changed, which can leave it out of view. */
 	showSelected() {
-		if (this.cell?.isConnected) show(this.cell);
+		if (this.drawing && this.selected) this.drawing.showCell(this.selected);
+		else if (this.cell?.isConnected) show(this.cell);
 	}
 
 	/** Whether the table whose cell is closing was selected from above. */
@@ -173,7 +183,9 @@ class CellSelection implements PluginValue, Cells {
 			this.start = start;
 			if (this.selected) {
 				statesWithCell.add(update.state);
-				this.view.requestMeasure(this.redraw);
+				const own = this.ownTable();
+				if (own) this.draw(own);
+				else this.view.requestMeasure(this.redraw);
 			}
 		} else if (this.side !== null && layout.tableAt(head)?.from === start) {
 			// A cell is open: the note's caret is in the table's text.
@@ -221,6 +233,8 @@ class CellSelection implements PluginValue, Cells {
 		this.selected = null;
 		statesWithCell.delete(this.view.state);
 		this.mark(null);
+		this.drawing?.markCell(null);
+		this.drawing = null;
 	}
 
 	private forget() {
@@ -246,6 +260,31 @@ class CellSelection implements PluginValue, Cells {
 			if (this.cell) show(this.cell);
 		},
 	};
+
+	/** The plugin's own table that is selected, where the plugin draws it. */
+	private ownTable(): DrawnTable | null {
+		const { view } = this;
+		const own = view.state.facet(ownTables);
+		const table = own && selectedTable(view.state, viewLayout(view));
+		return table ? own.table(view, table.from) : null;
+	}
+
+	/**
+	 * Has the plugin's own table draw the selected cell, whenever its row is drawn, as its rows come and go. A cell
+	 * that's gone, after an edit took its row or column, leaves its table selected. Says whether the cell is there.
+	 */
+	private draw(own: DrawnTable): boolean {
+		const { selected } = this;
+		if (!selected || selected.row >= own.grid.rows || selected.column >= own.grid.columns(selected.row)) {
+			this.left = null;
+			this.deselect();
+			return false;
+		}
+		if (this.drawing !== own) this.drawing?.markCell(null);
+		this.drawing = own;
+		own.markCell(selected);
+		return true;
+	}
 
 	/** The selected table's element, found in the content's own block widgets when it's new. */
 	private tableElement(): HTMLTableElement | null {

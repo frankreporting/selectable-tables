@@ -188,3 +188,11 @@
 		transform: none;
 	}
 }
+
+/*
+ * Find's match where a cell's Markdown changes the matched words as drawn: the whole cell shows it, in the color
+ * Obsidian draws round a match in the text. Where the cell draws them as typed, the words carry Obsidian's own class.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own :is(th, td).selectable-tables-match-cell {
+	box-shadow: inset 0 0 0 3px var(--text-accent);
+}

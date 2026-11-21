@@ -191,6 +191,19 @@ export function cellCaret(doc: Text, table: Span, { row, column }: Cell): number
 	return line.from + (cells[Math.min(column, cells.length - 1)]?.to ?? line.length);
 }
 
+/**
+ * The cell holding a place in a table's text: its row, the delimiter line counting as the header's, and the cell
+ * between whose pipes it sits, a pipe counting as the cell before it.
+ */
+export function cellAt(doc: Text, table: Span, pos: number): Cell {
+	const line = doc.lineAt(pos);
+	const index = line.number - doc.lineAt(table.from).number;
+	const offset = pos - line.from;
+	const segments = segmentsIn(line.text);
+	const column = segments.findIndex((segment) => offset <= segment.to);
+	return { row: index <= 1 ? 0 : index - 1, column: Math.max(0, column < 0 ? segments.length - 1 : column) };
+}
+
 /** A cell's text the way its editor shows it: `\|` is a pipe, and `<br>` outside code is a line break. */
 function unescaped(text: string): string {
 	const code = Array.from(text.matchAll(/(`+)[^`]+\1/g), (match) => ({ from: match.index, to: match.index + match[0].length }));

@@ -1,9 +1,12 @@
 import type { Text } from '@codemirror/state';
 import type { EditorView, Rect } from '@codemirror/view';
 import { type App, Component, editorInfoField, getLinkpath, MarkdownRenderer } from 'obsidian';
+import { CELL_CLASS, HOLDS_CELL_CLASS } from '../editor/cells';
+import type { Grid } from '../editor/decide';
 import { OWN_BORDERS_CLASS } from '../editor/freeze';
 import { markedCells } from '../editor/freeze-mark';
-import { rowCells, type Span } from '../editor/table-text';
+import type { DrawnTable } from '../editor/layout';
+import { type Cell, rowCells, type Span } from '../editor/table-text';
 import { fitColumns, measureCell, type Metrics, rowHeight, type Words } from './estimate';
 import { Bar, SLIDE_VARIABLE, SLIDES_CLASS, TIMELINE_VARIABLE, usesBars } from './bar';
 import { blockCount, blockHeight, blockOf, blockRows, blockSpans, bodyLayout, topInBlock } from './blocks';
@@ -11,6 +14,7 @@ import { BOX_CLASS, BOX_ID } from './boxes';
 import { covers, Heights, type RowRange, type Visible, wanted } from './heights';
 import { measure, measureContent } from './metrics';
 import { timed } from './profile';
+import { type LineMatch, type Match, MATCH_SELECTOR, matchSpans, paintMatches } from './matches';
 import { barPlace, type BarPlace, clampSlide, maxSlide, revealDelta } from './sideways';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
@@ -176,7 +180,15 @@ function statusInset(scroller: HTMLElement, pane: DOMRect, box: DOMRect): number
  * pane are in the page, with spacers standing in for the rest. It lives as long as the table does, across changes
  * to the note, and its DOM is kept while it lives, so CodeMirror can put it back when the table scrolls into view.
  */
-export class Model implements Span {
+/** What showing a cell reads from the page: the cell, the pane, and how much of the pane's bottom the status bar hides. */
+interface ShowRead {
+	cell: DOMRect;
+	margin: number;
+	top: number;
+	bottom: number;
+}
+
+export class Model implements Span, DrawnTable {
 	readonly id = ++ids;
 	view: EditorView | null = null;
 	private readonly component = new Component();
@@ -247,6 +259,21 @@ export class Model implements Span {
 	private readonly mediaKey = {};
 	private readonly drawKey = {};
 	private readonly heightKey = {};
+	private readonly showKey = {};
+	private readonly matchKey = {};
+
+	// The navigation layer's marks.
+	/** The selected cell, row 0 being the header, drawn whenever its row is drawn. */
+	private cell: Cell | null = null;
+	private cellEl: HTMLTableCellElement | null = null;
+	/** A cell to bring into view once its row is drawn. */
+	private showing: Cell | null = null;
+	/** Find's matches and the Search pane's in the table, by body row, the header being -1, in their lines. */
+	private matches = new Map<number, LineMatch[]>();
+	/** The first match, to bring into view sideways once its row is drawn. */
+	private revealMatch = false;
+	/** Whether rows may hold matches drawn before, which a row kept out of the page brings back. */
+	private painted = false;
 
 	constructor(
 		private readonly app: App,
@@ -281,6 +308,140 @@ export class Model implements Span {
 	setSelected(on: boolean): void {
 		this.selected = on;
 		for (const block of this.blocks) block?.dom.toggleClass('is-selected', on);
+	}
+
+	// The selected cell and Find ---------------------------------------------------------------------------------
+
+	/** The table's rows and cells for the keys, the header being row 0: every row has every column, as drawn. */
+	get grid(): Grid {
+		const columns = this.columns;
+		return { rows: this.count + 1, columns: () => columns };
+	}
+
+	markCell(cell: Cell | null): void {
+		this.cell = cell;
+		for (const block of this.blocks) block?.table.toggleClass(HOLDS_CELL_CLASS, !!cell);
+		this.paintCell();
+	}
+
+	/** A cell's element, if its row is drawn: row 0 is the header. */
+	private cellElement({ row, column }: Cell): HTMLTableCellElement | null {
+		const tr = row === 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(row - 1);
+		return tr?.instanceOf(HTMLTableRowElement) ? (tr.cells[column] ?? null) : null;
+	}
+
+	/** Puts the selected cell's mark on its element, as its row comes and goes. */
+	private paintCell(): void {
+		const el = this.cell ? this.cellElement(this.cell) : null;
+		if (el === this.cellEl) return;
+		this.cellEl?.removeClass(CELL_CLASS);
+		el?.addClass(CELL_CLASS);
+		this.cellEl = el;
+	}
+
+	/**
+	 * Brings a cell into view, just far enough, as `nearest` does: down the note, and sideways through the table's
+	 * scrollbar or box. A row that isn't drawn, such as row 2,000 after Cmd+↓, is scrolled to from its estimated place,
+	 * which the scroll's own measure draws, and the cell is then shown from where it's really drawn, before the frame is
+	 * painted. The note's scroll, not the cell's own `scrollIntoView`, which would scroll the box that clips the table.
+	 */
+	showCell(cell: Cell): void {
+		const view = this.view;
+		if (!view) return;
+		this.showing = cell;
+		if (!this.cellElement(cell)?.isConnected) this.scrollToEstimate(cell.row - 1);
+		this.requestShow();
+	}
+
+	/** Scrolls the note so a row, -1 for the header, is in the pane by its estimated place, before it's drawn. */
+	private scrollToEstimate(row: number): void {
+		const view = this.view;
+		if (!view || this.stale) return;
+		const index = row < 0 ? 0 : blockOf(this.count, row);
+		const span = blockSpans(view.state.doc, this)[index];
+		if (!span) return;
+		const scroller = view.scrollDOM;
+		const docTop = view.documentTop - scroller.getBoundingClientRect().top - scroller.clientTop + scroller.scrollTop;
+		const top = docTop + view.lineBlockAt(span.from).top + (index === 0 ? (this.metrics?.padTop ?? 0) : 0) + (row < 0 ? 0 : topInBlock(this.heights, row, this.headHeight));
+		const bottom = top + (row < 0 ? this.headHeight : this.heights.get(row));
+		const margin = 16;
+		if (top - margin < scroller.scrollTop) scroller.scrollTop = top - margin;
+		else if (bottom + margin > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom + margin - scroller.clientHeight;
+	}
+
+	/** Shows the cell waiting to be shown, on the next measure, once its row is drawn and measured. */
+	private requestShow(): void {
+		const view = this.view;
+		if (!view || !this.showing) return;
+		view.requestMeasure({ key: this.showKey, read: () => timed('measure', () => this.readShow()), write: (read) => timed('draw', () => this.writeShow(read)) });
+	}
+
+	private readShow(): ShowRead | null {
+		const view = this.view;
+		const el = this.showing && this.cellElement(this.showing);
+		if (!view || !el?.isConnected) return null;
+		const scroller = view.scrollDOM;
+		const pane = scroller.getBoundingClientRect();
+		const cell = el.getBoundingClientRect();
+		const top = pane.top + scroller.clientTop;
+		const bottom = top + scroller.clientHeight - statusInset(scroller, pane, cell);
+		return { cell, margin: parseFloat(getComputedStyle(el).scrollMarginTop) || 0, top, bottom };
+	}
+
+	private writeShow(read: ShowRead | null): void {
+		const view = this.view;
+		if (!view || !read) return;
+		this.showing = null;
+		const { cell, margin, top, bottom } = read;
+		const scroller = view.scrollDOM;
+		if (cell.top - margin < top || cell.height + 2 * margin > bottom - top) scroller.scrollTop -= top - (cell.top - margin);
+		else if (cell.bottom + margin > bottom) scroller.scrollTop += cell.bottom + margin - bottom;
+		this.showSideways(cell.left, cell.right);
+	}
+
+	/**
+	 * Find's matches in the table, and the Search pane's, from the decorations Obsidian lays over the note's text, which
+	 * the table's blocks hide: they're drawn in their cells instead, as the rows holding them are drawn.
+	 */
+	setMatches(matches: readonly Match[], doc: Text): void {
+		const byRow = matchSpans(matches, doc, this);
+		const same = byRow.size === this.matches.size && [...byRow].every(([row, list]) => JSON.stringify(list) === JSON.stringify(this.matches.get(row)));
+		if (same) return;
+		const touched = new Set([...this.matches.keys(), ...byRow.keys()]);
+		this.matches = byRow;
+		this.revealMatch = byRow.size > 0;
+		if (byRow.size) this.painted = true;
+		for (const row of touched) this.paintRowMatches(row);
+		this.requestMatch();
+	}
+
+	/** Draws a drawn row's matches, -1 being the header, and takes off those it had. */
+	private paintRowMatches(row: number): void {
+		const tr = row < 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(row);
+		const view = this.view;
+		if (!view || !tr?.instanceOf(HTMLTableRowElement)) return;
+		const { header } = linesOf(view.state.doc, this);
+		paintMatches(tr, view.state.doc.line(row < 0 ? header : header + 2 + row).text, this.matches.get(row) ?? []);
+	}
+
+	/** Brings the first match into view sideways, once its row is drawn: Obsidian's own scroll takes it into view down the note. */
+	private requestMatch(): void {
+		const view = this.view;
+		if (!view || !this.revealMatch) return;
+		view.requestMeasure({
+			key: this.matchKey,
+			read: () => {
+				const first = Math.min(...this.matches.keys());
+				const tr = first < 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(first);
+				const el = tr?.isConnected ? tr.querySelector(MATCH_SELECTOR) : null;
+				return el ? el.getBoundingClientRect() : null;
+			},
+			write: (rect) => {
+				if (!rect) return;
+				this.revealMatch = false;
+				this.showSideways(rect.left, rect.right);
+			},
+		});
 	}
 
 	destroy(): void {
@@ -511,6 +672,7 @@ export class Model implements Span {
 		dom.addEventListener('load', loaded, true);
 		dom.addEventListener('loadedmetadata', loaded, true);
 		dom.toggleClass('is-selected', this.selected);
+		table.toggleClass(HOLDS_CELL_CLASS, !!this.cell);
 		if (this.dir) dom.dir = this.dir;
 		// Which table a swipe over the block is for.
 		dom.setAttribute(BOX_ID, String(this.id));
@@ -636,6 +798,7 @@ export class Model implements Span {
 				else block.tbody.insertBefore(row, at);
 			}
 		}
+		this.paintCell();
 	}
 
 	/**
@@ -727,6 +890,8 @@ export class Model implements Span {
 		thead.empty();
 		if (row) thead.append(row);
 		this.headText = text;
+		if (this.matches.has(-1)) this.paintRowMatches(-1);
+		this.paintCell();
 		if (row) this.sizeMedia(mediaCells([row]));
 		const dir = row?.cells[0]?.firstElementChild?.getAttribute('dir') ?? '';
 		if (dir !== this.dir) {
@@ -763,6 +928,8 @@ export class Model implements Span {
 				out[i] = tr;
 			});
 		}
+		// Kept rows may hold matches from before, and fresh ones none.
+		if (this.matches.size || this.painted) rows.forEach((row, i) => paintMatches(out[i]!, doc.line(header + 2 + row).text, this.matches.get(row) ?? []));
 		return out;
 	}
 
@@ -897,6 +1064,13 @@ export class Model implements Span {
 		this.sizeMedia(mediaCells(this.rescanMedia ? [...this.rendered.values(), ...Array.from(this.blocks[0]?.thead?.rows ?? [])] : fresh));
 		this.rescanMedia = false;
 		if (need.length || force) view.requestMeasure({ key: this.heightKey, read: () => timed('measure', () => this.readHeights()), write: (measured) => timed('draw', () => this.fixHeights(measured, anchor, anchorTop)) });
+		else this.drawnAll();
+	}
+
+	/** The rows are drawn and measured: a cell or a match waiting for its row is shown now, before the frame is painted. */
+	private drawnAll(): void {
+		this.requestShow();
+		this.requestMatch();
 	}
 
 	/** Measures cells' pictures and players on the next measure, and widens their columns to fit, as Obsidian's table does. */
@@ -973,6 +1147,7 @@ export class Model implements Span {
 			this.headHeight = measured.head;
 			changed = true;
 		}
+		this.drawnAll();
 		if (!changed) return;
 		this.arrange();
 		this.placeBar();

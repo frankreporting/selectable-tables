@@ -1,5 +1,6 @@
 import type { Extension } from '@codemirror/state';
 import { Notice, type Plugin } from 'obsidian';
+import { selectableTables } from './editor/extension';
 import { ownTables } from './own-table';
 
 /** What the plugin saves for the preview: whether it draws tables itself. */
@@ -10,7 +11,8 @@ interface Saved {
 /**
  * The preview switch: a command that has the plugin draw Live Preview tables itself, for the whole vault, with no
  * restart. Only a preview build has it (esbuild.config.mjs); a release build puts preview-off.ts here. With the
- * switch on, the plugin's own table takes the place of its keys and frozen tables, which don't work on it yet.
+ * switch on, the plugin's own table takes the place of Obsidian's, and the keys run on it. Frozen tables don't work on
+ * it yet, and nor do the freeze items in a table's menu, which is Obsidian's.
  * The setting is saved with the plugin's data, which Sync can carry to other devices.
  */
 export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {
@@ -28,10 +30,11 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 		queueMicrotask(() => use(false));
 	});
 
+	const keys = selectableTables({ frozen: false });
 	const use = (drawing: boolean) => {
 		on = drawing;
 		extensions.length = 0;
-		extensions.push(...(drawing ? [own.extension] : usual));
+		extensions.push(...(drawing ? [own.extension, keys] : usual));
 		app.workspace.updateOptions();
 	};
 

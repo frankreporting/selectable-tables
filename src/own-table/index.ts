@@ -1,10 +1,9 @@
 import { ensureSyntaxTree, forceParsing, type Language, language, syntaxTree } from '@codemirror/language';
-import { EditorSelection, EditorState, type Extension, Prec, RangeSet, StateEffect, StateField, type Text, type Transaction } from '@codemirror/state';
+import { EditorState, type Extension, Prec, RangeSet, StateEffect, StateField, type Text, type Transaction } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, type PluginValue, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
-import { type App, editorEditorField, Platform } from 'obsidian';
-import { noCells, stopsEdit, typeBelow, typesText } from '../editor/decide';
-import { type Layout, viewLayout } from '../editor/layout';
+import { type App, editorEditorField } from 'obsidian';
+import { ownTables as ownTablesFacet } from '../editor/layout';
 import { frontmatterEnd, type Span } from '../editor/table-text';
 import { endOfNextLine, findTables, type Found, lineChange, updateTables } from './find';
 import { OBSIDIAN_ROW, ROW_CLASS } from './hide-rows';
@@ -18,20 +17,36 @@ import { profile, timed } from './profile';
 import { Swipes, wheelStep } from './sideways';
 import { linesOf } from './shape';
 import { lineClassProp, treeRows } from './tree-rows';
+import { FIND_CLASS, FLASH_CLASS, type Match } from './matches';
 
 /**
  * The plugin's own table, for Live Preview notes: it draws each table Obsidian would draw, as one block, with only
- * the rows near the pane in the page. A preview, behind a switch (preview.ts): it can't edit a cell, freeze a table
- * or run the table keys yet, and Obsidian's table controls aren't there.
+ * the rows near the pane in the page. A preview, behind a switch (preview.ts): it can't edit a cell or freeze a table
+ * yet, and Obsidian's table controls aren't there. The navigation layer (src/editor) runs on it, reading its tables
+ * through `ownTables` in layout.ts.
  */
-
-/** Where Ctrl+Option types nothing, so Ctrl+Alt isn't AltGr. */
-const APPLE = Platform.isMacOS || Platform.isIosApp;
 
 /** On every editor while the plugin runs. styles.css scopes what it changes in tables to it. */
 const ACTIVE_CLASS = 'selectable-tables';
-/** On the editor while a table is selected whole; styles.css hides the caret and frames the table. */
-const SELECTED_CLASS = 'selectable-tables-selected';
+
+/**
+ * Find's matches and the Search pane's in the tables' text, from the decorations Obsidian lays over the note, which
+ * the tables' blocks hide. Obsidian keeps them in a field, so they're a set of the decorations facet, not a function.
+ */
+function matchesIn(state: EditorState, spans: readonly Span[]): Match[][] {
+	const found: Match[][] = spans.map(() => []);
+	if (!spans.length) return found;
+	for (const source of state.facet(EditorView.decorations)) {
+		if (typeof source === 'function') continue;
+		spans.forEach((span, index) => {
+			source.between(span.from, span.to, (from, to, decoration) => {
+				const name = (decoration.spec as { class?: unknown }).class;
+				if (name === FIND_CLASS || name === FLASH_CLASS) found[index]!.push({ from, to, flash: name === FLASH_CLASS });
+			});
+		});
+	}
+	return found;
+}
 
 /**
  * The tables of one editor's state, where each was in this state, and the syntax tree they were found in. The
@@ -233,35 +248,23 @@ export function ownTables(app: App, failed: () => void) {
 	};
 
 	const attributes = EditorView.editorAttributes.of((view) => ({
-		class: [ACTIVE_CLASS, selectedModel(view.state) ? SELECTED_CLASS : '', usesBars(view) ? BARS_CLASS : ''].filter(Boolean).join(' '),
+		class: [ACTIVE_CLASS, usesBars(view) ? BARS_CLASS : ''].filter(Boolean).join(' '),
 	}));
 
 	/**
-	 * Typing over a table selected whole does nothing, as with the plugin's keys: it would replace the table with a
-	 * letter. Typing with a keydown goes below it (`typing`); this stops the rest, such as the emoji picker's.
-	 * Deleting, cutting and pasting still act on it, and so does anything that isn't typing.
+	 * The tables, whole, for the navigation layer: its keys, its edit guard, and the selected cell, which the table
+	 * draws. Typing over a table selected whole, and the guard on it, are the navigation layer's, as on Obsidian's.
 	 */
-	const keepSelectedTable = EditorState.transactionFilter.of((tr) => {
-		if (!tr.docChanged) return tr;
-		const model = selectedModel(tr.startState);
-		return model && stopsEdit(tr, model, false) ? [] : tr;
+	const forKeys = ownTablesFacet.of({
+		spans: (state) => (drawsTables(state) ? (state.field(tables, false)?.spans ?? null) : null),
+		table(view, from) {
+			const value = view.state.field(tables, false);
+			const index = value?.spans.findIndex((span) => span.from === from) ?? -1;
+			return index >= 0 ? (value!.models[index] ?? null) : null;
+		},
 	});
 
-	/**
-	 * A key that types on a table selected whole starts a new paragraph below it, as with the plugin's keys, and
-	 * its text goes there: the caret moves on the key's keydown, before the text, and before an input method's
-	 * composition starts, which mustn't be touched once it runs.
-	 */
 	const tableEvents = EditorView.domEventHandlers({
-		keydown(event, view) {
-			const model = event.defaultPrevented || event.isComposing || !typesText(event, APPLE) ? null : selectedModel(view.state);
-			if (!model) return false;
-			// The table as a whole: CodeMirror's layout holds a table of more than 100 rows as several blocks.
-			const layout: Layout = { ...viewLayout(view), tableAt: (pos) => (pos >= model.from && pos <= model.to ? { from: model.from, to: model.to } : null) };
-			const action = typeBelow({ state: view.state, layout, cells: noCells });
-			if (action?.type === 'below') view.dispatch({ changes: { from: action.from, to: action.to, insert: action.insert }, selection: EditorSelection.cursor(action.pos), scrollIntoView: true });
-			return false;
-		},
 		/**
 		 * A press on the box around a table's blocks, beside the table, selects it, as a press on a table's one block
 		 * does. CodeMirror would put the caret at a block's edge, in the table's text. Not on the box's scrollbar.
@@ -356,6 +359,15 @@ export function ownTables(app: App, failed: () => void) {
 				const selected = selectedModel(update.state);
 				for (const model of this.models) model.setSelected(model === selected);
 			}
+			// Find and the Search pane mark their matches with effects; an edit moves them.
+			if (update.docChanged || update.transactions.some((tr) => tr.effects.length > 0)) {
+				const spans = update.state.field(tables, false)?.spans ?? [];
+				const matches = matchesIn(update.state, spans);
+				// A table not drawn yet takes them too, for when Find's scroll brings it into view.
+				this.models.forEach((model, index) => {
+					if (!model.view || model.view === update.view) model.setMatches(matches[index] ?? [], update.state.doc);
+				});
+			}
 			if (update.geometryChanged) {
 				update.view.requestMeasure({
 					key: this,
@@ -412,7 +424,7 @@ export function ownTables(app: App, failed: () => void) {
 	});
 
 	return {
-		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, keepSelectedTable, Prec.highest(tableEvents)] : unsupported) as Extension,
+		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, forKeys, Prec.highest(tableEvents)] : unsupported) as Extension,
 		/**
 		 * Obsidian's `css-change`, a new theme, font or snippet, or a font that finished loading: every table is laid
 		 * out again, with text measured anew, since a font that loads measures differently under the same name.

@@ -3287,6 +3287,433 @@
 						await sleep(800);
 					}
 				}
+
+				{
+					// --- Keys on the plugin's table (STA-80): the navigation layer runs on it, across its blocks. ↑ and ↓ stop
+					// on a table with a tap, Enter selects a cell but opens none yet, Find shows its match in the cell, and a
+					// caret put inside a table by anything but a key selects the table and that cell.
+					preview.use(true);
+					await sleep(400);
+					// After every step: nothing crashed, every drawn row shows its line, and a selected cell is outlined once.
+					const steady = (view) => {
+						const marks = view.contentDOM.querySelectorAll('.selectable-tables-cell').length;
+						return { crashed: crashed(view), rows: rowsRight(view).length, marks };
+					};
+					const steadyOk = (s, cell) => s.crashed === 0 && s.rows === 0 && (cell ? s.marks === 1 : s.marks === 0);
+					const whole = (view, model) => {
+						const { from, to } = view.state.selection.main;
+						return view.state.selection.ranges.length === 1 && from === model.from && to === model.to;
+					};
+					const cellOf = (view) => {
+						const el = view.contentDOM.querySelector('.selectable-tables-cell');
+						if (!el) return null;
+						const tr = el.parentElement;
+						const label = tr.parentElement.localName === 'thead' ? 0 : Number(tr.getAttribute('aria-rowindex')) - 1;
+						return `${label},${el.cellIndex}`;
+					};
+					const inPane = (view, el) => {
+						const r = el.getBoundingClientRect();
+						const p = view.scrollDOM.getBoundingClientRect();
+						return r.top >= p.top - 1 && r.bottom <= p.bottom + 1;
+					};
+					const lineOf = (view, text) => {
+						for (let n = 1; n <= view.state.doc.lines; n++) if (view.state.doc.line(n).text.startsWith(text)) return n;
+						return -1;
+					};
+					const tint = (model) => firstBox(model).classList.contains('is-selected') && view.dom.classList.contains('selectable-tables-selected');
+
+					// ↑ and ↓ stop on a table with a tap, and pass it held.
+					view = await open('Cell moves');
+					const cellsText = view.state.doc.toString();
+					let seed = models(view)[0];
+					const aboveSeed = view.state.doc.lineAt(seed.from).number - 1;
+					const belowSeed = view.state.doc.lineAt(seed.to).number + 1;
+					await caretOnLine(view, aboveSeed);
+					await press(view, 'ArrowDown');
+					const stopped = whole(view, seed) && view.state.selection.main.head === seed.to && tint(seed);
+					await press(view, 'ArrowDown');
+					const onBelow = sel(view).line === belowSeed && sel(view).anchor === sel(view).head;
+					await press(view, 'ArrowUp');
+					const fromBelow = whole(view, seed) && view.state.selection.main.head === seed.from;
+					await press(view, 'ArrowUp');
+					check('Own 30: a tap of ↓ above a table selects it, ↓ again goes to the line below, ↑ selects it from below, ↑ again goes back above', stopped && onBelow && fromBelow && sel(view).line === aboveSeed, { stopped, onBelow, fromBelow, line: sel(view).line, steady: steady(view) });
+					await press(view, 'ArrowDown', { repeat: true });
+					check('Own 30: a held ↓ passes the table in one press', sel(view).line === belowSeed && sel(view).anchor === sel(view).head, sel(view));
+					await caretOnLine(view, aboveSeed);
+					await press(view, 'ArrowRight');
+					const rightSelects = whole(view, seed);
+					await press(view, 'ArrowRight');
+					const rightLeaves = sel(view).line === belowSeed;
+					await press(view, 'ArrowLeft');
+					const leftSelects = whole(view, seed);
+					await press(view, 'ArrowLeft');
+					check('Own 31: → and ← at the table\'s edge select it, and leave it again', rightSelects && rightLeaves && leftSelects && sel(view).line === aboveSeed, { rightSelects, rightLeaves, leftSelects, line: sel(view).line });
+
+					// Backspace below selects the table, a second removes it, and Undo brings it back.
+					await caretOnLine(view, belowSeed);
+					await press(view, 'Backspace');
+					const backSelects = whole(view, seed) && view.state.doc.toString() === cellsText;
+					await press(view, 'Backspace');
+					const removed = !view.state.doc.toString().includes('| A1   |');
+					await press(view, 'z', { metaKey: true, code: 'KeyZ' });
+					await settle();
+					check('Own 32: Backspace on the line below a table selects it and deletes nothing, a second removes it, and Undo brings it back', backSelects && removed && view.state.doc.toString() === cellsText, { backSelects, removed, back: view.state.doc.toString() === cellsText });
+					await restore(view, cellsText);
+
+					// Delete above does nothing; typing above keeps a blank line between the text and the table, in one undo step.
+					seed = models(view)[0];
+					await caretOnLine(view, aboveSeed);
+					await press(view, 'Delete');
+					const deleteQuiet = view.state.doc.toString() === cellsText && !whole(view, seed);
+					await caretOnLine(view, aboveSeed);
+					await realType('w');
+					const typedAbove = view.state.doc.toString();
+					const kept = typedAbove.includes('## Seed trays\nw\n\n| Tray') && models(view).length === models(view).length && ownBoxes(view).length > 0;
+					await press(view, 'z', { metaKey: true, code: 'KeyZ' });
+					await settle();
+					check('Own 33: Delete at the end of the blank line above a table does nothing', deleteQuiet);
+					check('Own 33: typing on the blank line above a table keeps a blank line under the text, and one Undo takes both back', kept && view.state.doc.toString() === cellsText, { kept, typed: JSON.stringify(typedAbove.slice(typedAbove.indexOf('## Seed trays'), typedAbove.indexOf('## Seed trays') + 26)), undone: view.state.doc.toString() === cellsText });
+					await restore(view, cellsText);
+					// Backspace at the start of that blank line moves the caret up, and deletes nothing.
+					await caretOnLine(view, aboveSeed);
+					await press(view, 'Backspace');
+					check('Own 33: Backspace on the blank line above a table, under text, moves the caret up and deletes nothing', view.state.doc.toString() === cellsText && sel(view).line === aboveSeed - 1, sel(view));
+
+					// The caret keeps its place across a table it stopped on.
+					view = await open('Two report tables');
+					const startLine = lineOf(view, 'Plants checked');
+					const shortLine = lineOf(view, 'A short line between the tables');
+					const placeAfter = async (presses) => {
+						const line = view.state.doc.line(startLine);
+						view.focus();
+						view.dispatch({ selection: { anchor: line.from + 'Plants checked'.length }, scrollIntoView: true });
+						await settle();
+						for (let i = 0; i < presses; i++) await press(view, 'ArrowDown');
+						const { head } = view.state.selection.main;
+						return { line: view.state.doc.lineAt(head).number, x: view.coordsAtPos(head)?.left, start: view.coordsAtPos(view.state.doc.lineAt(head).from)?.left };
+					};
+					const startX = (() => {
+						const line = view.state.doc.line(startLine);
+						return view.coordsAtPos(line.from + 'Plants checked'.length)?.left;
+					})();
+					const across = await placeAfter(4);
+					preview.use(false);
+					await sleep(500);
+					view = await open('Two report tables');
+					const stock = await placeAfter(3);
+					preview.use(true);
+					await sleep(500);
+					view = await open('Two report tables');
+					// With the switch off, passing a table loses the place across and lands at the line's start: kept for reference.
+					check('Own 34: ↓ four times past a table it stops on lands at the place across it started at, within 1 px', across.line === shortLine && Math.abs(across.x - startX) <= 1, { across, stock, startX });
+
+					// A held ↓ and ↑ pass every table in Long note, and never select one.
+					view = await open('Long note');
+					await caretOnLine(view, 1);
+					let selectedOnce = false;
+					let presses = 0;
+					const heldStart = performance.now();
+					while (sel(view).line < view.state.doc.lines && presses < 2000) {
+						await press(view, 'ArrowDown', { repeat: true });
+						presses++;
+						if (sel(view).anchor !== sel(view).head) selectedOnce = true;
+					}
+					const downMs = performance.now() - heldStart;
+					let upSelected = false;
+					let upPresses = 0;
+					while (sel(view).line > 1 && upPresses < 2000) {
+						await press(view, 'ArrowUp', { repeat: true });
+						upPresses++;
+						if (sel(view).anchor !== sel(view).head) upSelected = true;
+					}
+					check('Own 35: a held ↓ and ↑ go through Long note past every table without selecting one', !selectedOnce && !upSelected && sel(view).line === 1 && steadyOk(steady(view)), { presses, upPresses, selectedOnce, upSelected, downMs: Math.round(downMs) });
+
+					// Selecting a 2,000-row table from above doesn't move the note, and ↓ passes all its rows.
+					view = await open('Table 2000 by 12');
+					const bigText = view.state.doc.toString();
+					let big = models(view).find((model) => model.count > 1000);
+					const aboveBig = view.state.doc.lineAt(big.from).number - 1;
+					await caretOnLine(view, aboveBig);
+					view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(aboveBig).from, { y: 'start', yMargin: 40 }) });
+					await sleep(300);
+					let top = view.scrollDOM.scrollTop;
+					await press(view, 'ArrowRight');
+					await frames(3);
+					check('Own 36: → on the line above the 2,000-row table selects it, and the note doesn\'t move', whole(view, big) && Math.abs(view.scrollDOM.scrollTop - top) <= 1, { moved: view.scrollDOM.scrollTop - top });
+					await press(view, 'Escape');
+					top = view.scrollDOM.scrollTop;
+					await press(view, 'ArrowDown');
+					await frames(3);
+					const downSelects = whole(view, big) && Math.abs(view.scrollDOM.scrollTop - top) <= 1;
+					let t0 = performance.now();
+					await press(view, 'ArrowDown');
+					const passMs = performance.now() - t0 - 120;
+					const pastAll = sel(view).line === view.state.doc.lineAt(big.to).number + 1;
+					await press(view, 'ArrowUp');
+					check('Own 36: ↓ selects it too without moving the note, ↓ again puts the caret below all 2,000 rows, and ↑ selects it from below', downSelects && pastAll && whole(view, big) && view.state.selection.main.head === big.from, { downSelects, pastAll, passMs: Math.round(passMs) });
+
+					// Cells: Enter selects one, the arrows, Tab and Shift+Tab move it, and nothing opens or changes.
+					view = await open('Cell moves');
+					seed = models(view)[0];
+					await caretOnLine(view, aboveSeed);
+					await press(view, 'ArrowDown');
+					await press(view, 'Enter');
+					const first = cellOf(view);
+					const tintOff = getComputedStyle(firstBox(seed).querySelector('table'), '::after').display === 'none';
+					const walk = [];
+					for (const key of ['ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowUp']) {
+						await press(view, key);
+						walk.push(cellOf(view));
+					}
+					await press(view, 'Tab');
+					walk.push(cellOf(view));
+					await press(view, 'Tab', { shiftKey: true });
+					await press(view, 'Tab', { shiftKey: true });
+					walk.push(cellOf(view));
+					check('Own 37: Enter on the selected table selects its first cell and takes the tint off; the arrows stop at the edges, Tab and Shift+Tab wrap between rows', first === '0,0' && tintOff && walk.join(' ') === '0,1 0,2 0,2 1,2 2,2 3,2 4,2 4,2 4,1 3,1 3,2 3,0' && view.state.doc.toString() === cellsText && steadyOk(steady(view), true), { first, tintOff, walk: walk.join(' '), steady: steady(view) });
+					await press(view, 'Enter');
+					const enterQuiet = cellOf(view) === '3,0' && view.state.doc.toString() === cellsText;
+					await press(view, 'Escape');
+					const backToTable = !cellOf(view) && whole(view, seed) && tint(seed);
+					await press(view, 'Enter');
+					const sameCell = cellOf(view) === '3,0';
+					await press(view, 'Escape');
+					await press(view, 'Escape');
+					check('Own 38: Enter on a selected cell does nothing yet; Escape goes back to the table, Enter to the same cell, and Escape twice to the line above', enterQuiet && backToTable && sameCell && sel(view).line === aboveSeed, { enterQuiet, backToTable, sameCell, line: sel(view).line });
+
+					// Copy gives the cell's Markdown; Cut and Paste do nothing; Toggle checkbox and Toggle comment change nothing; typing goes below.
+					await caretOnLine(view, aboveSeed);
+					await press(view, 'ArrowDown');
+					await press(view, 'Enter');
+					await press(view, 'ArrowDown');
+					await press(view, 'ArrowRight');
+					await press(view, 'ArrowRight');
+					const copied = clipboard(view, 'copy');
+					const cut = clipboard(view, 'cut');
+					const pasted = clipboard(view, 'paste', 'pasted');
+					for (const id of ['editor:toggle-checklist-status', 'editor:toggle-comments']) app.commands.executeCommandById(id);
+					await settle();
+					check('Own 39: on a selected cell, Copy gives its Markdown, and Cut, Paste, Toggle checkbox and Toggle comment change nothing', copied.text === '**Keep damp**' && cut.taken && pasted.taken && view.state.doc.toString() === cellsText && cellOf(view) === '1,2', { copied, cut: cut.taken, pasted: pasted.taken, cell: cellOf(view) });
+					await realType('q');
+					const below = view.state.doc.toString();
+					const belowOk = below.slice(0, seed.to) === cellsText.slice(0, seed.to) && /^\n\nq\n/.test(below.slice(seed.to));
+					await press(view, 'z', { metaKey: true, code: 'KeyZ' });
+					await settle();
+					check('Own 39: a letter typed on a selected cell starts a paragraph below the table, and Undo takes it back with the table selected', belowOk && view.state.doc.toString() === cellsText && whole(view, models(view)[0]), { belowOk, after: JSON.stringify(below.slice(seed.to, seed.to + 8)) });
+					await restore(view, cellsText);
+
+					// A held ↓ through the 2,000-row table: the cell moves a row at a time across the seams, and stays in view.
+					view = await open('Table 2000 by 12');
+					big = models(view).find((model) => model.count > 1000);
+					await caretOnLine(view, aboveBig);
+					await press(view, 'ArrowDown');
+					await press(view, 'Enter');
+					let heldBad = null;
+					for (let i = 1; i <= 230 && !heldBad; i++) {
+						await press(view, 'ArrowDown', { repeat: true });
+						await frames(1);
+						const el = view.contentDOM.querySelector('.selectable-tables-cell');
+						if (cellOf(view) !== `${i},0` || !el || !inPane(view, el) || !steadyOk(steady(view), true)) heldBad = { i, cell: cellOf(view), inPane: el && inPane(view, el), steady: steady(view) };
+					}
+					check('Own 40: holding ↓ on a selected cell moves it a row at a time past rows 100 and 200, with the cell in view and outlined after every press', !heldBad, heldBad);
+
+					// Cmd+↓ to row 2,000, drawn and in view in the frame it's painted; Cmd+↑ back to the header; Page Down and Page Up the same.
+					const jump = async (key, mods, want) => {
+						const start = performance.now();
+						await view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true, ...mods }));
+						await frames(1);
+						const el = view.contentDOM.querySelector('.selectable-tables-cell');
+						const first = { cell: cellOf(view), inPane: !!el && inPane(view, el), ms: Math.round(performance.now() - start) };
+						await sleep(200);
+						return { ...first, ok: first.cell === want && first.inPane && steadyOk(steady(view), true) };
+					};
+					// The header is row 0, so the 2,000th row is the last body row.
+					const lastRow = `${big.count},0`;
+					const jumps = {
+						end: await jump('ArrowDown', { metaKey: true }, lastRow),
+						start: await jump('ArrowUp', { metaKey: true }, '0,0'),
+						pageDown: await jump('PageDown', {}, lastRow),
+						pageUp: await jump('PageUp', {}, '0,0'),
+					};
+					check('Own 41: Cmd+↓ and Page Down jump a selected cell to row 2,000, and Cmd+↑ and Page Up back to the header, each in view and outlined in the first frame after the key', Object.values(jumps).every((j) => j.ok && j.ms < 100), jumps);
+
+					// End and Home go to the row's ends, scrolling the table sideways to show the cell; → across shows each cell.
+					await press(view, 'ArrowDown');
+					const sideBox = (model) => (model.boxes[0].parentElement.classList.contains('selectable-tables-blocks') ? model.boxes[0].parentElement : model.boxes[0]);
+					const sideways = () => {
+						const el = view.contentDOM.querySelector('.selectable-tables-cell');
+						const box = sideBox(big).getBoundingClientRect();
+						const r = el?.getBoundingClientRect();
+						return !!r && r.left >= box.left - 1 && r.right <= box.right + 1;
+					};
+					await press(view, 'End');
+					await frames(3);
+					const endShown = cellOf(view) === '1,11' && sideways();
+					await press(view, 'Home');
+					await frames(3);
+					const homeShown = cellOf(view) === '1,0' && sideways() && big.sideways().scroll <= 1;
+					let acrossOk = true;
+					for (let c = 1; c < 12; c++) {
+						await press(view, 'ArrowRight');
+						await frames(2);
+						if (cellOf(view) !== `1,${c}` || !sideways()) acrossOk = false;
+					}
+					check('Own 42: End, Home and → on a selected cell scroll the wide table sideways to show it', endShown && homeShown && acrossOk, { endShown, homeShown, acrossOk, scroll: big.sideways() });
+					await press(view, 'Home');
+
+					// The cell stays outlined as its row leaves the pane and comes back, and ↓ from far away brings the note back to it.
+					view.scrollDOM.scrollTop += 30000;
+					await sleep(400);
+					view.scrollDOM.scrollTop -= 30000;
+					await sleep(400);
+					const backOutlined = cellOf(view) === '1,0';
+					view.scrollDOM.scrollTop += 20000;
+					await sleep(400);
+					await press(view, 'ArrowDown');
+					await frames(3);
+					const el2 = view.contentDOM.querySelector('.selectable-tables-cell');
+					check('Own 43: the selected cell stays outlined as its row scrolls out and back, and ↓ from far away shows the cell below', backOutlined && cellOf(view) === '2,0' && !!el2 && inPane(view, el2), { backOutlined, cell: cellOf(view) });
+					await press(view, 'Escape');
+					await press(view, 'Escape');
+
+					// Find: the table stays drawn and shows the match in its cell, and the match's cell comes into view sideways.
+					const findIn = async () => {
+						app.workspace.getLeaf(false).view.showSearch(false);
+						await settle();
+						return Object.values(app.workspace.getLeaf(false).view.editMode).find((value) => value?.searchInputEl);
+					};
+					const search = async (find, text) => {
+						find.searchInputEl.value = text;
+						find.searchInputEl.dispatchEvent(new Event('input'));
+						await sleep(400);
+					};
+					view = await open('Cell moves');
+					let find = await findIn();
+					await search(find, 'Frost');
+					const wide = models(view).find((model) => model.from > view.state.doc.toString().indexOf('## Wide table'));
+					const findHighlight = () => Array.from(view.contentDOM.querySelectorAll('.selectable-tables-own span.obsidian-search-match-highlight')).filter((span) => span.isConnected);
+					const highlighted = findHighlight();
+					const firstMatch = highlighted.length === 1 && highlighted[0].textContent === 'Frost' && highlighted[0].closest('td').cellIndex === 7;
+					find.findNext();
+					await sleep(500);
+					const next = findHighlight();
+					const nextBox = sideBox(wide).getBoundingClientRect();
+					const nextRect = next[0]?.getBoundingClientRect();
+					const nextShown = next.length === 1 && next[0].closest('td').cellIndex === 15 && nextRect.left >= nextBox.left - 1 && nextRect.right <= nextBox.right + 1;
+					check('Own 44: Find keeps the table drawn and highlights the matched word in its cell, and the next match at the table\'s far right comes into view sideways', ownBoxes(view).length >= 3 && firstMatch && nextShown, { firstMatch, nextShown, count: next.length, scroll: wide.sideways() });
+					const matchStart = view.state.doc.toString().indexOf('Frost', view.state.doc.toString().indexOf('Frost') + 1);
+					find.searchInputEl.focus();
+					find.hide();
+					await sleep(300);
+					const afterFind = { cell: cellOf(view), whole: whole(view, wide) };
+					await press(view, 'ArrowLeft');
+					const leftOne = cellOf(view);
+					await press(view, 'Escape');
+					await press(view, 'Escape');
+					check('Own 45: closing Find on a match selects its table and the cell holding it, and the keys go on from there', afterFind.cell === '1,15' && afterFind.whole && leftOne === '1,14' && view.state.selection.main.empty && (view.state.selection.main.head < wide.from || view.state.selection.main.head > wide.to), { afterFind, leftOne, matchStart });
+
+					// Find in the 2,000-row table: row 1,500's match is drawn, highlighted and on screen at once.
+					view = await open('Table 2000 by 12');
+					big = models(view).find((model) => model.count > 1000);
+					find = await findIn();
+					t0 = performance.now();
+					find.searchInputEl.value = 'Row 1500 ';
+					find.searchInputEl.dispatchEvent(new Event('input'));
+					let farMatch = null;
+					for (let i = 0; i < 30 && !farMatch; i++) {
+						await frames(1);
+						const span = findHighlight()[0];
+						if (span && inPane(view, span)) farMatch = { ms: Math.round(performance.now() - t0), text: span.textContent };
+					}
+					find.searchInputEl.focus();
+					find.hide();
+					await sleep(300);
+					check('Own 46: Find on row 1,500 of the 2,000-row table shows the match highlighted in its cell, on screen, within 100 ms, and closing Find selects that cell', !!farMatch && farMatch.ms < 100 && cellOf(view) === '1500,0', { farMatch, cell: cellOf(view) });
+					await press(view, 'Escape');
+					await press(view, 'Escape');
+
+					// A Search pane result in a table flashes in its cell and selects that cell.
+					view = await open('Cell moves');
+					const wideNow = models(view).find((model) => model.from > view.state.doc.toString().indexOf('## Wide table'));
+					const frostAt = view.state.doc.toString().indexOf('Frost', wideNow.from);
+					app.workspace.getLeaf(false).view.setEphemeralState({ match: { content: view.state.doc.toString(), matches: [[frostAt, frostAt + 5]] } });
+					await sleep(500);
+					const flashed = view.contentDOM.querySelectorAll('.selectable-tables-own span.is-flashing').length;
+					check('Own 47: a Search pane result in a table flashes in its cell, and selects its table and that cell', cellOf(view) === '1,7' && whole(view, wideNow) && flashed === 1, { cell: cellOf(view), flashed });
+					await press(view, 'Escape');
+					await press(view, 'Escape');
+
+					// Replace goes through, and the row shows the new text; Undo puts it back.
+					app.workspace.getLeaf(false).view.showSearch(true);
+					await settle();
+					find = Object.values(app.workspace.getLeaf(false).view.editMode).find((value) => value?.searchInputEl);
+					await search(find, 'Frost');
+					find.replaceInputEl.value = 'Snow';
+					find.replaceCurrentMatch();
+					await sleep(400);
+					const replaced = view.state.doc.toString().includes('| Snow most of the day |');
+					const shownSnow = Array.from(view.contentDOM.querySelectorAll('.selectable-tables-own td')).some((td) => td.textContent.trim() === 'Snow most of the day');
+					find.hide();
+					await sleep(200);
+					await press(view, 'Escape');
+					await press(view, 'Escape');
+					await press(view, 'z', { metaKey: true, code: 'KeyZ' });
+					await settle();
+					check('Own 48: Replace changes the matched cell, the row shows the new text, and Undo puts it back', replaced && shownSnow && view.state.doc.toString() === cellsText, { replaced, shownSnow, undone: view.state.doc.toString() === cellsText });
+					await restore(view, cellsText);
+
+					// 60 seeded random steps: keys, cell moves, Find, edits elsewhere, Undo and Redo, on the 2,000-row table.
+					view = await open('Table 2000 by 12');
+					let seedValue = 80;
+					const random = () => {
+						seedValue = (seedValue * 1103515245 + 12345) % 2147483648;
+						return seedValue / 2147483648;
+					};
+					const keysToPress = [['ArrowDown'], ['ArrowUp'], ['ArrowLeft'], ['ArrowRight'], ['Enter'], ['Escape'], ['Tab'], ['Tab', { shiftKey: true }], ['End'], ['Home'], ['PageDown'], ['PageUp'], ['ArrowDown', { metaKey: true }], ['ArrowUp', { metaKey: true }], ['ArrowDown', { repeat: true }]];
+					const fuzz = [];
+					let fuzzBad = null;
+					for (let step = 0; step < 60 && !fuzzBad; step++) {
+						const roll = random();
+						const big2 = models(view).find((model) => model.count > 1000);
+						let what;
+						if (roll < 0.55) {
+							const [key, mods] = keysToPress[Math.floor(random() * keysToPress.length)];
+							what = `${key}${mods ? JSON.stringify(mods) : ''}`;
+							await press(view, key, mods);
+						} else if (roll < 0.65) {
+							what = 'select table';
+							await caretOnLine(view, view.state.doc.lineAt(big2.from).number - 1);
+							await press(view, 'ArrowDown');
+						} else if (roll < 0.75) {
+							const line = view.state.doc.line(1 + Math.floor(random() * 2));
+							what = `edit line ${line.number}`;
+							view.dispatch({ changes: { from: line.to, insert: ' x' }, userEvent: 'input.type' });
+						} else if (roll < 0.85) {
+							what = random() < 0.5 ? 'undo' : 'redo';
+							app.commands.executeCommandById(what === 'undo' ? 'editor:undo' : 'editor:redo');
+						} else {
+							what = 'find';
+							const f = await findIn();
+							f.searchInputEl.value = `Row ${1 + Math.floor(random() * 2000)} `;
+							f.searchInputEl.dispatchEvent(new Event('input'));
+							await sleep(200);
+							f.searchInputEl.focus();
+							f.hide();
+						}
+						await settle();
+						await frames(2);
+						const s = steady(view);
+						fuzz.push(what);
+						const selectedCell = view.contentDOM.querySelector('.selectable-tables-holds-cell');
+						if (s.crashed || s.rows || s.marks > 1 || (selectedCell && s.marks !== 1)) fuzzBad = { step, what, steady: s, last: fuzz.slice(-6) };
+					}
+					check('Own 49: after each of 60 seeded random keys, cell moves, Find, edits elsewhere, Undo and Redo, nothing crashed, the drawing matches the text, and a selected cell is outlined once', !fuzzBad, fuzzBad);
+					await press(view, 'Escape');
+					await press(view, 'Escape');
+					await restore(view, bigText);
+					preview.use(false);
+					await sleep(300);
+				}
 			} finally {
 				preview.skew(0);
 				preview.use(false);

@@ -1,10 +1,10 @@
-import { EditorSelection, EditorState, Extension, Prec, SelectionRange, TransactionSpec } from '@codemirror/state';
+import { EditorSelection, EditorState, Extension, Prec, SelectionRange, Transaction, TransactionSpec } from '@codemirror/state';
 import { EditorView, KeyBinding, keymap, ViewPlugin } from '@codemirror/view';
 import { type Editor, editorEditorField, editorInfoField, editorLivePreviewField, Notice, Platform } from 'obsidian';
 import { cellFollowsCaret, cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText } from './decide';
+import { Action, arrow, backspace, blankLinesAbove, caretInTable, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText } from './decide';
 import { frozenTables } from './freeze';
-import { viewLayout } from './layout';
+import { ownSpans, viewLayout } from './layout';
 import type { Span } from './table-text';
 
 /** On the editor while a table is selected; styles.css hides the caret then, as Obsidian does for images. */
@@ -24,11 +24,19 @@ function active(view: EditorView): boolean {
 	return view.hasFocus && !view.compositionStarted && view.state.field(editorLivePreviewField, false) === true && !cellWidget(view);
 }
 
+/** Whether the key being handled is a held key's repeat, read as each key comes in, before its bindings run. */
+let keyRepeat = false;
+
+/** Whether Vim is driving: its normal and visual modes. */
+const vimDriving = (view: EditorView) => view.scrollDOM.classList.contains(VIM_CLASS);
+
 function context(view: EditorView): Context {
+	const layout = viewLayout(view);
 	return {
 		state: view.state,
-		layout: viewLayout(view),
+		layout,
 		cells: view.plugin(cellSelection) ?? noCells,
+		stops: layout.ownTables === true && !keyRepeat && !vimDriving(view),
 		leavesLine(forward) {
 			const range = view.state.selection.main;
 			const line = view.state.doc.lineAt(range.head);
@@ -60,13 +68,35 @@ function land(view: EditorView, range: SelectionRange, table: Span, forward: boo
 	return EditorSelection.cursor(target.from + Math.min(column, target.length), 0, undefined, range.goalColumn);
 }
 
+/**
+ * Where a caret goes on from a table ↑ or ↓ stopped on: the line beyond it, at the place across that the caret had
+ * before the table, `goal` px from the content's left, as CodeMirror keeps it for ↑ and ↓. On the row next to the
+ * table when that line wraps.
+ */
+function landBeyond(view: EditorView, table: Span, forward: boolean, goal: number): SelectionRange {
+	const target = view.state.doc.lineAt(forward ? table.to + 1 : table.from - 1);
+	const block = view.lineBlockAt(target.from);
+	const half = Math.min(view.defaultLineHeight, block.height) / 2;
+	const y = view.documentTop + (forward ? block.top + half : block.bottom - half);
+	const pos = view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + goal, y }, false);
+	return EditorSelection.cursor(pos >= target.from && pos <= target.to ? pos : forward ? target.from : target.to, 0, undefined, goal);
+}
+
+/** The caret's place across, as CodeMirror keeps it for ↑ and ↓, or measured from where it's drawn. */
+function goalOf(view: EditorView, range: SelectionRange): number | undefined {
+	if (range.goalColumn !== undefined) return range.goalColumn;
+	const coords = view.coordsAtPos(range.head, range.assoc || -1);
+	return coords ? coords.left - view.contentDOM.getBoundingClientRect().left : undefined;
+}
+
 function caret(pos: number): TransactionSpec {
 	return { selection: EditorSelection.cursor(pos), scrollIntoView: true, userEvent: 'select' };
 }
 
-/** Selects exactly a table, scrolled to the side it was selected from. */
-function selecting(table: Span, fromAbove: boolean): TransactionSpec {
-	return { selection: wholeTable(table, fromAbove), effects: EditorView.scrollIntoView(fromAbove ? table.from : table.to), userEvent: 'select' };
+/** Selects exactly a table, scrolled to the side it was selected from, keeping a caret's place across for ↑ and ↓. */
+function selecting(table: Span, fromAbove: boolean, goal?: number): TransactionSpec {
+	// A range alone would be read as an anchor and a head, and lose the place across ↑ and ↓ go on at.
+	return { selection: EditorSelection.create([wholeTable(table, fromAbove, goal)]), effects: EditorView.scrollIntoView(fromAbove ? table.from : table.to), userEvent: 'select' };
 }
 
 function run(view: EditorView, action: Action | null): boolean {
@@ -81,9 +111,16 @@ function run(view: EditorView, action: Action | null): boolean {
 		case 'select':
 			view.dispatch(selecting(action.table, action.fromAbove));
 			return true;
-		case 'pass':
-			view.dispatch({ selection: land(view, main, action.table, action.forward), scrollIntoView: true, userEvent: 'select' });
+		case 'stop':
+			view.dispatch(selecting(action.table, action.fromAbove, goalOf(view, main)));
 			return true;
+		case 'pass': {
+			// From a table ↑ or ↓ stopped on, the caret goes on at the place it had before the table.
+			const onTable = !main.empty && main.goalColumn !== undefined;
+			const to = onTable ? EditorSelection.create([landBeyond(view, action.table, action.forward, main.goalColumn)]) : land(view, main, action.table, action.forward);
+			view.dispatch({ selection: to, scrollIntoView: true, userEvent: 'select' });
+			return true;
+		}
 		case 'extendPast': {
 			const head = land(view, main, action.table, action.forward);
 			view.dispatch({ selection: EditorSelection.range(main.anchor, head.head, head.goalColumn), scrollIntoView: true, userEvent: 'select' });
@@ -143,9 +180,9 @@ function onArrow(direction: Direction, shift: boolean) {
 	return (view: EditorView): boolean => decide(view) || leaveToObsidian(view, 'arrow');
 }
 
-/** A selection of exactly a table, from the side the keys can later go back to. */
-export function wholeTable({ from, to }: Span, fromAbove: boolean): SelectionRange {
-	return fromAbove ? EditorSelection.range(from, to) : EditorSelection.range(to, from);
+/** A selection of exactly a table, from the side the keys can later go back to, with a caret's place across for ↑ and ↓. */
+export function wholeTable({ from, to }: Span, fromAbove: boolean, goal?: number): SelectionRange {
+	return fromAbove ? EditorSelection.range(from, to, goal) : EditorSelection.range(to, from, goal);
 }
 
 /**
@@ -214,6 +251,13 @@ function cellJumpKey(keys: Keys, jump: (context: Context, forward: boolean) => A
 }
 
 const bindings: KeyBinding[] = [
+	// Every key, before its own bindings: whether it's a held key's repeat, which ↑ and ↓ pass tables on.
+	{
+		any: (_, event) => {
+			keyRepeat = event.repeat;
+			return false;
+		},
+	},
 	// Held down, Enter stops at the selected table or cell. Its repeats would walk on into a cell, and
 	// from there add rows. This comes first so it runs ahead of the key's own binding.
 	{ any: (view, event) => event.key === 'Enter' && event.repeat && active(view) && selectedTable(view.state, viewLayout(view)) !== null },
@@ -228,6 +272,7 @@ const bindings: KeyBinding[] = [
 		shift: (view) => active(view) && run(view, stay(view.state, viewLayout(view))),
 	},
 	{ key: 'Delete', run: (view) => active(view) && run(view, deleteForward(view.state, viewLayout(view))) },
+	{ key: 'Backspace', run: (view) => active(view) && run(view, backspace(view.state, viewLayout(view))) },
 	{
 		key: 'Escape',
 		run: (view) => (active(view) ? run(view, escape(context(view))) : view.hasFocus && escapeCell(view) !== null),
@@ -278,7 +323,7 @@ const APPLE = Platform.isMacOS || Platform.isIosApp;
  * own letters. This runs on every key that types, so the cheapest test comes first.
  */
 function typesBelow(view: EditorView): boolean {
-	return selectedTables.has(view.state) && active(view) && !view.scrollDOM.classList.contains(VIM_CLASS);
+	return selectedTables.has(view.state) && active(view) && !vimDriving(view);
 }
 
 /**
@@ -335,7 +380,7 @@ const keepCellsClosed = EditorState.transactionFilter.of((tr) => {
 	const action = landing(tr, {
 		layout: viewLayout(view),
 		active: active(view),
-		vim: view.scrollDOM.classList.contains(VIM_CLASS),
+		vim: vimDriving(view),
 		left: leftToObsidian?.view === view ? leftToObsidian.key : null,
 		cellSelected: cellSelected(tr.startState),
 	});
@@ -343,6 +388,43 @@ const keepCellsClosed = EditorState.transactionFilter.of((tr) => {
 	if (action.type === 'caret') return caret(action.pos);
 	return action.type === 'select' ? selecting(action.table, action.fromAbove) : [];
 });
+
+/**
+ * The blank line above the plugin's own table stays: an edit that leaves text right against the table, such as typing
+ * on that line, puts a line break back at the table's start, in the same step, so one Undo takes both back. Obsidian
+ * does this for its own table only. Undo, Redo, Sync and a second pane put back text as it was, and a running
+ * composition is never touched.
+ */
+const keepLineAbove = EditorState.transactionFilter.of((tr) => {
+	if (!tr.docChanged || tr.isUserEvent('input.type.compose') || tr.annotation(Transaction.remote) || ['undo', 'redo', 'set'].some((event) => tr.isUserEvent(event))) return tr;
+	const tables = ownSpans(tr.startState);
+	const breaks = tables?.length ? blankLinesAbove(tr, tables) : [];
+	return breaks.length ? [tr, { changes: breaks.map((from) => ({ from, insert: '\n' })), sequential: true }] : tr;
+});
+
+/** A move that comes with its own rule: a press, and Enter's caret that opens a cell. */
+const ownRule = (tr: Transaction) => tr.isUserEvent('select.pointer') || tr.annotation(opensCell) === true;
+
+/**
+ * The caret rule, with its decision in decide.ts: a selection put inside the plugin's own table by anything but a key
+ * or a press selects the table and the cell holding it. Keys have their rule in the check on key moves. It runs right
+ * after the update, as its own step, and never during a composition or while Vim is driving.
+ */
+const cellsFromCarets = ViewPlugin.define((view) => ({
+	update(update) {
+		if (!update.selectionSet || update.transactions.some(ownRule) || view.compositionStarted || vimDriving(view)) return;
+		if (!caretInTable(update.state, viewLayout(view))) return;
+		// Read again once the task's other dispatches are in: Find's close and a Search pane result each dispatch again
+		// right after putting the selection there.
+		queueMicrotask(() => {
+			if (view.compositionStarted || vimDriving(view)) return;
+			const found = caretInTable(view.state, viewLayout(view));
+			if (!found) return;
+			view.dispatch({ selection: wholeTable(found.table, true) });
+			view.plugin(cellSelection)?.select(found.cell);
+		});
+	},
+}));
 
 /** The editors open now, so a command can find the one behind the editor Obsidian gives it. */
 const views = new Set<EditorView>();
@@ -364,7 +446,11 @@ export function noteView(editor: Editor): EditorView | null {
 	return null;
 }
 
-/** The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. */
-export function selectableTables(): Extension {
-	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, keepCellsClosed, markSelectedTable, cellSelection, cellFollowsCaret, knownViews, frozenTables, EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
+/**
+ * The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. On the plugin's own
+ * table (a preview build's switch), frozen tables aren't there yet (STA-82).
+ */
+export function selectableTables({ frozen = true }: { frozen?: boolean } = {}): Extension {
+	const freezing = frozen ? [cellFollowsCaret, frozenTables] : [];
+	return [Prec.highest(keymap.of(bindings)), Prec.highest(selectedEvents), keepSelectedTable, keepCellsClosed, keepLineAbove, markSelectedTable, cellSelection, cellsFromCarets, knownViews, ...freezing, EditorView.editorAttributes.of({ class: ACTIVE_CLASS })];
 }

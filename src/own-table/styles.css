@@ -3,6 +3,14 @@
  * The table's box carries Obsidian's classes for its own table, so Obsidian's look and a theme's land on it.
  */
 
+/*
+ * Says this stylesheet is in the page. Obsidian adds a plugin's styles only after its start-up, and the plugin draws no
+ * table before then (preview.ts): its hidden parts, unhidden, take room beside the note.
+ */
+body {
+	--selectable-tables-styled: 1;
+}
+
 /* Columns keep the widths the plugin works out from the text, so they hold as rows come and go. */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own table {
 	table-layout: fixed;
@@ -187,4 +195,12 @@
 	to {
 		transform: none;
 	}
+}
+
+/*
+ * Find's match where a cell's Markdown changes the matched words as drawn: the whole cell shows it, in the color
+ * Obsidian draws round a match in the text. Where the cell draws them as typed, the words carry Obsidian's own class.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own :is(th, td).selectable-tables-match-cell {
+	box-shadow: inset 0 0 0 3px var(--text-accent);
 }

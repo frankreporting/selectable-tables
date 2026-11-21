@@ -3,6 +3,14 @@
  * The table's box carries Obsidian's classes for its own table, so Obsidian's look and a theme's land on it.
  */
 
+/*
+ * Says this stylesheet is in the page. Obsidian adds a plugin's styles only after its start-up, and the plugin draws no
+ * table before then (preview.ts): its hidden parts, unhidden, take room beside the note.
+ */
+body {
+	--selectable-tables-styled: 1;
+}
+
 /* Columns keep the widths the plugin works out from the text, so they hold as rows come and go. */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own table {
 	table-layout: fixed;

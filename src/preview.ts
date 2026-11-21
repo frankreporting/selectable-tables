@@ -3,6 +3,30 @@ import { Notice, type Plugin } from 'obsidian';
 import { selectableTables } from './editor/extension';
 import { ownTables } from './own-table';
 
+/** Set on the body by the preview's stylesheet, src/own-table/styles.css. */
+const STYLED = '--selectable-tables-styled';
+
+/**
+ * Calls `ready` once the preview's stylesheet is in the page. Obsidian adds a plugin's styles.css after its start-up,
+ * so on a reload, with the switch on, the plugin's table would be drawn for a moment without it. Its hidden parts
+ * then take room beside the note, the note narrows, and the tables are laid out again; Obsidian's own editor code
+ * measures in each update, so that never ends, and the stylesheet never gets its turn.
+ */
+function whenStyled(plugin: Plugin, ready: () => void): void {
+	const styled = () => getComputedStyle(activeDocument.body).getPropertyValue(STYLED) !== '';
+	if (styled()) {
+		ready();
+		return;
+	}
+	const watch = new MutationObserver(() => {
+		if (!styled()) return;
+		watch.disconnect();
+		ready();
+	});
+	watch.observe(activeDocument.head, { childList: true });
+	plugin.register(() => watch.disconnect());
+}
+
 /** What the plugin saves for the preview: whether it draws tables itself. */
 interface Saved {
 	ownTables?: boolean;
@@ -58,5 +82,5 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	});
 	// For the check script and timing runs, on the plugin: whether the switch is on, and the tables' insides.
 	Object.assign(plugin, { preview: { isOn: () => on, use, ...own.debug } });
-	if (saved.ownTables) use(true);
+	if (saved.ownTables) whenStyled(plugin, () => use(true));
 }

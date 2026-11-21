@@ -72,9 +72,13 @@
 	const attachedHere = !cdp.isAttached();
 	if (attachedHere) cdp.attach('1.3');
 	const virtualKeys = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, PageUp: 33, PageDown: 34, End: 35, Home: 36 };
+	// The key's own character, which macOS needs to match a Cmd or Ctrl shortcut to its menu item: without one it takes the
+	// first item with no key of its own, About Obsidian, whose dialog then holds every Obsidian window until someone answers it.
+	const macChars = { Escape: '\u001b', Enter: '\r', Tab: '\t', Backspace: '\u007f', ArrowUp: '\uf700', ArrowDown: '\uf701', ArrowLeft: '\uf702', ArrowRight: '\uf703', Home: '\uf729', End: '\uf72b', PageUp: '\uf72c', PageDown: '\uf72d' };
+	const macChar = (name) => macChars[name] ?? (name.length === 1 ? name.toLowerCase() : '');
 	async function real(key, { altKey, ctrlKey, metaKey, shiftKey } = {}, wait = settle) {
 		const modifiers = (altKey ? 1 : 0) | (ctrlKey ? 2 : 0) | (metaKey ? 4 : 0) | (shiftKey ? 8 : 0);
-		const event = { key, code: key, windowsVirtualKeyCode: virtualKeys[key], modifiers };
+		const event = { key, code: key, windowsVirtualKeyCode: virtualKeys[key], modifiers, unmodifiedText: macChar(key) };
 		await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
 		await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
 		await wait();
@@ -3743,7 +3747,7 @@
 					const key = async (name, { alt, ctrl, meta, shift, repeat } = {}) => {
 						const modifiers = (alt ? 1 : 0) | (ctrl ? 2 : 0) | (meta ? 4 : 0) | (shift ? 8 : 0);
 						const code = codes[name] ?? name.toUpperCase().charCodeAt(0);
-						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers, autoRepeat: !!repeat };
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: code, modifiers, autoRepeat: !!repeat, unmodifiedText: macChar(name) };
 						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
 						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
 						await settle();

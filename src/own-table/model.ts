@@ -5,11 +5,13 @@ import { OWN_BORDERS_CLASS } from '../editor/freeze';
 import { markedCells } from '../editor/freeze-mark';
 import { rowCells, type Span } from '../editor/table-text';
 import { fitColumns, measureCell, type Metrics, rowHeight, type Words } from './estimate';
+import { Bar, SLIDE_VARIABLE, SLIDES_CLASS, TIMELINE_VARIABLE, usesBars } from './bar';
 import { blockCount, blockHeight, blockOf, blockRows, blockSpans, bodyLayout, topInBlock } from './blocks';
-import { BOX_CLASS } from './boxes';
+import { BOX_CLASS, BOX_ID } from './boxes';
 import { covers, Heights, type RowRange, type Visible, wanted } from './heights';
 import { measure, measureContent } from './metrics';
 import { timed } from './profile';
+import { barPlace, type BarPlace, clampSlide, maxSlide, revealDelta } from './sideways';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
 /**
@@ -137,6 +139,36 @@ interface Block {
 	readonly tail: HTMLTableRowElement;
 	/** The widths and columns on the page, to tell when the shape's differ. */
 	applied: string;
+	/** How the block follows its table's scrollbar, as last written: to tell when that changes. */
+	dressed: string;
+}
+
+/** What placing a table's scrollbar reads from the page. */
+interface BarRead {
+	/** Whether the editor's wide tables move by a scrollbar, not in a box that scrolls. */
+	bars: boolean;
+	/** How far the table can move sideways: 0 for one no wider than its box. */
+	slide: number;
+	place?: BarPlace;
+	left: number;
+	width: number;
+	height: number;
+}
+
+/** A scrollbar's least height, where a theme pads a table's box less: room for a Mac's bar when it's always shown. */
+const BAR_HEIGHT = 12;
+
+/**
+ * How much of the pane's bottom the status bar hides, where it floats over the pane, beside the table's box: none in
+ * a pane above another, or in a window with no status bar.
+ */
+function statusInset(scroller: HTMLElement, pane: DOMRect, box: DOMRect): number {
+	const bottom = pane.top + scroller.clientTop + scroller.clientHeight;
+	const status = scroller.ownerDocument.querySelector('.status-bar');
+	if (!status) return 0;
+	const rect = status.getBoundingClientRect();
+	if (!rect.height || rect.top >= bottom || rect.bottom < bottom - 1 || rect.right <= box.left || rect.left >= box.right) return 0;
+	return bottom - rect.top;
 }
 
 /**
@@ -174,6 +206,14 @@ export class Model implements Span {
 	/** How far the table is scrolled sideways, which the box around its blocks takes back when CodeMirror makes it anew. */
 	private scrollX = 0;
 	private sideBox: HTMLElement | null = null;
+	/**
+	 * On a computer, the table's scrollbar, while it's wider than its box: its scroll is how far the table is moved
+	 * sideways, and outlives the table leaving the pane, since the bar sits in the note's scroller.
+	 */
+	private bar: Bar | null = null;
+	/** How far the table moves sideways at its bar's end. */
+	private slide = 0;
+	private readonly barKey = {};
 	private readonly rendered = new Map<number, HTMLTableRowElement>();
 	private readonly spare = new Map<number, HTMLTableRowElement>();
 	/** The text each drawn row was drawn from. */
@@ -245,6 +285,8 @@ export class Model implements Span {
 
 	destroy(): void {
 		this.component.unload();
+		this.bar?.destroy();
+		this.bar = null;
 		this.sideBox?.removeEventListener('scroll', this.onSideways);
 		this.sideBox = null;
 		this.view = null;
@@ -430,6 +472,7 @@ export class Model implements Span {
 		this.refresh();
 		// A block coming into the page may hold rows near the pane that weren't drawn while it was out.
 		if (this.blockCount > 1) this.schedule(true);
+		this.placeBar();
 		return block.dom;
 	}
 
@@ -469,8 +512,12 @@ export class Model implements Span {
 		dom.addEventListener('loadedmetadata', loaded, true);
 		dom.toggleClass('is-selected', this.selected);
 		if (this.dir) dom.dir = this.dir;
-		const block: Block = { index, dom, table, colgroup, thead, tbody, lead: spacer(PARITY_CLASS, EDGE_CLASS), above: spacer(), parity: spacer(PARITY_CLASS), below: spacer(), tail: spacer(PARITY_CLASS, EDGE_CLASS), applied: '' };
+		// Which table a swipe over the block is for.
+		dom.setAttribute(BOX_ID, String(this.id));
+		const block: Block = { index, dom, table, colgroup, thead, tbody, lead: spacer(PARITY_CLASS, EDGE_CLASS), above: spacer(), parity: spacer(PARITY_CLASS), below: spacer(), tail: spacer(PARITY_CLASS, EDGE_CLASS), applied: '', dressed: '' };
 		this.blocks[index] = block;
+		// A block that comes into the page is drawn where the table is sideways, in its first frame.
+		this.dress(block);
 		return block;
 	}
 
@@ -492,6 +539,7 @@ export class Model implements Span {
 		this.arrange();
 		this.schedule(this.dirty.size > 0 || this.remeasure);
 		this.remeasure = false;
+		this.placeBar();
 	}
 
 	/** Every row drawn again, after the columns changed. */
@@ -685,6 +733,7 @@ export class Model implements Span {
 			this.dir = dir;
 			for (const block of this.blocks) block?.dom.setAttr('dir', dir || null);
 			this.placeBox(null, true);
+			this.placeBar();
 		}
 	}
 
@@ -843,6 +892,7 @@ export class Model implements Span {
 		need.forEach((row, i) => this.rendered.set(row, fresh[i]!));
 		this.drawn = { first, end };
 		this.arrange();
+		this.placeBar();
 		// Players have their size at once, and pictures kept from before have loaded; the rest measure as they load.
 		this.sizeMedia(mediaCells(this.rescanMedia ? [...this.rendered.values(), ...Array.from(this.blocks[0]?.thead?.rows ?? [])] : fresh));
 		this.rescanMedia = false;
@@ -925,6 +975,7 @@ export class Model implements Span {
 		}
 		if (!changed) return;
 		this.arrange();
+		this.placeBar();
 		if (anchor >= 0 && anchor < this.count) {
 			const delta = topInBlock(this.heights, anchor, this.headHeight) - anchorTop;
 			if (Math.abs(delta) > 0.01) view.scrollDOM.scrollTop += delta;
@@ -962,6 +1013,133 @@ export class Model implements Span {
 	private readonly onSideways = () => {
 		if (this.sideBox) this.scrollX = this.sideBox.scrollLeft;
 	};
+
+	// Sideways, on a computer ----------------------------------------------------------------------------------------
+
+	/** The box the table shows in: its one block, or the box around its blocks. Null while none is in the page. */
+	private boxNow(): HTMLElement | null {
+		const block = this.blocks.find((each) => each?.dom.isConnected);
+		if (!block) return null;
+		if (this.blockCount < 2) return block.dom;
+		const box = block.dom.parentElement;
+		return box?.hasClass(BOX_CLASS) ? box : null;
+	}
+
+	/** Places the table's scrollbar on CodeMirror's next measure, after the table's size or place may have changed. */
+	placeBar(): void {
+		const view = this.view;
+		if (!view || (!this.bar && !this.blocks.some((block) => block?.dom.isConnected))) return;
+		view.requestMeasure({ key: this.barKey, read: () => timed('measure', () => this.readBar()), write: (read) => timed('draw', () => this.writeBar(read)) });
+	}
+
+	/**
+	 * How far the table can move sideways, and where its bar goes: from under the header to under the last row, in the
+	 * note's content, taken from the page where those rows are in it, else from CodeMirror's heights. Null when no
+	 * block is in the page, which leaves the bar as it is.
+	 */
+	private readBar(): BarRead | null {
+		const view = this.view;
+		const metrics = this.metrics;
+		if (!view || this.stale || !metrics) return null;
+		const bars = usesBars(view);
+		const none: BarRead = { bars, slide: 0, left: 0, width: 0, height: 0 };
+		if (!bars) return none;
+		const box = this.boxNow();
+		const table = this.blocks.find((block) => block?.dom.isConnected)?.table.parentElement;
+		if (!box || !table) return null;
+		// Fractional widths, as the browser lays them out: a box's clientWidth is rounded, and its scroll range isn't.
+		const style = getComputedStyle(box);
+		const rect = box.getBoundingClientRect();
+		const width = rect.width - (parseFloat(style.borderLeftWidth) || 0) - (parseFloat(style.borderRightWidth) || 0);
+		const slide = maxSlide(table.getBoundingClientRect().width, parseFloat(style.paddingLeft) || 0, parseFloat(style.paddingRight) || 0, width);
+		if (slide <= 0) return none;
+		const scroller = view.scrollDOM;
+		const pane = scroller.getBoundingClientRect();
+		const top = pane.top + scroller.clientTop - scroller.scrollTop;
+		const left = pane.left + scroller.clientLeft - scroller.scrollLeft;
+		const toContent = view.documentTop - top;
+		const padBottom = metrics.pad - metrics.padTop;
+		const first = this.blocks[0];
+		const last = this.blocks[this.blockCount - 1];
+		const start = first?.thead?.isConnected ? first.thead.getBoundingClientRect().bottom - top : view.lineBlockAt(this.from).top + toContent + metrics.padTop + this.headHeight;
+		const end = last?.table.isConnected ? last.table.getBoundingClientRect().bottom - top : view.lineBlockAt(this.to).bottom + toContent - padBottom;
+		const height = Math.max(BAR_HEIGHT, padBottom);
+		const place = barPlace(start, end, height, scroller.clientHeight, statusInset(scroller, pane, rect));
+		// The bar's scroll range is the slide exactly: it's a whole number of pixels wide, and its content that much wider.
+		return { bars, slide, place, left: rect.left + (parseFloat(style.borderLeftWidth) || 0) - left, width: box.clientWidth, height };
+	}
+
+	private writeBar(read: BarRead | null): void {
+		const view = this.view;
+		if (!read || !view) return;
+		if (read.slide > 0 && read.place) {
+			this.bar ??= new Bar(view, `--selectable-tables-x-${this.id}`, this.onBar);
+			this.slide = read.slide;
+			this.bar.place(read.place, read.left, read.width, read.height, read.slide, this.dir);
+		} else if (this.bar) {
+			this.bar.destroy();
+			this.bar = null;
+			this.slide = 0;
+		}
+		for (const block of this.blocks) if (block) this.dress(block);
+	}
+
+	private readonly onBar = () => {
+		if (this.bar) this.scrollX = this.bar.scroll;
+	};
+
+	/** Has a block follow the table's scrollbar, or not, as the table is wide and the editor uses bars. */
+	private dress(block: Block): void {
+		const bar = this.bar;
+		const slide = bar ? `${this.dir === 'rtl' ? '' : '-'}${this.slide}px` : '';
+		const key = bar ? `${bar.name} ${slide}` : '';
+		if (key === block.dressed) return;
+		block.dressed = key;
+		block.dom.toggleClass(SLIDES_CLASS, !!bar);
+		if (bar) {
+			block.dom.style.setProperty(TIMELINE_VARIABLE, bar.name);
+			block.dom.style.setProperty(SLIDE_VARIABLE, slide);
+		} else {
+			block.dom.style.removeProperty(TIMELINE_VARIABLE);
+			block.dom.style.removeProperty(SLIDE_VARIABLE);
+		}
+	}
+
+	/** Whether a sideways swipe over the table moves it: it's wider than its box, on a computer. */
+	get slides(): boolean {
+		return !!this.bar && this.slide > 0;
+	}
+
+	/** Moves the table sideways by a swipe's step, as a box's own scroll would, at the swipe's own speed. */
+	slideBy(dx: number): void {
+		if (this.bar) this.bar.scroll = clampSlide(this.bar.scroll + dx, this.slide, this.dir === 'rtl');
+	}
+
+	/**
+	 * Moves the table sideways just enough to show `left` to `right`, on the screen, as `scrollIntoView` with `nearest`
+	 * would in its box, keeping `clear` px at the box's start free, for a frozen column. Moves its bar on a computer,
+	 * and its box on a phone or tablet, so a caller needn't know which.
+	 */
+	showSideways(left: number, right: number, clear = 0): void {
+		const box = this.boxNow();
+		if (!box) return;
+		const rect = box.getBoundingClientRect();
+		const start = rect.left + box.clientLeft;
+		const rtl = this.dir === 'rtl';
+		const delta = revealDelta({ left: start, right: start + box.clientWidth }, { left, right }, clear, rtl);
+		if (!delta) return;
+		if (this.bar) {
+			this.bar.scroll = clampSlide(this.bar.scroll + delta, this.slide, rtl);
+			return;
+		}
+		box.scrollLeft += delta;
+		if (box === this.sideBox) this.scrollX = box.scrollLeft;
+	}
+
+	/** For the check script: the table's scrollbar, how far the table is moved sideways, and how far it can go. */
+	sideways(): { bar: HTMLElement | null; scroll: number; slide: number } {
+		return { bar: this.bar?.dom ?? null, scroll: this.bar ? this.bar.scroll : this.scrollX, slide: this.slide };
+	}
 
 	/**
 	 * Where a place in a block's text is drawn, `offset` from the block's start. Without this CodeMirror scrolls the

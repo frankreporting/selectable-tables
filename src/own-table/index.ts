@@ -9,11 +9,13 @@ import { frontmatterEnd, type Span } from '../editor/table-text';
 import { endOfNextLine, findTables, type Found, lineChange, updateTables } from './find';
 import { OBSIDIAN_ROW, ROW_CLASS } from './hide-rows';
 import { isCopy, knownLanguages, languageCopy } from './language';
+import { BARS_CLASS, useBoxes, usesBars } from './bar';
 import { blockSpans } from './blocks';
 import { BOX_CLASS, BOX_ID, type BoxRange, boxes } from './boxes';
 import { availableWidth, forgetMetrics, knownMetrics, lookChanged, metricsFor } from './metrics';
 import { Model, skewEstimates } from './model';
 import { profile, timed } from './profile';
+import { Swipes, wheelStep } from './sideways';
 import { linesOf } from './shape';
 import { lineClassProp, treeRows } from './tree-rows';
 
@@ -230,7 +232,9 @@ export function ownTables(app: App, failed: () => void) {
 		return state.field(tables, false)?.models.find((model) => main.from === model.from && main.to === model.to) ?? null;
 	};
 
-	const attributes = EditorView.editorAttributes.of((view) => ({ class: selectedModel(view.state) ? `${ACTIVE_CLASS} ${SELECTED_CLASS}` : ACTIVE_CLASS }));
+	const attributes = EditorView.editorAttributes.of((view) => ({
+		class: [ACTIVE_CLASS, selectedModel(view.state) ? SELECTED_CLASS : '', usesBars(view) ? BARS_CLASS : ''].filter(Boolean).join(' '),
+	}));
 
 	/**
 	 * Typing over a table selected whole does nothing, as with the plugin's keys: it would replace the table with a
@@ -283,11 +287,15 @@ export function ownTables(app: App, failed: () => void) {
 		/** Boxes CodeMirror puts around a table's blocks, as it puts them in the page. */
 		private readonly boxes: MutationObserver;
 		private redecorating = false;
+		private readonly swipes = new Swipes();
 
 		constructor(readonly view: EditorView) {
 			this.models = view.state.field(tables, false)?.models ?? [];
 			this.width = -1;
 			view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
+			// Not passive, so a sideways swipe over a wide table can keep the note still. Obsidian already listens so on the
+			// note's view, for Ctrl and the wheel to zoom, so a swipe's first event already waits for the page.
+			view.contentDOM.addEventListener('wheel', this.onWheel, { passive: false });
 			// CodeMirror makes a new box around a table's blocks whenever the first block it draws changes, and the new
 			// one starts scrolled to the table's left edge: it's put back here, right after CodeMirror's update and
 			// before the frame is drawn.
@@ -305,7 +313,28 @@ export function ownTables(app: App, failed: () => void) {
 		}
 
 		private readonly onScroll = () => {
-			for (const model of this.models) if (model.view === this.view && model.shown) model.schedule();
+			for (const model of this.models) {
+				if (model.view !== this.view || !model.shown) continue;
+				model.schedule();
+				if (model.slides) model.placeBar();
+			}
+		};
+
+		/**
+		 * A swipe over a wide table, on a computer: its sideways part moves the table, through its scrollbar, since no
+		 * box scrolls it. A swipe that starts mostly sideways keeps the note still, and one that starts up or down
+		 * leaves the table where it is, as in Obsidian's box, where the browser keeps a swipe to where it began.
+		 */
+		private readonly onWheel = (event: WheelEvent) => {
+			const step = wheelStep(event, this.view.scrollDOM.clientWidth);
+			if (!step) return;
+			const at = (event.target as Element | null)?.closest?.(`[${BOX_ID}]`);
+			const id = at ? Number(at.getAttribute(BOX_ID)) : -1;
+			const model = id >= 0 ? this.models.find((each) => each.id === id && each.view === this.view && each.slides) : undefined;
+			const swipe = this.swipes.next(event.timeStamp, step, model ?? null, event.cancelable);
+			if (swipe?.hold !== 'sideways') return;
+			if (event.cancelable) event.preventDefault();
+			(swipe.table as Model).slideBy(step.dx);
 		};
 
 		update(update: ViewUpdate) {
@@ -368,6 +397,7 @@ export function ownTables(app: App, failed: () => void) {
 
 		destroy() {
 			this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
+			this.view.contentDOM.removeEventListener('wheel', this.onWheel);
 			this.boxes.disconnect();
 			editors.delete(this);
 			retire(this.models);
@@ -404,6 +434,14 @@ export function ownTables(app: App, failed: () => void) {
 			},
 			skew: skewEstimates,
 			profile,
+			/** Timing runs: tables scroll sideways in their box again, as before the scrollbar, to compare against. */
+			boxes(on: boolean) {
+				useBoxes(on);
+				for (const editor of editors) {
+					editor.view.dispatch({});
+					for (const model of editor.view.state.field(tables, false)?.models ?? []) model.placeBar();
+				}
+			},
 		},
 	};
 }

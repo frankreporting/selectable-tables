@@ -128,3 +128,63 @@
 	border-end-start-radius: 0;
 	border-end-end-radius: 0;
 }
+
+/*
+ * On a computer, a wide table moves sideways by a transform that follows a scrollbar of the plugin's own (bar.ts),
+ * and its box clips it instead of scrolling it: a box that scrolls sideways stops rows sticking to the note. Phones
+ * and tablets keep the box, scrolled by a finger.
+ */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-bars .cm-table-widget.selectable-tables-own,
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-bars .cm-table-widget.selectable-tables-blocks.selectable-tables-blocks {
+	overflow: clip;
+}
+
+/*
+ * Each block's table follows the scroll of its table's bar, a timeline the note's scroller names for every block
+ * in it, so the blocks move as one, on the compositor, where the swipe runs.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-slides > .table-wrapper {
+	will-change: transform;
+	animation: selectable-tables-slide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+@keyframes selectable-tables-slide {
+	from {
+		transform: none;
+	}
+
+	to {
+		transform: translateX(var(--selectable-tables-slide));
+	}
+}
+
+/*
+ * The bar, in the note's scroller: under the table's last row, and carried up to the pane's bottom while the table
+ * crosses it, by an animation on the note's own scroll, so it never trails a scroll. Its look is the system's, or
+ * Obsidian's where Obsidian styles scrollbars.
+ */
+.markdown-source-view.mod-cm6 .cm-scroller > .selectable-tables-bar {
+	position: absolute;
+	z-index: 1;
+	overflow-x: auto;
+	overflow-y: hidden;
+	will-change: transform;
+	animation: selectable-tables-bar linear both;
+	animation-timeline: scroll(nearest block);
+	animation-range: var(--selectable-tables-bar-from) var(--selectable-tables-bar-to);
+}
+
+.markdown-source-view.mod-cm6 .cm-scroller > .selectable-tables-bar > div {
+	height: 1px;
+}
+
+@keyframes selectable-tables-bar {
+	from {
+		transform: translateY(var(--selectable-tables-bar-rise));
+	}
+
+	to {
+		transform: none;
+	}
+}

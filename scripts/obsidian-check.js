@@ -3020,8 +3020,13 @@
 				};
 				let rest = 0;
 				const moved = (row = 100) => rawMoved(row) - rest;
+				// Over a drawn row in the middle of the pane, or the given place.
+				const midRow = () => {
+					const middle = pane().top + view.scrollDOM.clientHeight / 2;
+					return big.drawnRows().map((entry) => entry.tr).filter((tr) => tr.isConnected).sort((a, b) => Math.abs(a.getBoundingClientRect().top - middle) - Math.abs(b.getBoundingClientRect().top - middle))[0];
+				};
 				const swipe = async (dx, dy = 0, at = null) => {
-					const r = at ?? drawnRow(100).getBoundingClientRect();
+					const r = at ?? midRow().getBoundingClientRect();
 					await cdp.sendCommand('Input.synthesizeScrollGesture', { x: Math.round(r.left + Math.min(300, r.width / 2)), y: Math.round(r.top + r.height / 2), xDistance: -dx, yDistance: -dy, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
 					await sleep(250);
 					await frames(3);
@@ -3084,17 +3089,21 @@
 				check('Own 20: the table keeps its place sideways after scrolling far down and back, and after an edit above it', keptFar.same && Math.abs(keptFar.scroll - placeAt) <= 0.5 && Math.abs(keptFar.moved - movedAt) <= 1 && Math.abs(keptEdit.scroll - placeAt) <= 0.5 && Math.abs(keptEdit.moved - movedAt) <= 1, { placeAt, movedAt, keptFar, keptEdit });
 
 				// A vertical scroll with the pointer over the bar scrolls the note.
-				const overBar = bar0.getBoundingClientRect();
+				// Putting the note's whole text back made its tables anew, with a bar each.
+				await sleep(300);
+				const barNow = barOf();
+				const overBar = barNow.getBoundingClientRect();
+				const onBar = document.elementFromPoint(Math.round(overBar.left + Math.min(300, overBar.width / 2)), Math.round(overBar.top + overBar.height / 2)) === barNow;
 				const beforeBar = view.scrollDOM.scrollTop;
 				await swipe(0, 200, { left: overBar.left, top: overBar.top + overBar.height / 2 - 0.5, width: overBar.width, height: 1 });
-				check('Own 20: scrolling up and down with the pointer over the bar scrolls the note', view.scrollDOM.scrollTop - beforeBar > 100, { by: view.scrollDOM.scrollTop - beforeBar });
+				check('Own 20: scrolling up and down with the pointer over the bar scrolls the note', onBar && view.scrollDOM.scrollTop - beforeBar > 100, { onBar, by: view.scrollDOM.scrollTop - beforeBar });
 
 				// The table's end: the bar right under the last row. Before the table: no bar in the pane.
 				view.dispatch({ effects: view.constructor.scrollIntoView(big.to, { y: 'center' }) });
 				await sleep(700);
 				await frames(4);
 				[big] = models(view);
-				const lastTable = big.boxes[big.blockCount - 1]?.querySelector('table');
+				const lastTable = big.boxes.find((box) => box.isConnected && box.classList.contains('selectable-tables-last'))?.querySelector('table');
 				const endGap = lastTable?.isConnected ? barOf().getBoundingClientRect().top - lastTable.getBoundingClientRect().bottom : NaN;
 				check('Own 21: once the last row is in the pane, the bar sits right under it', Math.abs(endGap) <= 1, { endGap });
 				view.scrollDOM.scrollTop = 0;

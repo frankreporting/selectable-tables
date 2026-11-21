@@ -659,7 +659,7 @@ export class Model implements Span, DrawnTable {
 			this.stale = true;
 			this.checkRows = true;
 			this.todo = true;
-		} else if (change || linesOf(doc, this).count !== before.count) this.edit(doc, before, change);
+		} else if (change || linesOf(doc, this).count !== before.count) this.edit(oldDoc, doc, before, change);
 		this.text = doc;
 	}
 
@@ -667,11 +667,12 @@ export class Model implements Span, DrawnTable {
 	 * The table's text changed: rows a change touched are measured again, and the rest keep their sizes. A change
 	 * to the header, the delimiter or the number of columns works the whole shape out again.
 	 */
-	private edit(doc: Text, before: TableLines, change: LineChange | null): void {
+	private edit(oldDoc: Text, doc: Text, before: TableLines, change: LineChange | null): void {
 		this.checkRows = true;
 		this.todo = true;
 		if (this.stale || !this.metrics) return;
 		const now = linesOf(doc, this);
+		if (change && now.count === before.count && this.repadded(oldDoc, doc, before, now, change)) return;
 		const splices = change ? rowSplices(before, now, change) : before.count === now.count ? [] : null;
 		if (!splices) {
 			this.stale = true;
@@ -689,6 +690,45 @@ export class Model implements Span, DrawnTable {
 			this.shiftRows(at, removed, added);
 		}
 		this.refit();
+	}
+
+	/**
+	 * A change that pads a column again, as an open cell's text outgrowing it does in a table Obsidian wrote, rewrites
+	 * every line of the table, the header and the delimiter row included, and leaves every cell's text as it was but the
+	 * one being typed in. Read as an edit of the header, it would work the whole shape out again, every cell of every
+	 * row measured on each key. So rows are compared, padding aside, and only those whose cells changed are measured.
+	 * Says whether it took the change: not when the columns or their alignment changed.
+	 */
+	private repadded(oldDoc: Text, doc: Text, before: TableLines, now: TableLines, change: LineChange): boolean {
+		if (change.first > now.header + 1 && change.oldFirst > before.header + 1) return false;
+		const delimiter = (text: Text, lines: TableLines) => (lines.header < text.lines ? rowCells(text.line(lines.header + 1).text) : []);
+		const was = delimiter(oldDoc, before);
+		const is = delimiter(doc, now);
+		if (was.length !== is.length || was.some((cell, column) => alignOf(cell) !== alignOf(is[column] ?? ''))) return false;
+		const oldHead = oldDoc.line(before.header).text;
+		const head = doc.line(now.header).text;
+		if (rowCells(head).length > this.columns) return false;
+		const first = Math.max(0, change.first - now.header - 2);
+		const last = Math.min(now.count - 1, change.last - now.header - 2);
+		const changed: number[] = [];
+		for (let row = first; row <= last; row++) {
+			const from = oldDoc.line(before.header + 2 + row).text;
+			const after = doc.line(now.header + 2 + row).text;
+			if (from === after || sameCells(from, after, this.columns, -1)) continue;
+			if (rowCells(after).length > this.columns) return false;
+			changed.push(row);
+		}
+		if (!sameCells(oldHead, head, this.columns, -1)) {
+			this.headWords = cellsOf(head, this.columns).map((text) => this.withMedia(text, true, measureCell(text, this.metrics!, true, measure)));
+			this.headHeight = rowHeight(this.headWords, this.widths, this.metrics!, true);
+		}
+		for (const row of changed) {
+			const words = this.measureRow(doc.line(now.header + 2 + row).text);
+			this.rowWords[row] = words;
+			this.heights.set(row, rowHeight(words, this.widths, this.metrics!, false), false);
+		}
+		this.refit();
+		return true;
 	}
 
 	/** Fits the columns again to their cells' sizes, and says whether any width changed. */

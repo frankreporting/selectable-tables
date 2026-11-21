@@ -363,8 +363,9 @@ export function ownTables(app: App, failed: () => void) {
 			if (update.docChanged || update.transactions.some((tr) => tr.effects.length > 0)) {
 				const spans = update.state.field(tables, false)?.spans ?? [];
 				const matches = matchesIn(update.state, spans);
+				// A table not drawn yet takes them too, for when Find's scroll brings it into view.
 				this.models.forEach((model, index) => {
-					if (model.view === update.view) model.setMatches(matches[index] ?? [], update.state.doc);
+					if (!model.view || model.view === update.view) model.setMatches(matches[index] ?? [], update.state.doc);
 				});
 			}
 			if (update.geometryChanged) {

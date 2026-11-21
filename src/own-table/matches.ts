@@ -125,8 +125,9 @@ export function paintMatches(tr: HTMLTableRowElement, line: string, matches: rea
 		const source = line.slice(bounds.from, bounds.to);
 		const text = source.trim();
 		const lead = bounds.from + source.length - source.trimStart().length;
-		const from = start - lead;
-		const matched = from >= 0 && end - lead <= text.length ? text.slice(from, end - lead) : '';
+		// A match running into the cell's padding, or past its pipe, shows on the words of the cell it starts in.
+		const from = Math.max(0, start - lead);
+		const matched = text.slice(from, Math.max(from, Math.min(text.length, end - lead)));
 		const drawn = box.textContent ?? '';
 		// The match is the nth time its words come in the cell's Markdown, and so in its drawn text.
 		let at = -1;

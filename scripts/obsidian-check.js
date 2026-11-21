@@ -3390,7 +3390,7 @@
 						await settle();
 						for (let i = 0; i < presses; i++) await press(view, 'ArrowDown');
 						const { head } = view.state.selection.main;
-						return { line: view.state.doc.lineAt(head).number, x: view.coordsAtPos(head)?.left };
+						return { line: view.state.doc.lineAt(head).number, x: view.coordsAtPos(head)?.left, start: view.coordsAtPos(view.state.doc.lineAt(head).from)?.left };
 					};
 					const startX = (() => {
 						const line = view.state.doc.line(startLine);
@@ -3404,7 +3404,7 @@
 					preview.use(true);
 					await sleep(500);
 					view = await open('Two report tables');
-					check('Own 34: ↓ four times past a table it stops on lands at the same place across as passing it with the switch off, within 1 px', across.line === shortLine && stock.line === shortLine && Math.abs(across.x - stock.x) <= 1 && across.x > startX - 40, { across, stock, startX });
+					check('Own 34: ↓ four times past a table it stops on lands at the same place across as passing it with the switch off, within 1 px', across.line === shortLine && stock.line === shortLine && Math.abs(across.x - stock.x) <= 1 && across.x > across.start + 40, { across, stock, startX });
 
 					// A held ↓ and ↑ pass every table in Long note, and never select one.
 					view = await open('Long note');
@@ -3526,10 +3526,12 @@
 						await sleep(200);
 						return { ...first, ok: first.cell === want && first.inPane && steadyOk(steady(view), true) };
 					};
+					// The header is row 0, so the 2,000th row is the last body row.
+					const lastRow = `${big.count},0`;
 					const jumps = {
-						end: await jump('ArrowDown', { metaKey: true }, '2000,0'),
+						end: await jump('ArrowDown', { metaKey: true }, lastRow),
 						start: await jump('ArrowUp', { metaKey: true }, '0,0'),
-						pageDown: await jump('PageDown', {}, '2000,0'),
+						pageDown: await jump('PageDown', {}, lastRow),
 						pageUp: await jump('PageUp', {}, '0,0'),
 					};
 					check('Own 41: Cmd+↓ and Page Down jump a selected cell to row 2,000, and Cmd+↑ and Page Up back to the header, each in view and outlined in the first frame after the key', Object.values(jumps).every((j) => j.ok && j.ms < 100), jumps);

@@ -183,7 +183,10 @@ function statusInset(scroller: HTMLElement, pane: DOMRect, box: DOMRect): number
 /** What showing a cell reads from the page: the cell, the pane, and how much of the pane's bottom the status bar hides. */
 interface ShowRead {
 	cell: DOMRect;
+	/** The cell's scroll margin above and below it, as `scrollIntoView` keeps it. */
 	margin: number;
+	/** Its scroll margins at its left and right, so a cell at a row's end takes the table back to its edge. */
+	side: { left: number; right: number };
 	top: number;
 	bottom: number;
 }
@@ -386,18 +389,20 @@ export class Model implements Span, DrawnTable {
 		const cell = el.getBoundingClientRect();
 		const top = pane.top + scroller.clientTop;
 		const bottom = top + scroller.clientHeight - statusInset(scroller, pane, cell);
-		return { cell, margin: parseFloat(getComputedStyle(el).scrollMarginTop) || 0, top, bottom };
+		const style = getComputedStyle(el);
+		const side = { left: parseFloat(style.scrollMarginLeft) || 0, right: parseFloat(style.scrollMarginRight) || 0 };
+		return { cell, margin: parseFloat(style.scrollMarginTop) || 0, side, top, bottom };
 	}
 
 	private writeShow(read: ShowRead | null): void {
 		const view = this.view;
 		if (!view || !read) return;
 		this.showing = null;
-		const { cell, margin, top, bottom } = read;
+		const { cell, margin, side, top, bottom } = read;
 		const scroller = view.scrollDOM;
 		if (cell.top - margin < top || cell.height + 2 * margin > bottom - top) scroller.scrollTop -= top - (cell.top - margin);
 		else if (cell.bottom + margin > bottom) scroller.scrollTop += cell.bottom + margin - bottom;
-		this.showSideways(cell.left, cell.right);
+		this.showSideways(cell.left - side.left, cell.right + side.right);
 	}
 
 	/**
@@ -425,16 +430,21 @@ export class Model implements Span, DrawnTable {
 		paintMatches(tr, view.state.doc.line(row < 0 ? header : header + 2 + row).text, this.matches.get(row) ?? []);
 	}
 
-	/** Brings the first match into view sideways, once its row is drawn: Obsidian's own scroll takes it into view down the note. */
+	/**
+	 * Brings the first match into view sideways, once its row is drawn: Obsidian's own scroll takes it into view down the
+	 * note. Only a drawn row asks for a measure, since each pass of drawing rows calls this, and a measure asked for in
+	 * every pass of a far jump restarts CodeMirror's measure loop until it gives up.
+	 */
 	private requestMatch(): void {
 		const view = this.view;
 		if (!view || !this.revealMatch) return;
+		const first = Math.min(...this.matches.keys());
+		const tr = first < 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(first);
+		if (!tr?.isConnected) return;
 		view.requestMeasure({
 			key: this.matchKey,
 			read: () => {
-				const first = Math.min(...this.matches.keys());
-				const tr = first < 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(first);
-				const el = tr?.isConnected ? tr.querySelector(MATCH_SELECTOR) : null;
+				const el = tr.isConnected ? tr.querySelector(MATCH_SELECTOR) : null;
 				return el ? el.getBoundingClientRect() : null;
 			},
 			write: (rect) => {

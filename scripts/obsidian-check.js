@@ -3404,7 +3404,8 @@
 					preview.use(true);
 					await sleep(500);
 					view = await open('Two report tables');
-					check('Own 34: ↓ four times past a table it stops on lands at the same place across as passing it with the switch off, within 1 px', across.line === shortLine && stock.line === shortLine && Math.abs(across.x - stock.x) <= 1 && across.x > across.start + 40, { across, stock, startX });
+					// With the switch off, passing a table loses the place across and lands at the line's start: kept for reference.
+					check('Own 34: ↓ four times past a table it stops on lands at the place across it started at, within 1 px', across.line === shortLine && Math.abs(across.x - startX) <= 1, { across, stock, startX });
 
 					// A held ↓ and ↑ pass every table in Long note, and never select one.
 					view = await open('Long note');

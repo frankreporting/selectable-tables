@@ -95,7 +95,8 @@ function caret(pos: number): TransactionSpec {
 
 /** Selects exactly a table, scrolled to the side it was selected from, keeping a caret's place across for ↑ and ↓. */
 function selecting(table: Span, fromAbove: boolean, goal?: number): TransactionSpec {
-	return { selection: wholeTable(table, fromAbove, goal), effects: EditorView.scrollIntoView(fromAbove ? table.from : table.to), userEvent: 'select' };
+	// A range alone would be read as an anchor and a head, and lose the place across ↑ and ↓ go on at.
+	return { selection: EditorSelection.create([wholeTable(table, fromAbove, goal)]), effects: EditorView.scrollIntoView(fromAbove ? table.from : table.to), userEvent: 'select' };
 }
 
 function run(view: EditorView, action: Action | null): boolean {
@@ -116,7 +117,7 @@ function run(view: EditorView, action: Action | null): boolean {
 		case 'pass': {
 			// From a table ↑ or ↓ stopped on, the caret goes on at the place it had before the table.
 			const onTable = !main.empty && main.goalColumn !== undefined;
-			const to = onTable ? landBeyond(view, action.table, action.forward, main.goalColumn) : land(view, main, action.table, action.forward);
+			const to = onTable ? EditorSelection.create([landBeyond(view, action.table, action.forward, main.goalColumn)]) : land(view, main, action.table, action.forward);
 			view.dispatch({ selection: to, scrollIntoView: true, userEvent: 'select' });
 			return true;
 		}

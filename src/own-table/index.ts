@@ -270,6 +270,13 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 		},
 	});
 
+	/** Obsidian's commands, acting at the note's selection inside an open cell, write into the cell as it writes (open-cell.ts). */
+	const cellCommands = EditorState.transactionFilter.of((tr) => {
+		const view = tr.startState.field(editorEditorField, false);
+		const cell = view ? openCells.get(view) : undefined;
+		return cell instanceof OpenCell && cell.note === view ? (cell.reconcile(tr) ?? tr) : tr;
+	});
+
 	const tableEvents = EditorView.domEventHandlers({
 		/**
 		 * A press on the box around a table's blocks, beside the table, selects it, as a press on a table's one block
@@ -443,7 +450,7 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 	});
 
 	return {
-		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, forKeys, Prec.highest(tableEvents)] : unsupported) as Extension,
+		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, forKeys, Prec.highest(tableEvents), cellCommands] : unsupported) as Extension,
 		/**
 		 * Obsidian's `css-change`, a new theme, font or snippet, or a font that finished loading: every table is laid
 		 * out again, with text measured anew, since a font that loads measures differently under the same name.

@@ -3807,7 +3807,8 @@
 					const cellSteady = (view) => {
 						const c = oc(view);
 						const texts = c?.texts();
-						return { crashed: crashed(view), rows: rowsRight(view).length, cell: !c || (texts.note !== null && texts.note.trim() === texts.cell.trim() && c.view.dom.isConnected) };
+						// What the cell writes is what the note holds: a line break in code is written <br> and reads back as <br>.
+						return { crashed: crashed(view), rows: rowsRight(view).length, cell: !c || (texts.source !== null && texts.source.trim() === texts.written.trim() && c.view.dom.isConnected) };
 					};
 					const cellSteadyOk = (s) => s.crashed === 0 && s.rows === 0 && s.cell;
 					let view;

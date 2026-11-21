@@ -158,10 +158,50 @@ export class OpenCell implements OwnCell {
 		return this.model.view === this.note ? { from: this.model.from, to: this.model.to } : null;
 	}
 
+	/**
+	 * A change made in the note right inside the cell's text, as Obsidian's editor commands make one at the note's
+	 * selection (Bold, Insert link, Insert horizontal rule), is taken as a change to the cell's text and written as the
+	 * cell writes, as Obsidian's table takes it into its open cell: line breaks and pipes it put there become `<br>`
+	 * and `\|`, and the column is padded again, rather than splitting the row. Null for any other transaction.
+	 */
+	reconcile(tr: Transaction): TransactionSpec | null {
+		if (this.closed || !tr.docChanged || tr.annotation(writesCell) || tr.annotation(Transaction.remote)) return null;
+		if (['undo', 'redo', 'set', 'input.type.compose'].some((event) => tr.isUserEvent(event))) return null;
+		const doc = tr.startState.doc;
+		const place = cellPlace(doc, this.model, this.cell);
+		if (!place?.segment) return null;
+		const from = place.line.from + place.segment.from;
+		const to = place.line.from + place.segment.to;
+		let inside = true;
+		tr.changes.iterChangedRanges((changeFrom, changeTo) => {
+			if (changeFrom < from || changeTo > to) inside = false;
+		});
+		if (!inside) return null;
+		// The cell's text after the change, as the change left it in the note: padding off, and what it typed kept.
+		const newFrom = tr.changes.mapPos(from, -1);
+		const raw = tr.newDoc.sliceString(newFrom, tr.changes.mapPos(to, 1));
+		const lead = raw.length - raw.replace(/^[ \t]+/, '').length;
+		const text = raw.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
+		const shown = toCellEditor(text);
+		const source = toCellSource(shown.text);
+		const written = writeCell(doc, this.model, this.cell, source.text, this.padding);
+		if (!written) return null;
+		const map = (pos: number) => {
+			const offset = clamp(pos - newFrom - lead, 0, text.length);
+			return written.from + clamp(source.changes.mapPos(shown.changes.mapPos(offset, 1), 1), 0, source.text.length);
+		};
+		const { ranges, mainIndex } = tr.newSelection;
+		const selection = EditorSelection.create(ranges.map((range) => EditorSelection.range(map(range.anchor), map(range.head))), mainIndex);
+		this.padding = written.padding;
+		const event = tr.annotation(Transaction.userEvent);
+		return { changes: written.changes, selection, scrollIntoView: tr.scrollIntoView, ...(event ? { userEvent: event } : {}) };
+	}
+
 	/** For the check script: the cell's text as the note has it, unescaped, and as its editor has it. */
-	texts(): { note: string | null; cell: string } {
+	texts(): { note: string | null; cell: string; written: string; source: string | null } {
 		const place = cellPlace(this.note.state.doc, this.model, this.cell);
-		return { note: place ? toCellEditor(place.source).text : null, cell: this.editor.view.state.doc.toString() };
+		const cell = this.editor.view.state.doc.toString();
+		return { note: place ? toCellEditor(place.source).text : null, cell, written: toCellSource(cell).text, source: place?.source ?? null };
 	}
 
 	holds(from: number, to: number): boolean {
@@ -421,8 +461,10 @@ export class OpenCell implements OwnCell {
 		if (text) this.padding = paddingFor(doc, model, this.cell);
 		const shown = toCellEditor(place.source);
 		const now = view.state.doc.toString();
-		// Padding and trailing spaces typed are the same to the note: only a change to the text itself comes in.
-		const changes = text && shown.text !== now && shown.text !== now.trim() ? { from: 0, to: now.length, insert: shown.text } : undefined;
+		// Padding and trailing spaces typed are the same to the note, and so is a line break in code, which is written
+		// `<br>` and reads back as `<br>`: only a change to the text the cell writes comes in.
+		const same = shown.text === now || shown.text === now.trim() || toCellSource(now).text.trim() === place.source;
+		const changes = text && !same ? { from: 0, to: now.length, insert: shown.text } : undefined;
 		const { main } = note.state.selection;
 		let next: EditorSelection | undefined;
 		const inside = this.holds(Math.min(main.anchor, main.head), Math.max(main.anchor, main.head));

@@ -523,9 +523,10 @@ export class Model implements Span, DrawnTable {
 		return null;
 	}
 
-	/** The open cell's editor changed its height: the rows are measured again. */
+	/** The open cell's editor changed its height: the rows are measured again, and what pins is placed again. */
 	cellResized(): void {
 		this.schedule(true);
+		this.pins.measure();
 	}
 
 	/**
@@ -893,16 +894,21 @@ export class Model implements Span, DrawnTable {
 			if (rowCells(after).length > this.columns) return false;
 			changed.push(row);
 		}
+		let taller = false;
 		if (!sameCells(oldHead, head, this.columns, -1)) {
 			this.headWords = cellsOf(head, this.columns).map((text) => this.withMedia(text, true, measureCell(text, this.metrics!, true, measure)));
+			const was = this.headHeight;
 			this.headHeight = rowHeight(this.headWords, this.widths, this.metrics!, true);
+			taller ||= was !== this.headHeight;
 		}
 		for (const row of changed) {
 			const words = this.measureRow(doc.line(now.header + 2 + row).text);
 			this.rowWords[row] = words;
-			this.heights.set(row, rowHeight(words, this.widths, this.metrics!, false), false);
+			if (this.heights.set(row, rowHeight(words, this.widths, this.metrics!, false), false)) taller = true;
 		}
-		this.refit();
+		// A row whose height the estimate already has isn't changed when it's measured, so what pins is placed again now,
+		// for a row that grows or shrinks in the strip and the frozen rows' copies.
+		if (this.refit() || taller) this.pins.measure();
 		return true;
 	}
 

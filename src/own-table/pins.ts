@@ -61,6 +61,7 @@ const LIFTED_ROW_CLASS = 'selectable-tables-lifted-row';
 /** On a copy hidden so the real cells under it show: the open cell's row in the strip, or the first block's rail. */
 const HIDDEN_CLASS = 'selectable-tables-hidden-copy';
 
+
 const NONE: Freeze = { rows: 0, columns: 0 };
 /** Whether the browser can pin rows, read once. */
 let freezes: boolean | undefined;

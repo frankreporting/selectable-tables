@@ -428,6 +428,14 @@ body {
 	visibility: hidden;
 }
 
+/*
+ * As in a frozen table of Obsidian's (styles.css), the selected cell's frame sits inside its cell where anything pins: a
+ * frame past the cell would peek out beside what's pinned over it, as the real cell's does a pixel above the strip.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(th, td).selectable-tables-cell::after {
+	inset: 0;
+}
+
 /* A row's solid fill is a shadow, which Chromium paints even on a hidden row: it goes too, or it covers the open cell. */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr.selectable-tables-hidden-copy.selectable-tables-hidden-copy,
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr.selectable-tables-hidden-copy.selectable-tables-hidden-copy > :is(th, td) {

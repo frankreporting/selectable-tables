@@ -4525,7 +4525,19 @@
 					check('Own 67: a press on the frozen column\'s copy opens the real cell where the copy was, with the keyboard, and the table stays', name?.cell.column === 0 && name.view.hasFocus && Math.abs(nameAt.left - copyAt.left) <= 1 && Math.abs(nameAt.top - copyAt.top) <= 1 && shows(name.view.contentDOM) && plants.sideways().scroll === slidNow, { open: name?.cell, nameAt, copyAt, scroll: plants.sideways().scroll });
 					const nameInk = name ? await inked(name.view.contentDOM) : 0;
 					check('Own 67: the frozen column\'s open cell is drawn on screen, its text showing where the copy was', nameInk > 20, { ink: nameInk });
-					await realType('word');
+					// Each letter, as it wraps the cell's text onto more lines, grows its row in the strip as in the table, by the next
+					// frame: the copy of the row below never covers what's typed (STA-92's hand check, 11/22).
+					const grown = [];
+					await key('End');
+					// Short words at the text's end wrap onto new lines; a longer first word would widen the column instead.
+					for (const letter of ' ab cd ef gh ij') {
+						await key(letter === ' ' ? ' ' : letter);
+						await frames(1);
+						const realHeight = nameEl.parentElement.getBoundingClientRect().height;
+						const copy = Array.from(strip().querySelectorAll('tbody tr')).find((tr) => Math.abs(tr.getBoundingClientRect().top - nameEl.parentElement.getBoundingClientRect().top) < 2);
+						grown.push([letter, Math.round(realHeight), copy ? Math.round(copy.getBoundingClientRect().height) : null]);
+					}
+					check('Own 67: after each letter typed in the frozen column\'s open cell, its row is as tall in the strip as in the table', grown.every(([, a, b]) => b !== null && Math.abs(a - b) <= 1) && grown.some(([, a]) => a > grown[0][1]), grown);
 					await key('Enter', { shift: true });
 					await frames(3);
 					const realRow = nameEl.parentElement;
@@ -4540,7 +4552,7 @@
 					const edge = strip()?.getBoundingClientRect().right;
 					check('Own 67: Tab opens the next cell, and the table slides to show it beside the frozen column', bed?.cell.column === 1 && bed.cell.row === name.cell.row && Math.abs(bedAt.left - edge) <= 1 && shows(bed.view.contentDOM), { open: bed?.cell, left: bedAt?.left, edge });
 					await leave();
-					for (let i = 0; i < 8 && view.state.doc.toString() !== frozenText; i++) await key('z', { meta: true });
+					for (let i = 0; i < 24 && view.state.doc.toString() !== frozenText; i++) await key('z', { meta: true });
 					check('Own 67: Cmd+Z takes the typing back', view.state.doc.toString() === frozenText);
 
 					// Find shows its matches in the frozen column's copies, moved sideways, and leaves the table where it is.
@@ -4660,6 +4672,35 @@
 						sheds = named(view, 'Sheds');
 						check('Own 70: a right-click on a cell of a table nothing freezes shows the three freeze items, in their own section, in one menu', menuOne.join() === 'Freeze rows up to here,Freeze columns up to here,Freeze rows and columns up to here' && menus === 1, { menuOne, menus });
 						check('Own 70: Freeze columns up to here freezes up to the right-clicked cell, which is selected', chose && view.state.doc.lineAt(sheds.from).text.includes('%%freeze 0 2%%') && sheds.cell?.row === 2 && sheds.cell?.column === 1, { header: view.state.doc.lineAt(sheds.from).text.slice(0, 30), cell: sheds.cell });
+						// The frozen header cell selected and the table moved sideways: nothing of its frame shows above the table
+						// beside its copy's, as the real cell's did a pixel past it (STA-92's hand check, 11/22).
+						await key('ArrowUp');
+						await key('ArrowUp');
+						sheds.slideToStart();
+						await sleep(150);
+						sheds.slideBy(250);
+						await sleep(250);
+						await frames(3);
+						const shedsBlock = sheds.boxes[0];
+						const shedsStrip = shedsBlock.querySelector('.selectable-tables-strip');
+						const copyHead = shedsStrip?.querySelector('thead tr')?.cells[1];
+						let peeking = null;
+						if (shedsStrip && copyHead) {
+							const top = Math.round(shedsStrip.getBoundingClientRect().top);
+							const box = shedsBlock.getBoundingClientRect();
+							const copyAt = copyHead.getBoundingClientRect();
+							const shot = await window.electron.remote.getCurrentWebContents().capturePage({ x: Math.round(box.left), y: top - 3, width: Math.round(box.width), height: 3 });
+							const bytes = shot.toBitmap();
+							const width = Math.round(box.width);
+							const [r0, g0, b0] = [bytes[2], bytes[1], bytes[0]];
+							peeking = 0;
+							for (let i = 0; i < bytes.length; i += 4) {
+								const x = box.left + ((i / 4) % width);
+								if (x >= copyAt.left - 2 && x <= copyAt.right + 2) continue;
+								if (Math.abs(bytes[i + 2] - r0) + Math.abs(bytes[i + 1] - g0) + Math.abs(bytes[i] - b0) > 60) peeking++;
+							}
+						}
+						check('Own 70: a selected frozen header cell, the table moved sideways, shows no line of its frame above the table beside its copy', sheds.cell?.row === 0 && peeking === 0, { cell: sheds.cell, peeking });
 						await pointAt(middle(sheds.cellElement({ row: 3, column: 2 }), 10));
 						const inside = oc(view);
 						if (inside) await pointAt(middle(inside.view.contentDOM), 'right');

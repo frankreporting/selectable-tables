@@ -7,7 +7,7 @@ import { escapeCell, noteView, wholeTable } from './extension';
 import { canFreeze } from './freeze';
 import { hasMark, MAX_FROZEN_COLUMNS, readFreeze } from './freeze-mark';
 import { FreezeCommand, freezeAt, freezeChanges } from './freeze-write';
-import { viewLayout } from './layout';
+import { openCells, ownTables, viewLayout } from './layout';
 import type { Cell, Span } from './table-text';
 
 /** The commands, which the right-click menu offers too. */
@@ -26,9 +26,12 @@ const RANGE_CLASS = 'has-selection';
 /** Obsidian's handles for dragging a row or a column, inside a cell, with menus of their own. */
 const HANDLES = '.table-row-drag-handle, .table-col-drag-handle';
 
-/** A cell of one of a note's tables, by its widget, which Obsidian keeps when it builds the table anew. */
+/**
+ * A cell of one of a note's tables, and where that table is now: Obsidian's by its widget, which Obsidian keeps when it
+ * builds the table anew, and the plugin's own by the plugin's list of the note's tables.
+ */
 interface Place {
-	widget: HTMLElement;
+	table(): Span | null;
 	cell: Cell;
 }
 
@@ -43,18 +46,24 @@ interface Target {
  * The cell an element is in, in one of the note's own tables. A cell can hold an embedded note with a table of
  * its own, whose cells aren't the table's, so the cell is the one whose table is the widget's.
  */
-function placeOf(view: EditorView, element: Element): Place | null {
+function placeOf(view: EditorView, element: Element): (Place & { widget: HTMLElement }) | null {
 	const widget = element.closest<HTMLElement>(`.${TABLE_CLASS}`);
 	const table = widget?.parentElement === view.contentDOM ? widget.querySelector('table') : null;
 	let cell = element.closest<HTMLTableCellElement>('td, th');
 	while (cell && cell.closest('table') !== table) cell = cell.parentElement?.closest<HTMLTableCellElement>('td, th') ?? null;
 	const row = cell?.parentElement as HTMLTableRowElement | null | undefined;
 	if (!widget || !cell || !row) return null;
-	return { widget, cell: { row: row.rowIndex, column: cell.cellIndex } };
+	return { widget, table: () => tableOf(view, widget), cell: { row: row.rowIndex, column: cell.cellIndex } };
 }
 
-/** The note's open cell: an editor in the box Obsidian builds beside the cell's rendered text. */
+/**
+ * The note's open cell: the plugin's own table's, or else an editor in the box Obsidian builds beside the cell's
+ * rendered text.
+ */
 function openCell(view: EditorView): { place: Place; editor: EditorView | null } | null {
+	const own = openCells.get(view);
+	if (own && own.note === view) return { place: { table: () => own.table(), cell: own.cell }, editor: own.view };
+	if (view.state.facet(ownTables)?.spans(view.state)) return null;
 	const editor = view.contentDOM.querySelector<HTMLElement>(`:scope > .${TABLE_CLASS} .table-cell-wrapper .cm-editor`);
 	const place = editor && placeOf(view, editor);
 	return editor && place ? { place, editor: EditorView.findFromDOM(editor) } : null;
@@ -71,8 +80,17 @@ function targetIn(view: EditorView): Target | null {
 	const table = selectedTable(view.state, viewLayout(view));
 	if (table && selected) return { table, cell: selected, open: null };
 	const open = openCell(view);
-	const span = open && tableOf(view, open.place.widget);
+	const span = open?.place.table();
 	return open && span ? { table: span, cell: open.place.cell, open: open.editor } : null;
+}
+
+/**
+ * Whether this note's tables can pin rows: the plugin's own pin only on a computer, and Obsidian's wherever the browser
+ * runs scroll-driven animations.
+ */
+function pins(view: EditorView): boolean {
+	const own = view.state.facet(ownTables);
+	return own?.spans(view.state) ? own.pins(view) : canFreeze();
 }
 
 /** Whether a command does anything on a table: Unfreeze needs a mark. */
@@ -102,7 +120,7 @@ function run(view: EditorView, command: FreezeCommand) {
 	const { main } = view.state.selection;
 	// Kept apart in the history, so that Undo takes back the freeze alone, even with another edit right after it.
 	view.dispatch({ changes: written.changes, selection: wholeTable({ from: table.from, to: written.to }, main.anchor < main.head), annotations: [writesFreeze.of(true), isolateHistory.of('full')] });
-	if (command !== 'none' && !canFreeze()) new Notice('This device can\'t pin a table\'s rows, so its tables scroll as usual.');
+	if (command !== 'none' && !pins(view)) new Notice('This device can\'t pin a table\'s rows, so its tables scroll as usual.');
 }
 
 /**
@@ -110,10 +128,11 @@ function run(view: EditorView, command: FreezeCommand) {
  * right-clicked cell is selected, as Escape leaves a cell, so the command runs from there and leaves it
  * selected, with the keyboard in the note. A table Obsidian has since taken away does nothing.
  */
-function runAt(view: EditorView, { widget, cell }: Place, command: FreezeCommand) {
+function runAt(view: EditorView, place: Place, command: FreezeCommand) {
 	const open = openCell(view);
 	if (open && !(open.editor && escapeCell(open.editor))) return;
-	const table = tableOf(view, widget);
+	const table = place.table();
+	const { cell } = place;
 	if (!table) return;
 	const { main } = view.state.selection;
 	if (main.from !== table.from || main.to !== table.to) view.dispatch({ selection: wholeTable(table, false), userEvent: 'select' });
@@ -124,7 +143,7 @@ function runAt(view: EditorView, { widget, cell }: Place, command: FreezeCommand
 
 /** The freeze items for a right-clicked cell, in a section of their own. */
 function addItems(menu: Menu, view: EditorView, place: Place) {
-	const table = tableOf(view, place.widget);
+	const table = place.table();
 	if (!table) return;
 	for (const { name, icon, command } of FREEZES) {
 		if (!offered(command, view, table)) continue;
@@ -154,7 +173,16 @@ export function cellMenu(menu: Menu, editor: Editor, info: MarkdownView | Markdo
 export const tableMenus = ViewPlugin.define((view) => {
 	const onMenu = (event: MouseEvent) => {
 		const target = event.target as Element;
-		if (!event.defaultPrevented || target.closest('.cm-editor') !== view.dom || target.closest(HANDLES)) return;
+		if (target.closest('.cm-editor') !== view.dom) return;
+		// The plugin's own table has no menu of Obsidian's yet: a right-click on a cell, or on a copy of a pinned one, makes
+		// one, which stops the editor's own menu as Obsidian's table menu does. An open cell's is left to `editor-menu`.
+		const own = view.state.facet(ownTables);
+		if (own?.spans(view.state)) {
+			const place = own.cellAt(view, target);
+			if (place) addItems(Menu.forEvent(event), view, place);
+			return;
+		}
+		if (!event.defaultPrevented || target.closest(HANDLES)) return;
 		const place = placeOf(view, target);
 		if (place && !place.widget.classList.contains(RANGE_CLASS)) addItems(Menu.forEvent(event), view, place);
 	};

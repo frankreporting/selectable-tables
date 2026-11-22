@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { frozenIn, pinsFit, railOf, stickyTops, stripWidth } from '../src/own-table/pin-sums';
+import { frozenIn, pinsFit, railOf, showDown, stickyTops, stripWidth } from '../src/own-table/pin-sums';
 
 const sizes = { rows: 60, table: 2000, pane: 700, columns: 120, room: 600, slides: true };
 
@@ -40,4 +40,33 @@ test("a block's copy of the frozen rows rides from the table's top, or the rows'
 test("the strip is as wide as the frozen columns, the space between them, and the table's border at its start", () => {
 	assert.equal(stripWidth([100, 50, 70], 2, 0, 1), 151);
 	assert.equal(stripWidth([100, 50, 70], 1, 4, 0), 108);
+});
+
+// A pane from 100 to 800 on the screen, with 60 px of rows pinned at its top.
+const pane = { top: 100, bottom: 800, margin: 8, under: 60, pinned: false, tableTop: null };
+
+test('a cell that passes under the pinned rows is shown below them, and only as far as it must', () => {
+	// Half under the pinned rows: down to just below them, its margin kept.
+	assert.equal(showDown({ ...pane, cellTop: 130, cellBottom: 160 }), 130 - 8 - 160);
+	// Clear of them already: the note stays.
+	assert.equal(showDown({ ...pane, cellTop: 200, cellBottom: 230 }), 0);
+	// Past the pane's bottom: up to the bottom, as before.
+	assert.equal(showDown({ ...pane, cellTop: 790, cellBottom: 820 }), 820 + 8 - 800);
+	// With nothing pinned, the pane's top is the limit.
+	assert.equal(showDown({ ...pane, under: 0, cellTop: 130, cellBottom: 160 }), 0);
+	// A cell taller than the room left below the pinned rows starts right under them.
+	assert.equal(showDown({ ...pane, cellTop: 300, cellBottom: 1000 }), 300 - 8 - 160);
+});
+
+test('a pinned cell moves the note only when it is out of the pane, or a key went up into the pinned rows', () => {
+	const pinned = { ...pane, pinned: true, under: 0 };
+	// Where the rows pin, at the pane's top, it's in view whatever its margin.
+	assert.equal(showDown({ ...pinned, cellTop: 100, cellBottom: 130 }), 0);
+	// Left behind above the pane with the table's end: back to it.
+	assert.equal(showDown({ ...pinned, cellTop: -400, cellBottom: -370 }), -500);
+	// Below the pane, before the table: down to it.
+	assert.equal(showDown({ ...pinned, cellTop: 900, cellBottom: 930 }), 130);
+	// Up into the pinned rows from below: the table goes back to its top, so the rows under them show again.
+	assert.equal(showDown({ ...pinned, cellTop: 100, cellBottom: 130, tableTop: -2400 }), -2500);
+	assert.equal(showDown({ ...pinned, cellTop: 300, cellBottom: 330, tableTop: 300 }), 0);
 });

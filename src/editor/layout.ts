@@ -21,8 +21,12 @@ export interface DrawnTable {
 	readonly grid: Grid;
 	/** Draws `cell` as the selected one, or takes the selected cell off with null. */
 	markCell(cell: Cell | null): void;
-	/** Brings a cell into view, down the note and sideways, drawing its row first if it isn't drawn. */
-	showCell(cell: Cell): void;
+	/**
+	 * Brings a cell into view, down the note and sideways, drawing its row first if it isn't drawn, clear of the rows and
+	 * columns that pin. A key that went up into a frozen row, or left into a frozen column (`toward`), takes the table
+	 * back to its top or its start, so the rows and columns beside them show again.
+	 */
+	showCell(cell: Cell, toward?: 'up' | 'left'): void;
 	/** Opens a cell for editing, with the caret at the end of its text. */
 	openCell(cell: Cell): void;
 }
@@ -54,6 +58,10 @@ export interface OwnTables {
 	spans(state: EditorState): readonly Span[] | null;
 	/** The table starting at `from` in the editor's state, for its cells. */
 	table(view: EditorView, from: number): DrawnTable | null;
+	/** Whether this editor's tables pin their frozen rows and columns: on a computer, not a phone or tablet. */
+	pins(view: EditorView): boolean;
+	/** The cell an element of a drawn table is in, a pinned copy's being its real cell, and where its table is now. */
+	cellAt(view: EditorView, target: Element): { table(): Span | null; cell: Cell } | null;
 }
 
 export const ownTables = Facet.define<OwnTables, OwnTables | null>({ combine: (values) => values[0] ?? null });

@@ -122,7 +122,7 @@ class CellSelection implements PluginValue, Cells {
 		return { rows: table?.rows.length ?? 0, columns: (row) => table?.rows[row]?.cells.length ?? 0 };
 	}
 
-	select(cell: Cell) {
+	select(cell: Cell, toward?: 'up' | 'left') {
 		const { view } = this;
 		this.start ??= selectedTable(view.state, viewLayout(view))?.from ?? null;
 		this.selected = cell;
@@ -130,7 +130,7 @@ class CellSelection implements PluginValue, Cells {
 		statesWithCell.add(view.state);
 		const own = this.ownTable();
 		if (own) {
-			if (this.draw(own)) own.showCell(cell);
+			if (this.draw(own)) own.showCell(cell, toward);
 			return;
 		}
 		this.mark(this.tableElement());

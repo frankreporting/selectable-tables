@@ -1,6 +1,7 @@
 import type { Extension } from '@codemirror/state';
 import { Notice, type Plugin } from 'obsidian';
 import { escapeCell, selectableTables } from './editor/extension';
+import { tableMenus } from './editor/freeze-commands';
 import { forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
 
@@ -37,7 +38,7 @@ interface Saved {
  * The preview switch: a command that has the plugin draw Live Preview tables itself, for the whole vault, with no
  * restart. Only a preview build has it (esbuild.config.mjs); a release build puts preview-off.ts here. With the
  * switch on, the plugin's own table takes the place of Obsidian's, and the keys run on it. Its frozen rows and columns
- * pin on a computer (pins.ts); the freeze commands and the items in a table's menu, which is Obsidian's, don't reach it yet.
+ * pin on a computer (pins.ts), and the freeze commands and the freeze items in the right-click menu act on it too.
  * The setting is saved with the plugin's data, which Sync can carry to other devices.
  */
 export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {
@@ -65,7 +66,8 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	const use = (drawing: boolean) => {
 		on = drawing;
 		extensions.length = 0;
-		extensions.push(...(drawing ? [own.extension, keys] : usual));
+		// The freeze items in a table's right-click menu stay, on the plugin's table's cells and its pinned copies.
+		extensions.push(...(drawing ? [own.extension, keys, tableMenus] : usual));
 		app.workspace.updateOptions();
 	};
 

@@ -2602,7 +2602,8 @@
 		}
 
 		// --- Own table (preview builds only): the plugin draws Live Preview tables itself, behind its switch. Run
-		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too.
+		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too;
+		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3737,7 +3738,7 @@
 				}
 				}
 
-				{
+				if (!window.__checkFrozenCellsOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -4263,6 +4264,633 @@
 						await restore(view, text);
 					}
 					check('Own 64: after each of 3 × 200 seeded random steps in open cells, nothing crashed, the drawing matches the text, and the open cell holds its note text', !cellsBad, cellsBad);
+					view = await open('Watering schedule');
+					await sleep(300);
+					for (const name of touched) {
+						const file = app.vault.getAbstractFileByPath(`${name}.md`);
+						if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+					}
+					preview.use(false);
+					await sleep(300);
+				}
+
+				if (!window.__checkCellsOnly || window.__checkFrozenCellsOnly) {
+					// --- Cells of the plugin's frozen tables (STA-92): selecting, opening and freezing cells where frozen rows and
+					// columns pin, on a computer. Real keys and presses through the window's debugger. Run alone with
+					// window.__checkOwnOnly, __checkCellsOnly and __checkFrozenCellsOnly all true.
+					preview.use(true);
+					await sleep(400);
+					const codes = { Escape: 27, Enter: 13, Tab: 9, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Backspace: 8, Home: 36, End: 35, PageUp: 33, PageDown: 34 };
+					const key = async (name, { alt, ctrl, meta, shift, repeat } = {}) => {
+						const modifiers = (alt ? 1 : 0) | (ctrl ? 2 : 0) | (meta ? 4 : 0) | (shift ? 8 : 0);
+						const code = codes[name] ?? name.toUpperCase().charCodeAt(0);
+						const text = name.length === 1 && !(modifiers & 6) ? name : '';
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: code, modifiers, autoRepeat: !!repeat, unmodifiedText: macChar(name), text };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await settle();
+					};
+					const pointAt = async ({ x, y }, button = 'left') => {
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: 1 });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount: 1 });
+						await sleep(350);
+					};
+					const middle = (el, dx = null) => {
+						const r = el.getBoundingClientRect();
+						return { x: dx === null ? r.left + r.width / 2 : dx < 0 ? r.right + dx : r.left + dx, y: r.top + r.height / 2 };
+					};
+					const paneOf = (view) => {
+						const r = view.scrollDOM.getBoundingClientRect();
+						return { top: r.top + view.scrollDOM.clientTop, bottom: r.top + view.scrollDOM.clientTop + view.scrollDOM.clientHeight };
+					};
+					const oc = (view) => preview.openCell(view);
+					const realOf = (model, el) => el && !el.closest('.selectable-tables-strip, .selectable-tables-rail');
+					const realMarked = (view) => Array.from(view.contentDOM.querySelectorAll('.selectable-tables-own .selectable-tables-cell')).filter((el) => realOf(null, el));
+					// What shows at an element's middle is that element: nothing pinned covers it.
+					const shows = (el) => {
+						if (!el?.isConnected) return false;
+						const { x, y } = middle(el);
+						const hit = document.elementFromPoint(x, y);
+						return !!hit && el.contains(hit);
+					};
+					// Whether an element's box is drawn with text in it, from the window's own picture of it, not the page's state:
+					// a copy painted over it is invisible to hit tests (STA-92's hand check, 11/22). Pixels that differ from the
+					// box's commonest color count as ink.
+					const inked = async (el) => {
+						const r = el.getBoundingClientRect();
+						const shot = await window.electron.remote.getCurrentWebContents().capturePage({ x: Math.round(r.left) + 2, y: Math.round(r.top) + 2, width: Math.max(1, Math.round(r.width) - 4), height: Math.max(1, Math.round(r.height) - 4) });
+						const bytes = shot.toBitmap();
+						const counts = new Map();
+						for (let i = 0; i < bytes.length; i += 4) {
+							const color = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+							counts.set(color, (counts.get(color) ?? 0) + 1);
+						}
+						const [background] = [...counts].sort((a, b) => b[1] - a[1])[0] ?? [0];
+						let ink = 0;
+						for (let i = 0; i < bytes.length; i += 4) {
+							const diff = Math.abs(bytes[i] - ((background >> 16) & 255)) + Math.abs(bytes[i + 1] - ((background >> 8) & 255)) + Math.abs(bytes[i + 2] - (background & 255));
+							if (diff > 150) ink++;
+						}
+						return ink;
+					};
+					// The pinned rows' bottom, and the frozen columns' edge, on the screen.
+					const cover = (view, model) => {
+						const room = model.pins.room;
+						const strip = model.boxes.find((box) => box.isConnected)?.querySelector('.selectable-tables-strip');
+						return { bottom: paneOf(view).top + room.height, edge: room.columns && strip ? strip.getBoundingClientRect().right : null, room };
+					};
+					// The selected cell, real, is clear of what's pinned: below the rows and right of the columns, unless it's one of them.
+					const clear = (view, model) => {
+						const cell = model.cell;
+						const el = cell && model.cellElement(cell);
+						if (!el?.isConnected) return 'not drawn';
+						const r = el.getBoundingClientRect();
+						const { bottom, edge, room } = cover(view, model);
+						const p = paneOf(view);
+						if (r.bottom <= p.top || r.top >= p.bottom) return 'out of the pane';
+						if (cell.row >= room.rows && r.top < bottom - 1) return `under the rows ${Math.round(r.top)} < ${Math.round(bottom)}`;
+						if (edge !== null && cell.column >= room.columns && r.left < edge - 1) return `under the columns ${Math.round(r.left)} < ${Math.round(edge)}`;
+						return 'clear';
+					};
+					// Every copy is drawn from the text now: the frozen rows' copies from their lines, each strip row from its real
+					// row's text, as tall as it, but for the open cell's row, whose cell holds what's typed.
+					const copiesRight = (view) => {
+						const bad = [];
+						for (const model of models(view)) {
+							const pins = model.pins;
+							if (!model.shown || !pins.source) continue;
+							const want = pins.host.lines(Math.max(0, pins.freeze.rows - 1));
+							if (want.join('\n') !== pins.source.lines.join('\n')) bad.push(`${model.from}: frozen rows' copy`);
+							for (const block of model.blocks) {
+								const strip = block?.dom.isConnected ? pins.parts.get(block)?.strip : null;
+								// A strip that steps aside for an open cell in a frozen row and a frozen column draws nothing.
+								if (!strip || strip.box.classList.contains('selectable-tables-strip-off')) continue;
+								for (const tr of Array.from(block.tbody.rows)) {
+									if (tr.classList.contains('selectable-tables-spacer')) continue;
+									const mirror = strip.mirrors.get(tr);
+									if (!mirror) {
+										bad.push(`${model.from}:${block.index}: a row with no strip copy`);
+										continue;
+									}
+									if (tr !== model.openRow && mirror.text !== pins.host.textOf(tr)) bad.push(`${model.from}:${tr.getAttribute('aria-rowindex')}: strip text`);
+									if (Math.abs(tr.getBoundingClientRect().height - mirror.tr.getBoundingClientRect().height) > 1) bad.push(`${model.from}:${tr.getAttribute('aria-rowindex')}: strip height`);
+								}
+							}
+						}
+						return bad;
+					};
+					const steady = (view) => ({ crashed: crashed(view), rows: rowsRight(view).length, copies: copiesRight(view), marked: realMarked(view).length });
+					const steadyOk = (s) => s.crashed === 0 && s.rows === 0 && s.copies.length === 0 && s.marked <= 1;
+					const named = (view, heading) => {
+						const at = view.state.doc.toString().indexOf(`## ${heading}`);
+						return models(view).find((model) => model.from > at);
+					};
+					const selectAbove = async (view, model) => {
+						const line = view.state.doc.line(view.state.doc.lineAt(model.from).number - 1);
+						view.dispatch({ selection: { anchor: line.to }, scrollIntoView: true });
+						view.focus();
+						await sleep(250);
+						await key('ArrowRight');
+					};
+					const toRow = async (view, model, row) => {
+						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(view.state.doc.lineAt(model.from).number + 2 + row).from, { y: 'start' }) });
+						await sleep(400);
+						await frames(3);
+					};
+					const leave = async () => {
+						await key('Escape');
+						await key('Escape');
+					};
+					const touched = ['Frozen tables', 'Frozen table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					let view = await open('Frozen tables');
+					await sleep(400);
+					const frozenText = view.state.doc.toString();
+					let plants = named(view, 'Plants');
+
+					// The keys keep the selected cell clear of what's pinned, down the note and sideways, and going up or left
+					// into what's frozen takes the table back to its top or its start.
+					view.scrollDOM.scrollTop = 0;
+					await sleep(200);
+					await selectAbove(view, plants);
+					await key('Enter');
+					const moves = [];
+					for (let i = 0; i < 30; i++) {
+						await key('ArrowDown', { repeat: i > 0 });
+						moves.push(['↓', clear(view, plants)]);
+					}
+					for (let i = 0; i < 8; i++) {
+						await key('ArrowRight', { repeat: i > 0 });
+						moves.push(['→', clear(view, plants)]);
+					}
+					for (let i = 0; i < 40; i++) {
+						await key('ArrowUp', { repeat: i > 0 });
+						if (plants.cell.row >= 2) moves.push(['↑', clear(view, plants)]);
+					}
+					const tableTop = firstBox(plants).querySelector('table').getBoundingClientRect().top;
+					check('Own 65: holding ↓, → and ↑ in Plants keeps the selected cell clear of the pinned rows and the frozen column', moves.every(([, at]) => at === 'clear'), moves.filter(([, at]) => at !== 'clear'));
+					check('Own 65: ↑ into a frozen row takes the table back to its top', plants.cell.row === 0 && tableTop >= paneOf(view).top - 1, { cell: plants.cell, tableTop, pane: paneOf(view).top });
+					for (let i = 0; i < 8; i++) await key('ArrowLeft', { repeat: i > 0 });
+					check('Own 65: ← into a frozen column takes the table back to its start', plants.cell.column === 0 && plants.sideways().scroll === 0, { cell: plants.cell, scroll: plants.sideways().scroll });
+					check('Own 65: the selected cell\'s copy in the frozen column shows its outline, once', view.contentDOM.querySelectorAll('.selectable-tables-strip .selectable-tables-cell').length === 1 && realMarked(view).length === 1);
+					await leave();
+					// Every key that moves a cell, in Plants, Tools and the 2,000-row table, scrolled down and sideways: the cell is
+					// never under what's pinned. A cell of a long table that isn't drawn yet is drawn before the frame is painted.
+					const everyKey = [['ArrowDown'], ['ArrowDown'], ['ArrowRight'], ['ArrowRight'], ['Tab'], ['End'], ['PageDown'], ['ArrowDown'], ['Home'], ['ArrowRight'], ['PageDown'], ['Tab', { shift: true }], ['PageUp'], ['ArrowDown', { meta: true }], ['ArrowLeft'], ['ArrowUp'], ['ArrowUp', { meta: true }], ['ArrowDown', { ctrl: true }], ['End'], ['ArrowUp', { ctrl: true }]];
+					const keyed = [];
+					for (const [note, heading] of [['Frozen tables', 'Plants'], ['Frozen tables', 'Tools'], ['Frozen table 2000 by 12', null]]) {
+						view = await open(note);
+						await sleep(note === 'Frozen tables' ? 400 : 800);
+						const table = () => (heading ? named(view, heading) : models(view)[0]);
+						await selectAbove(view, table());
+						await key('Enter');
+						for (const [k, mods] of everyKey) {
+							await key(k, mods);
+							await frames(2);
+							const at = clear(view, table());
+							keyed.push([note === 'Frozen tables' ? heading : '2000', `${mods ? Object.keys(mods)[0] + '+' : ''}${k}`, table().cell && `${table().cell.row},${table().cell.column}`, at]);
+						}
+						await leave();
+						await leave();
+					}
+					check('Own 65: every key that moves a cell, in Plants, Tools and the 2,000-row table, leaves the selected cell clear of the pinned rows and columns, and drawn', keyed.every((step) => step[3] === 'clear'), keyed.filter((step) => step[3] !== 'clear'));
+					view = await open('Frozen tables');
+					await sleep(400);
+					plants = named(view, 'Plants');
+
+					// A press on a row half under the pinned rows opens it below them, and its caret stays in view as it grows.
+					await toRow(view, plants, 6);
+					view.scrollDOM.scrollTop += 20;
+					await sleep(200);
+					await frames(3);
+					const pinBottom = cover(view, plants).bottom;
+					const halfRow = Array.from(firstBox(plants).querySelectorAll('tbody tr')).find((tr) => {
+						const r = tr.getBoundingClientRect();
+						return !tr.className.includes('selectable-tables') && r.top < pinBottom - 4 && r.bottom > pinBottom + 4;
+					});
+					if (halfRow) {
+						const r = halfRow.cells[3].getBoundingClientRect();
+						await pointAt({ x: r.left + 20, y: (pinBottom + r.bottom) / 2 });
+						await frames(3);
+					}
+					const halfOpen = oc(view);
+					const halfTop = halfOpen && plants.cellElement(halfOpen.cell).getBoundingClientRect().top;
+					for (let i = 0; i < 3; i++) await key('Enter', { shift: true });
+					await frames(2);
+					const caret = halfOpen?.view.coordsAtPos(halfOpen.view.state.selection.main.head);
+					check('Own 66: a press on a row half under the pinned rows opens its cell fully below them', !!halfOpen && halfTop >= pinBottom - 1, { half: !!halfRow, open: halfOpen?.cell, halfTop, pinBottom });
+					check('Own 66: three line breaks later the cell has grown and its caret is in view, clear of the pinned rows', !!caret && caret.top >= pinBottom - 1 && caret.bottom <= paneOf(view).bottom + 1 && halfOpen.view.state.doc.lines === 4, { caret, pinBottom });
+					for (let i = 0; i < 3; i++) await key('z', { meta: true });
+					await leave();
+					check('Own 66: Cmd+Z three times takes the line breaks back', view.state.doc.toString() === frozenText);
+
+					// Moved sideways, a press on a pinned header cell opens it where it is, and the note doesn't move. A press on
+					// the frozen column's copy opens the real cell at the strip's place, which keeps the keyboard; its row grows in
+					// the column and the table alike, and Tab goes on to the next cell, beside the frozen column.
+					await toRow(view, plants, 12);
+					const head = firstBox(plants).querySelector('thead tr');
+					plants.slideToStart();
+					await sleep(200);
+					plants.slideBy(head.cells[1].getBoundingClientRect().width);
+					await sleep(200);
+					await frames(3);
+					const slid = plants.sideways().scroll;
+					// The row at the pane's bottom, which mustn't move: a header that grows as it opens, showing the freeze mark,
+					// grows over the rows under it, and the note's scroll moves to keep them still.
+					const atBottom = () => Array.from(firstBox(plants).querySelectorAll(':scope > .table-wrapper tbody tr')).find((tr) => {
+						const r = tr.getBoundingClientRect();
+						return r.top < paneOf(view).bottom - 30 && r.bottom >= paneOf(view).bottom - 30;
+					});
+					const bottomRow = atBottom();
+					const bottomBefore = bottomRow?.getBoundingClientRect().top;
+					await pointAt(middle(head.cells[2], 15));
+					const sown = oc(view);
+					const moved = bottomRow ? bottomRow.getBoundingClientRect().top - bottomBefore : null;
+					check('Own 67: a press on a pinned header cell, moved sideways, opens it where it is, and the row at the pane\'s bottom and the table stay', sown?.cell.row === 0 && sown.cell.column === 2 && shows(sown.view.contentDOM) && moved !== null && Math.abs(moved) <= 1 && plants.sideways().scroll === slid, { open: sown?.cell, moved, scroll: plants.sideways().scroll, slid });
+					await leave();
+					const strip = () => firstBox(plants).querySelector('.selectable-tables-strip');
+					const mid = (paneOf(view).top + paneOf(view).bottom) / 2;
+					const copyRow = Array.from(strip().querySelectorAll('tbody tr')).find((tr) => {
+						const r = tr.getBoundingClientRect();
+						return r.top < mid && r.bottom > mid;
+					});
+					const copyAt = copyRow.cells[0].getBoundingClientRect();
+					const slidNow = plants.sideways().scroll;
+					await pointAt({ x: copyAt.left + 10, y: copyAt.top + copyAt.height / 2 });
+					await frames(3);
+					const name = oc(view);
+					const nameEl = name && plants.cellElement(name.cell);
+					const nameAt = nameEl?.getBoundingClientRect();
+					check('Own 67: a press on the frozen column\'s copy opens the real cell where the copy was, with the keyboard, and the table stays', name?.cell.column === 0 && name.view.hasFocus && Math.abs(nameAt.left - copyAt.left) <= 1 && Math.abs(nameAt.top - copyAt.top) <= 1 && shows(name.view.contentDOM) && plants.sideways().scroll === slidNow, { open: name?.cell, nameAt, copyAt, scroll: plants.sideways().scroll });
+					const nameInk = name ? await inked(name.view.contentDOM) : 0;
+					check('Own 67: the frozen column\'s open cell is drawn on screen, its text showing where the copy was', nameInk > 20, { ink: nameInk });
+					// Each letter, as it wraps the cell's text onto more lines, grows its row in the strip as in the table, by the next
+					// frame: the copy of the row below never covers what's typed (STA-92's hand check, 11/22).
+					const grown = [];
+					await key('End');
+					// Short words at the text's end wrap onto new lines; a longer first word would widen the column instead.
+					for (const letter of ' ab cd ef gh ij') {
+						await key(letter === ' ' ? ' ' : letter);
+						await frames(1);
+						const realHeight = nameEl.parentElement.getBoundingClientRect().height;
+						const copy = Array.from(strip().querySelectorAll('tbody tr')).find((tr) => Math.abs(tr.getBoundingClientRect().top - nameEl.parentElement.getBoundingClientRect().top) < 2);
+						grown.push([letter, Math.round(realHeight), copy ? Math.round(copy.getBoundingClientRect().height) : null]);
+					}
+					check('Own 67: after each letter typed in the frozen column\'s open cell, its row is as tall in the strip as in the table', grown.every(([, a, b]) => b !== null && Math.abs(a - b) <= 1) && grown.some(([, a]) => a > grown[0][1]), grown);
+					await key('Enter', { shift: true });
+					await frames(3);
+					const realRow = nameEl.parentElement;
+					const rowCopy = Array.from(strip().querySelectorAll('tbody tr')).find((tr) => Math.abs(tr.getBoundingClientRect().top - realRow.getBoundingClientRect().top) < 2);
+					const nextReal = realRow.nextElementSibling?.getBoundingClientRect().top;
+					const nextCopy = rowCopy?.nextElementSibling?.getBoundingClientRect().top;
+					check('Own 67: typing grows the row in the frozen column and across the table alike, and the rows below stay lined up', !!rowCopy && Math.abs(realRow.getBoundingClientRect().height - rowCopy.getBoundingClientRect().height) <= 1 && Math.abs(nextReal - nextCopy) <= 1 && shows(name.view.contentDOM), { real: realRow.getBoundingClientRect().height, copy: rowCopy?.getBoundingClientRect().height, nextReal, nextCopy });
+					await key('Tab');
+					await frames(3);
+					const bed = oc(view);
+					const bedAt = bed && plants.cellElement(bed.cell).getBoundingClientRect();
+					const edge = strip()?.getBoundingClientRect().right;
+					check('Own 67: Tab opens the next cell, and the table slides to show it beside the frozen column', bed?.cell.column === 1 && bed.cell.row === name.cell.row && Math.abs(bedAt.left - edge) <= 1 && shows(bed.view.contentDOM), { open: bed?.cell, left: bedAt?.left, edge });
+					await leave();
+					for (let i = 0; i < 24 && view.state.doc.toString() !== frozenText; i++) await key('z', { meta: true });
+					check('Own 67: Cmd+Z takes the typing back', view.state.doc.toString() === frozenText);
+
+					// A cell in a frozen row and a frozen column, opened with the rows pinned and the table moved sideways: the table
+					// goes back to its start and the strip steps aside, so the open cell shows at the pane's top, and rows passing
+					// under the pinned rows don't cover it (STA-92's hand check, 11/22). Escape brings the strip back.
+					await toRow(view, plants, 12);
+					plants.slideToStart();
+					await sleep(150);
+					plants.slideBy(200);
+					await sleep(250);
+					await frames(3);
+					const cornerCopy = strip().querySelector('thead tr')?.cells[0];
+					if (cornerCopy) await pointAt(middle(cornerCopy, -6));
+					await frames(3);
+					const corner = oc(view);
+					const cornerInk = [corner ? await inked(corner.view.contentDOM) : 0];
+					plants.slideBy(150);
+					view.scrollDOM.scrollTop += 90;
+					await sleep(250);
+					await frames(3);
+					cornerInk.push(corner ? await inked(corner.view.contentDOM) : 0);
+					const cornerTop = corner?.view.dom.closest('th')?.getBoundingClientRect().top;
+					check('Own 67: a cell in a frozen row and a frozen column opens at the pane\'s top with the table at its start, and stays drawn as rows pass under it', corner?.cell.row === 0 && corner.cell.column === 0 && plants.sideways().scroll === 0 && cornerInk.every((ink) => ink > 20) && Math.abs(cornerTop - paneOf(view).top) <= 2, { open: corner?.cell, scroll: plants.sideways().scroll, ink: cornerInk, top: cornerTop, pane: paneOf(view).top });
+					await leave();
+					await frames(2);
+					const headCopy = strip().querySelector('thead tr');
+					check('Own 67: closed, the strip and its copy of the header are back', !!headCopy && getComputedStyle(strip()).display !== 'none' && getComputedStyle(headCopy).visibility === 'visible', { display: getComputedStyle(strip()).display });
+					for (let i = 0; i < 6 && view.state.doc.toString() !== frozenText; i++) await key('z', { meta: true });
+
+					// Find shows its matches in the frozen column's copies, moved sideways, and leaves the table where it is.
+					view.scrollDOM.scrollTop = view.lineBlockAt(plants.from).top - 50;
+					await sleep(300);
+					plants.slideBy(300);
+					await sleep(200);
+					const slidFind = plants.sideways().scroll;
+					app.workspace.getLeaf(false).view.showSearch(false);
+					await settle();
+					const find = Object.values(app.workspace.getLeaf(false).view.editMode).find((value) => value?.searchInputEl);
+					find.searchInputEl.value = 'Plant 7';
+					find.searchInputEl.dispatchEvent(new Event('input'));
+					await sleep(500);
+					await frames(3);
+					const stripMatch = strip().querySelector('.selectable-tables-match');
+					check('Own 68: Find\'s match in the frozen column shows on its copy there, and the table stays where it was', stripMatch?.closest('td').textContent.trim() === 'Plant 7' && shows(stripMatch.closest('td')) && plants.sideways().scroll === slidFind, { match: stripMatch?.closest('td')?.textContent, scroll: plants.sideways().scroll, slidFind });
+					find.searchInputEl.value = '';
+					find.searchInputEl.dispatchEvent(new Event('input'));
+					await sleep(300);
+					check('Own 68: emptying Find takes the match off the copy', !strip().querySelector('.selectable-tables-match'));
+					find.hide();
+					await settle();
+
+					// The freeze commands from a selected cell and an open one, Undo and Redo: the note's text as with the switch
+					// off, Undo taking back the freeze alone, and the cell selected and in view after each.
+					const commandsRun = async (on) => {
+						preview.use(on);
+						await sleep(400);
+						view = await open('Frozen tables');
+						await sleep(400);
+						view.scrollDOM.scrollTop = 0;
+						await sleep(200);
+						const table = () => (on ? named(view, 'Plants') : null);
+						const texts = [];
+						const seen = [];
+						const after = async () => {
+							await sleep(400);
+							await frames(3);
+							texts.push(view.state.doc.toString());
+							if (on) seen.push([table().cell && `${table().cell.row},${table().cell.column}`, clear(view, table())]);
+						};
+						const start = on ? table() : null;
+						if (on) await selectAbove(view, start);
+						else {
+							const line = view.state.doc.toString().indexOf('## Plants');
+							view.dispatch({ selection: { anchor: view.state.doc.lineAt(line).to + 1 }, scrollIntoView: true });
+							view.focus();
+							await sleep(250);
+							await real('ArrowRight');
+						}
+						await key('Enter');
+						for (const k of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowRight']) await key(k);
+						app.commands.executeCommandById('selectable-tables:freeze-rows-and-columns');
+						await after();
+						await key('z', { meta: true });
+						await after();
+						await key('z', { meta: true, shift: true });
+						await after();
+						await key('z', { meta: true });
+						await after();
+						await key('Enter');
+						const opened = !!(on ? oc(view) : view.contentDOM.querySelector('.cm-table-widget.has-focus'));
+						app.commands.executeCommandById('selectable-tables:unfreeze-table');
+						await after();
+						const closed = on ? !oc(view) && table().cell?.row === 3 && table().cell?.column === 1 && view.hasFocus : true;
+						await key('z', { meta: true });
+						await after();
+						await leave();
+						await restore(view, frozenText);
+						return { texts, seen, opened, closed };
+					};
+					const off = await commandsRun(false);
+					const on = await commandsRun(true);
+					// The mark on Plants' header line, two lines below its heading.
+					const marks = (texts) => texts.map((text) => (text.slice(text.indexOf('## Plants')).split('\n')[2].match(/%%freeze \d+ \d+%%/) ?? ['none'])[0]);
+					check('Own 69: freezing, Undo, Redo, Undo, Unfreeze from an open cell and Undo write the same text as with the switch off', on.texts.length === off.texts.length && on.texts.every((text, i) => text === off.texts[i]), { on: marks(on.texts), off: marks(off.texts) });
+					check('Own 69: Undo takes back the freeze alone, and Redo puts it back', marks(on.texts).join() === '%%freeze 4 2%%,%%freeze 2 1%%,%%freeze 4 2%%,%%freeze 2 1%%,none,%%freeze 2 1%%', marks(on.texts));
+					check('Own 69: after each, the cell stays selected and in view, clear of what\'s pinned', on.seen.every(([cell, at]) => cell === '3,1' && at === 'clear'), on.seen);
+					check('Own 69: Unfreeze from an open cell closes it, leaves it selected, and the keyboard in the note', on.opened && on.closed, on);
+
+					// The right-click menu: the freeze items on a cell of the plugin's table, with Unfreeze only for a table with a
+					// mark, and inside an open cell. Obsidian draws its own menus for the check.
+					const config = app.vault.config;
+					const hadNative = Object.hasOwn(config, 'nativeMenus');
+					const nativeBefore = config.nativeMenus;
+					const shownMenu = () => Array.from(document.querySelectorAll('.menu')).pop() ?? null;
+					const freezeItems = () => Array.from(shownMenu()?.querySelectorAll('.menu-item') ?? []).filter((item) => item.dataset.section === 'selectable-tables-freeze').map((item) => item.querySelector('.menu-item-title')?.textContent);
+					const closeMenu = async () => {
+						shownMenu()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+						await sleep(200);
+					};
+					const choose = async (title) => {
+						const item = Array.from(shownMenu()?.querySelectorAll('.menu-item') ?? []).find((el) => el.querySelector('.menu-item-title')?.textContent === title);
+						if (!item) {
+							await closeMenu();
+							return false;
+						}
+						await pointAt(middle(item, 10));
+						await sleep(300);
+						return true;
+					};
+					try {
+						config.nativeMenus = false;
+						app.updateUseNativeMenu();
+						// The parser reads only so far past the screen, so Sheds is found once it's scrolled to.
+						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.toString().indexOf('## Sheds'), { y: 'start' }) });
+						await sleep(500);
+						let sheds = named(view, 'Sheds');
+						view.dispatch({ effects: view.constructor.scrollIntoView(sheds.from, { y: 'start', yMargin: 120 }) });
+						await sleep(400);
+						await pointAt(middle(sheds.cellElement({ row: 2, column: 1 })), 'right');
+						const menuOne = freezeItems();
+						const menus = document.querySelectorAll('.menu').length;
+						const chose = await choose('Freeze columns up to here');
+						await frames(3);
+						sheds = named(view, 'Sheds');
+						check('Own 70: a right-click on a cell of a table nothing freezes shows the three freeze items, in their own section, in one menu', menuOne.join() === 'Freeze rows up to here,Freeze columns up to here,Freeze rows and columns up to here' && menus === 1, { menuOne, menus });
+						check('Own 70: Freeze columns up to here freezes up to the right-clicked cell, which is selected', chose && view.state.doc.lineAt(sheds.from).text.includes('%%freeze 0 2%%') && sheds.cell?.row === 2 && sheds.cell?.column === 1, { header: view.state.doc.lineAt(sheds.from).text.slice(0, 30), cell: sheds.cell });
+						// The frozen header cell selected and the table moved sideways: nothing of its frame shows above the table
+						// beside its copy's, as the real cell's did a pixel past it (STA-92's hand check, 11/22).
+						await key('ArrowUp');
+						await key('ArrowUp');
+						sheds.slideToStart();
+						await sleep(150);
+						sheds.slideBy(250);
+						await sleep(250);
+						await frames(3);
+						const shedsBlock = sheds.boxes[0];
+						const shedsStrip = shedsBlock.querySelector('.selectable-tables-strip');
+						const copyHead = shedsStrip?.querySelector('thead tr')?.cells[1];
+						let peeking = null;
+						if (shedsStrip && copyHead) {
+							const top = Math.round(shedsStrip.getBoundingClientRect().top);
+							const box = shedsBlock.getBoundingClientRect();
+							const copyAt = copyHead.getBoundingClientRect();
+							const shot = await window.electron.remote.getCurrentWebContents().capturePage({ x: Math.round(box.left), y: top - 3, width: Math.round(box.width), height: 3 });
+							const bytes = shot.toBitmap();
+							const width = Math.round(box.width);
+							const [r0, g0, b0] = [bytes[2], bytes[1], bytes[0]];
+							peeking = 0;
+							for (let i = 0; i < bytes.length; i += 4) {
+								const x = box.left + ((i / 4) % width);
+								if (x >= copyAt.left - 2 && x <= copyAt.right + 2) continue;
+								if (Math.abs(bytes[i + 2] - r0) + Math.abs(bytes[i + 1] - g0) + Math.abs(bytes[i] - b0) > 60) peeking++;
+							}
+						}
+						check('Own 70: a selected frozen header cell, the table moved sideways, shows no line of its frame above the table beside its copy', sheds.cell?.row === 0 && peeking === 0, { cell: sheds.cell, peeking });
+						await pointAt(middle(sheds.cellElement({ row: 3, column: 2 }), 10));
+						const inside = oc(view);
+						if (inside) await pointAt(middle(inside.view.contentDOM), 'right');
+						const menuTwo = freezeItems();
+						const choseTwo = await choose('Unfreeze table');
+						await frames(3);
+						sheds = named(view, 'Sheds');
+						check('Own 70: a right-click inside an open cell shows the freeze items, Unfreeze too, and Unfreeze closes the cell and takes the mark out', !!inside && menuTwo.length === 4 && menuTwo[3] === 'Unfreeze table' && choseTwo && !view.state.doc.lineAt(sheds.from).text.includes('%%freeze') && !oc(view) && sheds.cell?.row === 3, { menuTwo, open: !!oc(view), header: view.state.doc.lineAt(sheds.from).text.slice(0, 30) });
+						await closeMenu();
+					} finally {
+						if (hadNative) config.nativeMenus = nativeBefore;
+						else delete config.nativeMenus;
+						app.updateUseNativeMenu();
+					}
+					await leave();
+					await restore(view, frozenText);
+
+					// The 2,000-row table, in blocks of 100: deep down, a press on the pinned header opens the real cell at the
+					// table's top, where it shows, and pins with the note while it's open; what's typed shows in the pinned
+					// header's copies; a selected header cell's outline shows on the copy at every seam.
+					view = await open('Frozen table 2000 by 12');
+					await sleep(800);
+					const bigText = view.state.doc.toString();
+					const big = models(view)[0];
+					await toRow(view, big, 520);
+					const crossing = () => big.boxes.find((box) => {
+						const r = box.isConnected && box.getBoundingClientRect();
+						return r && r.top <= paneOf(view).top && r.bottom > paneOf(view).top;
+					});
+					const copyCell = (column) => crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[0]?.cells[column];
+					const pressed = copyCell(2);
+					const pressedText = pressed?.textContent;
+					if (pressed) await pointAt(middle(pressed, -6));
+					await sleep(400);
+					await frames(4);
+					const deep = oc(view);
+					check('Own 71: deep in the table, a press on the pinned header opens the real cell at the table\'s top, where it shows, with the keyboard', deep?.cell.row === 0 && deep.cell.column === 2 && deep.view.hasFocus && shows(deep.view.contentDOM) && deep.view.state.doc.toString() === pressedText, { open: deep?.cell, shows: deep && shows(deep.view.contentDOM), text: [deep?.view.state.doc.toString(), pressedText] });
+					const deepInk = deep ? await inked(deep.view.contentDOM) : 0;
+					check('Own 71: the open header cell is drawn on screen, its text showing under the hidden copy', deepInk > 20, { ink: deepInk });
+					await key('End');
+					await realType('q');
+					view.scrollDOM.scrollTop += 600;
+					await sleep(300);
+					await frames(3);
+					check('Own 71: scrolled on with it open, the open header cell pins at the pane\'s top and still shows', !!deep && shows(deep.view.contentDOM) && Math.abs(deep.view.dom.closest('th').getBoundingClientRect().top - paneOf(view).top) <= 2, { top: deep?.view.dom.closest('th')?.getBoundingClientRect().top, pane: paneOf(view).top });
+					await leave();
+					await toRow(view, big, 520);
+					check('Own 71: after Escape, the pinned header deep down shows what was typed', copyCell(2)?.textContent === `${pressedText}q`, { copy: copyCell(2)?.textContent });
+					for (let i = 0; i < 4 && view.state.doc.toString() !== bigText; i++) await key('z', { meta: true });
+					await leave();
+					await restore(view, bigText);
+					// With the header cell open at the table's top, scrolled on within the first block past where its rows are
+					// drawn, the frozen body row still pins under the header.
+					view.scrollDOM.scrollTop = 0;
+					await sleep(300);
+					await toRow(view, big, 0);
+					view.scrollDOM.scrollTop -= 200;
+					await sleep(300);
+					await frames(3);
+					big.slideToStart();
+					await sleep(200);
+					await pointAt(middle(big.cellElement({ row: 0, column: 1 }), -6));
+					const topOpen = oc(view);
+					view.scrollDOM.scrollTop += 2400;
+					await sleep(400);
+					await frames(4);
+					const below = big.cellElement({ row: 0, column: 1 })?.getBoundingClientRect();
+					const hitRow = below && document.elementFromPoint(below.left + below.width / 2, paneOf(view).top + below.height + 6)?.closest('tr');
+					const rowOne = !!hitRow && (hitRow.getAttribute('data-selectable-tables-row') === '1' || hitRow.getAttribute('aria-rowindex') === '2');
+					check('Own 71: with the header cell open and the note scrolled on within the first block, the header and the frozen row under it stay pinned', topOpen?.cell.row === 0 && shows(topOpen.view.contentDOM) && rowOne, { open: topOpen?.cell, shows: topOpen && shows(topOpen.view.contentDOM), hitRow: hitRow?.outerHTML.slice(0, 120) });
+					await leave();
+					// Selected from above, Freeze rows up to a header cell, then Undo: Undo scrolls to the table's far end, and the
+					// cell still ends in view.
+					view.scrollDOM.scrollTop = 0;
+					await sleep(300);
+					await selectAbove(view, big);
+					await key('Enter');
+					await key('ArrowRight');
+					app.commands.executeCommandById('selectable-tables:freeze-rows');
+					await sleep(400);
+					await key('z', { meta: true });
+					await sleep(600);
+					await frames(4);
+					const undoneSeen = big.pins.chosenCopies.some((el) => shows(el)) || shows(big.cellElement(big.cell));
+					check('Own 71: Undo of a freeze on the long table leaves the selected header cell in view', view.state.doc.toString() === bigText && big.cell?.row === 0 && undoneSeen, { cell: big.cell, seen: undoneSeen, text: view.state.doc.toString() === bigText });
+					await leave();
+					await restore(view, bigText);
+					view.scrollDOM.scrollTop = 0;
+					await sleep(300);
+					await selectAbove(view, big);
+					await key('Enter');
+					await key('ArrowRight');
+					const seams = [];
+					for (const row of [60, 99, 101, 150, 199, 205, 1990]) {
+						await toRow(view, big, row);
+						seams.push([row, copyCell(1)?.classList.contains('selectable-tables-cell') && shows(copyCell(1))]);
+					}
+					check('Own 72: a selected header cell\'s outline shows on the pinned header across every seam', seams.every(([, ok]) => ok), seams);
+					await leave();
+
+					// 60 seeded random steps on both tables: keys, presses on real cells, pinned copies and the strip, the freeze
+					// commands, Undo and Redo, typing, scrolling and swipes. After each, nothing crashed and the drawing, the copies
+					// and the strip included, matches the text.
+					let seed = 92;
+					const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+					const pick = (list) => list[Math.floor(random() * list.length)];
+					let bad = null;
+					const log = [];
+					for (const [note, steps] of [['Frozen tables', 30], ['Frozen table 2000 by 12', 30]]) {
+						view = await open(note);
+						await sleep(note === 'Frozen tables' ? 400 : 800);
+						const text = view.state.doc.toString();
+						const table = () => (note === 'Frozen tables' ? named(view, 'Plants') : models(view)[0]);
+						await selectAbove(view, table());
+						await key('Enter');
+						for (let step = 0; step < steps && !bad; step++) {
+							const roll = random();
+							let what;
+							const t = table();
+							if (roll < 0.35) {
+								const k = pick(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Home', 'End', 'PageDown', 'PageUp']);
+								what = k;
+								await key(k, { shift: k === 'Tab' && random() < 0.3 });
+							} else if (roll < 0.55) {
+								const kind = pick(['rail', 'strip', 'corner', 'real']);
+								const box = t.boxes.find((b) => b.isConnected && b.getBoundingClientRect().top <= paneOf(view).bottom && b.getBoundingClientRect().bottom > paneOf(view).top);
+								const sel = { rail: '.selectable-tables-copy-table td, .selectable-tables-copy-table th', strip: '.selectable-tables-strip td', corner: '.selectable-tables-corner th, .selectable-tables-corner td', real: ':scope > .table-wrapper td' }[kind];
+								const cells = box ? Array.from(box.querySelectorAll(sel)).filter((el) => shows(el)) : [];
+								what = `press ${kind}`;
+								if (cells.length) await pointAt(middle(pick(cells), 8));
+							} else if (roll < 0.65) {
+								const c = pick(['freeze-rows', 'freeze-columns', 'freeze-rows-and-columns', 'unfreeze-table']);
+								what = c;
+								app.commands.executeCommandById(`selectable-tables:${c}`);
+								await settle();
+							} else if (roll < 0.75) {
+								what = random() < 0.6 ? 'undo' : 'redo';
+								await key('z', { meta: true, shift: what === 'redo' });
+							} else if (roll < 0.85) {
+								what = 'type';
+								if (oc(view)) await realType('ab');
+								else await key('Enter');
+							} else if (roll < 0.93) {
+								what = 'scroll';
+								view.scrollDOM.scrollTop += (random() - 0.4) * 1500;
+								await sleep(200);
+							} else {
+								what = 'swipe';
+								t.slideBy((random() - 0.4) * 400);
+								await sleep(150);
+							}
+							await sleep(150);
+							await frames(3);
+							const s = steady(view);
+							log.push(what);
+							if (!steadyOk(s)) bad = { note, step, what, steady: s, last: log.slice(-6) };
+						}
+						await leave();
+						await leave();
+						await restore(view, text);
+					}
+					check('Own 73: after each of 60 seeded random keys, presses on pinned cells and the strip, freezes, Undo, Redo, typing, scrolls and swipes, nothing crashed and the drawing matches the text, copies included', !bad, bad);
 					view = await open('Watering schedule');
 					await sleep(300);
 					for (const name of touched) {

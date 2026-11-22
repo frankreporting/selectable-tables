@@ -4314,6 +4314,26 @@
 						const hit = document.elementFromPoint(x, y);
 						return !!hit && el.contains(hit);
 					};
+					// Whether an element's box is drawn with text in it, from the window's own picture of it, not the page's state:
+					// a copy painted over it is invisible to hit tests (STA-92's hand check, 11/22). Pixels that differ from the
+					// box's commonest color count as ink.
+					const inked = async (el) => {
+						const r = el.getBoundingClientRect();
+						const shot = await window.electron.remote.getCurrentWebContents().capturePage({ x: Math.round(r.left) + 2, y: Math.round(r.top) + 2, width: Math.max(1, Math.round(r.width) - 4), height: Math.max(1, Math.round(r.height) - 4) });
+						const bytes = shot.toBitmap();
+						const counts = new Map();
+						for (let i = 0; i < bytes.length; i += 4) {
+							const color = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+							counts.set(color, (counts.get(color) ?? 0) + 1);
+						}
+						const [background] = [...counts].sort((a, b) => b[1] - a[1])[0] ?? [0];
+						let ink = 0;
+						for (let i = 0; i < bytes.length; i += 4) {
+							const diff = Math.abs(bytes[i] - ((background >> 16) & 255)) + Math.abs(bytes[i + 1] - ((background >> 8) & 255)) + Math.abs(bytes[i + 2] - (background & 255));
+							if (diff > 150) ink++;
+						}
+						return ink;
+					};
 					// The pinned rows' bottom, and the frozen columns' edge, on the screen.
 					const cover = (view, model) => {
 						const room = model.pins.room;
@@ -4470,14 +4490,24 @@
 					// the column and the table alike, and Tab goes on to the next cell, beside the frozen column.
 					await toRow(view, plants, 12);
 					const head = firstBox(plants).querySelector('thead tr');
+					plants.slideToStart();
+					await sleep(200);
 					plants.slideBy(head.cells[1].getBoundingClientRect().width);
 					await sleep(200);
 					await frames(3);
 					const slid = plants.sideways().scroll;
-					const scrollBefore = view.scrollDOM.scrollTop;
+					// The row at the pane's bottom, which mustn't move: a header that grows as it opens, showing the freeze mark,
+					// grows over the rows under it, and the note's scroll moves to keep them still.
+					const atBottom = () => Array.from(firstBox(plants).querySelectorAll(':scope > .table-wrapper tbody tr')).find((tr) => {
+						const r = tr.getBoundingClientRect();
+						return r.top < paneOf(view).bottom - 30 && r.bottom >= paneOf(view).bottom - 30;
+					});
+					const bottomRow = atBottom();
+					const bottomBefore = bottomRow?.getBoundingClientRect().top;
 					await pointAt(middle(head.cells[2], 15));
 					const sown = oc(view);
-					check('Own 67: a press on a pinned header cell, moved sideways, opens it where it is, and the note and the table stay', sown?.cell.row === 0 && sown.cell.column === 2 && shows(sown.view.contentDOM) && Math.abs(view.scrollDOM.scrollTop - scrollBefore) <= 1 && plants.sideways().scroll === slid, { open: sown?.cell, by: view.scrollDOM.scrollTop - scrollBefore, scroll: plants.sideways().scroll, slid });
+					const moved = bottomRow ? bottomRow.getBoundingClientRect().top - bottomBefore : null;
+					check('Own 67: a press on a pinned header cell, moved sideways, opens it where it is, and the row at the pane\'s bottom and the table stay', sown?.cell.row === 0 && sown.cell.column === 2 && shows(sown.view.contentDOM) && moved !== null && Math.abs(moved) <= 1 && plants.sideways().scroll === slid, { open: sown?.cell, moved, scroll: plants.sideways().scroll, slid });
 					await leave();
 					const strip = () => firstBox(plants).querySelector('.selectable-tables-strip');
 					const mid = (paneOf(view).top + paneOf(view).bottom) / 2;
@@ -4493,6 +4523,8 @@
 					const nameEl = name && plants.cellElement(name.cell);
 					const nameAt = nameEl?.getBoundingClientRect();
 					check('Own 67: a press on the frozen column\'s copy opens the real cell where the copy was, with the keyboard, and the table stays', name?.cell.column === 0 && name.view.hasFocus && Math.abs(nameAt.left - copyAt.left) <= 1 && Math.abs(nameAt.top - copyAt.top) <= 1 && shows(name.view.contentDOM) && plants.sideways().scroll === slidNow, { open: name?.cell, nameAt, copyAt, scroll: plants.sideways().scroll });
+					const nameInk = name ? await inked(name.view.contentDOM) : 0;
+					check('Own 67: the frozen column\'s open cell is drawn on screen, its text showing where the copy was', nameInk > 20, { ink: nameInk });
 					await realType('word');
 					await key('Enter', { shift: true });
 					await frames(3);
@@ -4665,6 +4697,8 @@
 					await frames(4);
 					const deep = oc(view);
 					check('Own 71: deep in the table, a press on the pinned header opens the real cell at the table\'s top, where it shows, with the keyboard', deep?.cell.row === 0 && deep.cell.column === 2 && deep.view.hasFocus && shows(deep.view.contentDOM) && deep.view.state.doc.toString() === pressedText, { open: deep?.cell, shows: deep && shows(deep.view.contentDOM), text: [deep?.view.state.doc.toString(), pressedText] });
+					const deepInk = deep ? await inked(deep.view.contentDOM) : 0;
+					check('Own 71: the open header cell is drawn on screen, its text showing under the hidden copy', deepInk > 20, { ink: deepInk });
 					await key('End');
 					await realType('q');
 					view.scrollDOM.scrollTop += 600;
@@ -4685,12 +4719,14 @@
 					view.scrollDOM.scrollTop -= 200;
 					await sleep(300);
 					await frames(3);
-					await pointAt(middle(big.cellElement({ row: 0, column: 3 }), -6));
+					big.slideToStart();
+					await sleep(200);
+					await pointAt(middle(big.cellElement({ row: 0, column: 1 }), -6));
 					const topOpen = oc(view);
 					view.scrollDOM.scrollTop += 2400;
 					await sleep(400);
 					await frames(4);
-					const below = big.cellElement({ row: 0, column: 3 })?.getBoundingClientRect();
+					const below = big.cellElement({ row: 0, column: 1 })?.getBoundingClientRect();
 					const hitRow = below && document.elementFromPoint(below.left + below.width / 2, paneOf(view).top + below.height + 6)?.closest('tr');
 					const rowOne = !!hitRow && (hitRow.getAttribute('data-selectable-tables-row') === '1' || hitRow.getAttribute('aria-rowindex') === '2');
 					check('Own 71: with the header cell open and the note scrolled on within the first block, the header and the frozen row under it stay pinned', topOpen?.cell.row === 0 && shows(topOpen.view.contentDOM) && rowOne, { open: topOpen?.cell, shows: topOpen && shows(topOpen.view.contentDOM), hitRow: hitRow?.outerHTML.slice(0, 120) });

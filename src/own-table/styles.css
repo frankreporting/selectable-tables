@@ -427,3 +427,10 @@ body {
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-hidden-copy {
 	visibility: hidden;
 }
+
+/* A row's solid fill is a shadow, which Chromium paints even on a hidden row: it goes too, or it covers the open cell. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr.selectable-tables-hidden-copy.selectable-tables-hidden-copy,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr.selectable-tables-hidden-copy.selectable-tables-hidden-copy > :is(th, td) {
+	background: none;
+	box-shadow: none;
+}

@@ -91,7 +91,11 @@ export function runEdit(view: EditorView, edit: TableEdit, end: EditEnd = {}): b
 	const lines: string[] = [];
 	for (let n = doc.lineAt(table.from).number; n <= doc.lineAt(table.to).number; n++) lines.push(doc.line(n).text);
 	const edited = editTable(lines, edit, cell, { rtl: own.rtl, shown: shownText });
-	if (!edited) return true;
+	if (!edited) {
+		// Nothing to do there: an open cell opens again.
+		if (open) own.openCell(cell);
+		return true;
+	}
 	const annotations = [writesTable.of('rows'), isolateHistory.of('full')];
 	if (!edited.lines) {
 		// The table's last row or column: the table goes, as in Obsidian, and the caret goes where it was.
@@ -103,11 +107,19 @@ export function runEdit(view: EditorView, edit: TableEdit, end: EditEnd = {}): b
 	const { main } = view.state.selection;
 	if (changes.length) view.dispatch({ changes, selection: wholeTable({ from: table.from, to }, main.anchor < main.head), annotations, scrollIntoView: false });
 	const at = { row: edited.cell.row, column: end.column ?? edited.cell.column };
-	const cells = view.plugin(cellSelection);
-	cells?.select(at);
-	if (!open && !ADDS.has(edit)) return true;
-	cells?.opening();
-	ownTable(view, { from: table.from, to })?.openWhenDrawn(at);
+	const opens = open || ADDS.has(edit);
+	const now = ownTable(view, { from: table.from, to });
+	// The cell is selected, and opened, once its row is drawn from the new text: right after the edit, the row drawn
+	// there can be one from before.
+	const finish = () => {
+		const cells = view.plugin(cellSelection);
+		cells?.select(at);
+		if (!opens) return;
+		cells?.opening();
+		now?.openCell(at);
+	};
+	if (changes.length && now) now.afterDraw(at, finish);
+	else finish();
 	return true;
 }
 

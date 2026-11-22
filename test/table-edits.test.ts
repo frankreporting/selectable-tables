@@ -38,6 +38,12 @@ test('a row of only dashes is dropped, as Obsidian\'s parser drops it', () => {
 	]);
 });
 
+test('a row of only dashes, which the plugin draws and Obsidian drops, doesn\'t shift the rows an edit acts on', () => {
+	const dashed = ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |', '| ----- | ---- |', '| Mint  | Den  |', '| Sage  | Loft |'];
+	assert.deepEqual(edit(dashed, 'row-delete', cell(3, 0)).lines, ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |', '| Sage  | Loft |']);
+	assert.deepEqual(edit(dashed, 'row-up', cell(3, 1)).lines?.slice(2), ['| Mint  | Den  |', '| Fern  | Hall |', '| Sage  | Loft |']);
+});
+
 test('Add row above and below put an empty row there and go to its cell in the same column', () => {
 	assert.deepEqual(edit(plants, 'row-before', cell(2, 1)), {
 		lines: ['| Plant  | Room    | Count |', '| ------ | ------- | ----- |', '| Fern   | Kitchen | 10    |', '|        |         |       |', '| Basil  | Balcony | 9     |', '| Cactus | Office  | 100   |'],
@@ -187,4 +193,5 @@ test('a cell\'s shown text, as Obsidian draws it', () => {
 	assert.equal(shownText('a<br>b \\| c %%hidden%%'), 'a\nb | c');
 	assert.equal(shownText('snake_case_name'), 'snake_case_name');
 	assert.equal(shownText('<span>x</span> &amp; y'), 'x & y');
+	assert.equal(shownText('&#1114112; &#65;'), '&#1114112; A');
 });

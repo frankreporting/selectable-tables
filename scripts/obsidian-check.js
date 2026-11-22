@@ -4974,6 +4974,13 @@
 						await sleep(200);
 						return on ? openAtNow(view) === `${row},${column}` : !!view.contentDOM.querySelector('.cm-table-widget.has-focus');
 					};
+					// Where a right-click reaches an open cell's own menu: its text. Obsidian's open cell offers no table items in its
+					// padding (STA-61), so the checks press its text.
+					const menuAt = (view, on, heading, row, column) => {
+						const td = cellOf(view, on, heading, row, column);
+						const line = td?.querySelector('.cm-editor .cm-line');
+						return middle(line ?? td, 4);
+					};
 					const leaveAll = async (view) => {
 						await key('Escape');
 						await key('Escape');
@@ -5056,9 +5063,12 @@
 						const onMenus = await menusFor(true);
 						const tableTop = ['Row', 'Column', 'Sort by column (A to Z)', 'Sort by column (Z to A)', 'Freeze rows up to here', 'Freeze columns up to here', 'Freeze rows and columns up to here'];
 						check('Own 74: a right-click on a cell that isn\'t open shows Row, Column, the two sorts, then the freeze items, as Obsidian\'s own table does', onMenus.closed.top.join() === tableTop.join() && offMenus.closed.top.join() === tableTop.join(), { on: onMenus.closed.top, off: offMenus.closed.top });
-						check('Own 74: its Row and Column submenus hold Obsidian\'s items, worded and ordered as in Obsidian\'s', JSON.stringify([onMenus.closed.Row, onMenus.closed.Column]) === JSON.stringify([offMenus.closed.Row, offMenus.closed.Column]) && onMenus.closed.Row?.length === 5 && onMenus.closed.Column?.length === 8, { on: [onMenus.closed.Row, onMenus.closed.Column], off: [offMenus.closed.Row, offMenus.closed.Column] });
-						const tail = (titles) => titles.slice(titles.indexOf('Row'));
-						check('Own 74: over an open cell\'s text, the text items come first, then the same table items as Obsidian\'s open cell', onMenus.open.top.indexOf('Row') > 0 && tail(onMenus.open.top).join() === tail(offMenus.open.top).join() && JSON.stringify(onMenus.open.Row) === JSON.stringify(offMenus.open.Row), { on: onMenus.open.top, off: offMenus.open.top });
+						check('Own 74: its Row and Column submenus hold Obsidian\'s items, worded and ordered as in Obsidian\'s', JSON.stringify([onMenus.closed.Row, onMenus.closed.Column]) === JSON.stringify([offMenus.closed.Row, offMenus.closed.Column]) && onMenus.closed.Row?.length === 6 && onMenus.closed.Column?.length === 8, { on: [onMenus.closed.Row, onMenus.closed.Column], off: [offMenus.closed.Row, offMenus.closed.Column] });
+						// Obsidian's open cell puts the freeze items, from editor-menu, before its own table items; the plugin's cell puts
+						// the table items first, then the freeze items, as on a cell that isn't open.
+						const textItems = (titles) => titles.filter((title) => !tableTop.includes(title));
+						const tableItemsOf = (titles) => titles.filter((title) => ['Row', 'Column', 'Sort by column (A to Z)', 'Sort by column (Z to A)'].includes(title));
+						check('Own 74: over an open cell\'s text, the same text items come first as in Obsidian\'s open cell, then the table items and the freeze items', textItems(onMenus.open.top).length > 0 && textItems(onMenus.open.top).join() === textItems(offMenus.open.top).join() && onMenus.open.top.slice(onMenus.open.top.indexOf('Row')).join() === tableTop.join() && tableItemsOf(offMenus.open.top).join() === tableItemsOf(tableTop).join() && JSON.stringify(onMenus.open.Row) === JSON.stringify(offMenus.open.Row), { on: onMenus.open.top, off: offMenus.open.top, rows: [onMenus.open.Row, offMenus.open.Row] });
 
 						// The empty space below a short cell's text in a tall row, open.
 						view = await open('Table controls');
@@ -5091,7 +5101,7 @@
 							for (const [under, title] of items) {
 								await scrollTo(view, heading);
 								const opened = await openCellAt(view, on, heading, row, column);
-								await pointAt(middle(cellOf(view, on, heading, row, column), 6), 'right');
+								await pointAt(menuAt(view, on, heading, row, column), 'right');
 								const picked = await pick(under, title);
 								await sleep(300);
 								const after = view.state.doc.toString();
@@ -5111,7 +5121,9 @@
 						const offItems = await itemsRun(false, 'Seeds', 2, 1);
 						const onItems = await itemsRun(true, 'Seeds', 2, 1);
 						const differ = onItems.out.filter((each, i) => each.after !== offItems.out[i]?.after || each.after === onItems.text).map((each) => each.title);
-						check('Own 75: each Row, Column and Sort item, from an open cell, writes the same text as Obsidian\'s own table does', differ.length === 0 && onItems.out.every((each) => each.opened && each.picked), { differ, unpicked: onItems.out.filter((each) => !each.opened || !each.picked).map((each) => each.title) });
+						const seedsOf = (text) => text.slice(text.indexOf('## Seeds'), text.indexOf('A line between'));
+						const firstDiffer = onItems.out.findIndex((each, i) => each.after !== offItems.out[i]?.after || each.after === onItems.text);
+						check('Own 75: each Row, Column and Sort item, from an open cell, writes the same text as Obsidian\'s own table does', differ.length === 0 && onItems.out.every((each) => each.opened && each.picked), { differ, unpicked: onItems.out.filter((each) => !each.opened || !each.picked).map((each) => each.title), offUnpicked: offItems.out.filter((each) => !each.opened || !each.picked).map((each) => each.title), first: firstDiffer >= 0 ? { title: onItems.out[firstDiffer].title, on: seedsOf(onItems.out[firstDiffer].after), off: seedsOf(offItems.out[firstDiffer].after), was: seedsOf(onItems.text) } : null });
 						check('Own 75: Undo takes each edit back alone, and Redo puts it back', onItems.out.every((each) => each.undone && each.redone), onItems.out.filter((each) => !each.undone || !each.redone).map((each) => each.title));
 						const ended = Object.fromEntries(onItems.out.map((each) => [each.title, each.where.open]));
 						check('Own 76: after an item from an open cell, the new row\'s or column\'s cell opens, the moved cell opens in its place, and Delete opens the cell above or to the left', ended['Add row above'] === '2,1' && ended['Add row below'] === '3,1' && ended['Move row up'] === '1,1' && ended['Move row down'] === '3,1' && ended['Delete row'] === '1,1' && ended['Add column to the left'] === '2,1' && ended['Add column to the right'] === '2,2' && ended['Move column left'] === '2,0' && ended['Move column right'] === '2,2' && ended['Delete column'] === '2,0' && ended['Sort by column (A to Z)'] === '2,1', ended);
@@ -5128,7 +5140,7 @@
 							const text = view.state.doc.toString();
 							await scrollTo(view, 'Spaced by hand');
 							await openCellAt(view, on, 'Spaced by hand', 1, 0);
-							await pointAt(middle(cellOf(view, on, 'Spaced by hand', 1, 0), 6), 'right');
+							await pointAt(menuAt(view, on, 'Spaced by hand', 1, 0), 'right');
 							await pick('Row', 'Move row down');
 							const after = view.state.doc.toString();
 							await leaveAll(view);
@@ -5137,7 +5149,7 @@
 						};
 						const handOff = await handRun(false);
 						const handOn = await handRun(true);
-						check('Own 77: a table spaced by hand comes out tidied on its first edit, as Obsidian\'s own table leaves it', handOn === handOff && handOn.includes('| Hoe  | :---: |') === false && handOn.includes('| Hoe  |'), { on: handOn.slice(handOn.indexOf('## Spaced')), off: handOff.slice(handOff.indexOf('## Spaced')) });
+						check('Own 77: a table spaced by hand comes out tidied on its first edit, as Obsidian\'s own table leaves it', handOn === handOff && handOn.includes('| Hoe  | South |'), { on: handOn.slice(handOn.indexOf('## Spaced')), off: handOff.slice(handOff.indexOf('## Spaced')) });
 
 						// The commands, from a selected cell: Fern moves down, then right, and stays selected, with nothing open; with no
 						// cell selected or open, no table command is offered, and Obsidian's own aren't either.
@@ -5248,11 +5260,35 @@
 							for (let n = headerLine; n <= view.state.doc.lineAt(models(view)[0].to).number; n++) lines.push(view.state.doc.line(n).text);
 							return lines;
 						};
-						const before = bigLines();
+						// The table as Obsidian's table writes it: an edit writes it all again, so a table someone typed in by hand, as
+						// this git-ignored note can be after a hand check, comes out tidied, its columns as wide as their longest text.
+						const tidy = (lines) => {
+							const rows = lines.filter((_, i) => i !== 1).map(rowCells);
+							const aligns = rowCells(lines[1]).map((c) => (c.startsWith(':') ? (c.endsWith(':') ? 'center' : 'left') : c.endsWith(':') ? 'right' : null));
+							const widths = aligns.map((_, c) => Math.max(5, ...rows.map((r) => (r[c] ?? '').length + 2)));
+							const pad = (text, width, align) => {
+								const space = width - text.length;
+								const lead = align === 'right' ? space - 1 : align === 'center' ? Math.floor(space / 2) : 1;
+								return ' '.repeat(lead) + text + ' '.repeat(space - lead);
+							};
+							const dashes = (width, align) => (align === 'left' ? ` :${'-'.repeat(width - 3)} ` : align === 'center' ? ` :${'-'.repeat(width - 4)}: ` : align === 'right' ? ` ${'-'.repeat(width - 3)}: ` : ` ${'-'.repeat(width - 2)} `);
+							const out = rows.map((r) => `|${aligns.map((a, c) => pad(r[c] ?? '', widths[c], a)).join('|')}|`);
+							out.splice(1, 0, `|${aligns.map((a, c) => dashes(widths[c], a)).join('|')}|`);
+							return out;
+						};
+						// Timed on the table as Obsidian writes it, as the note is in git, so the first edit isn't the one that tidies it.
+						const tidied = tidy(bigLines());
+						const bigStart = view.state.doc.line(headerLine).from;
+						view.dispatch({ changes: { from: bigStart, to: view.state.doc.lineAt(models(view)[0].to).to, insert: tidied.join('\n') } });
+						await sleep(1500);
+						await frames(3);
+						const tidyText = view.state.doc.toString();
+						const before = tidied;
 						// The row at the pane's bottom, by its first cell, which counts the rows, and where it is; and the note's scroll.
 						const bottomRow = () => {
 							const pane = view.scrollDOM.getBoundingClientRect();
-							const hit = document.elementFromPoint(pane.left + 80, pane.top + view.scrollDOM.clientHeight - 30)?.closest('tr');
+							const left = view.contentDOM.getBoundingClientRect().left;
+							const hit = document.elementFromPoint(left + 40, pane.top + view.scrollDOM.clientHeight - 80)?.closest('tr');
 							return { text: hit?.cells[0]?.textContent.trim() ?? null, top: hit?.getBoundingClientRect().top ?? null, scroll: view.scrollDOM.scrollTop };
 						};
 						const timedEdit = async (row, column, id) => {
@@ -5275,10 +5311,10 @@
 						};
 						const deleted = await timedEdit(1500, 1, 'selectable-tables:table-row-delete');
 						const deletedRight = deleted.lines.length === before.length - 1 && deleted.lines.join('\n') === [...before.slice(0, 1501), ...before.slice(1502)].join('\n');
-						await restore(view, bigText);
+						await restore(view, tidyText);
 						const moved = await timedEdit(100, 1, 'selectable-tables:table-row-down');
 						const movedRight = moved.lines.join('\n') === [...before.slice(0, 101), before[102], before[101], ...before.slice(103)].join('\n');
-						await restore(view, bigText);
+						await restore(view, tidyText);
 						// Sort through the menu, since it has no command.
 						await leaveAll(view);
 						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(headerLine + 400).from, { y: 'center' }) });
@@ -5305,7 +5341,11 @@
 						await restore(view, bigText);
 						// The note doesn't scroll, and below an edit that keeps the number of rows, the row at the bottom is the same one.
 						const stays = (r, sameRow) => Math.abs(r.bottom.scroll - r.now.scroll) <= 2 && (!sameRow || (r.bottom.text === r.now.text && Math.abs(r.bottom.top - r.now.top) <= 2));
-						check('Own 81: in Table 2000 by 12, Delete row on row 1,500, Move row down on row 100 across a seam, and Sort A to Z each write the right text', deletedRight && movedRight && bodySorted && sameRows && !!sortItem, { deletedRight, movedRight, bodySorted, sameRows, sortItem: !!sortItem });
+						const firstOff = (got, want) => {
+							const i = want.findIndex((line, n) => got[n] !== line);
+							return i < 0 ? (got.length === want.length ? null : { lengths: [got.length, want.length] }) : { at: i, got: got[i]?.slice(0, 80), want: want[i]?.slice(0, 80), lengths: [got.length, want.length] };
+						};
+						check('Own 81: in Table 2000 by 12, Delete row on row 1,500, Move row down on row 100 across a seam, and Sort A to Z each write the right text', deletedRight && movedRight && bodySorted && sameRows && !!sortItem, { deletedRight, movedRight, bodySorted, sameRows, sortItem: !!sortItem, deleted: firstOff(deleted.lines, [...before.slice(0, 1501), ...before.slice(1502)]), moved: firstOff(moved.lines, [...before.slice(0, 101), before[102], before[101], ...before.slice(103)]), sortHeader: [sortedLines[0]?.slice(0, 60), before[0]?.slice(0, 60)], sortLengths: [sortedLines.length, before.length] });
 						check('Own 81: each takes under 1 s', deleted.ms < 1000 && moved.ms < 1000 && sortMs < 1000, { deleted: deleted.ms, moved: moved.ms, sort: sortMs });
 						check('Own 81: the row at the pane\'s bottom stays where it was', stays(deleted, false) && stays(moved, true) && stays({ bottom: sortBottom, now: sortNow }, false), { deleted: [deleted.bottom, deleted.now], moved: [moved.bottom, moved.now], sort: [sortBottom, sortNow] });
 						results.push({ name: 'Own 81 timings (ms)', ok: true, detail: { deleteRow1500: deleted.ms, moveRow100: moved.ms, sortColumn2: sortMs } });

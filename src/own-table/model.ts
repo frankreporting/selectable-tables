@@ -344,7 +344,7 @@ export class Model implements Span, DrawnTable {
 	private openRow: HTMLTableRowElement | null = null;
 	private openColumn = -1;
 	/** A cell to open once its row is drawn. */
-	private toOpen: { cell: Cell; run: () => void } | null = null;
+	private toOpen: { cell: Cell; run: () => void; near?: boolean } | null = null;
 
 	// Frozen rows and columns, on a computer.
 	private readonly pins = new Pins(this.pinHost());
@@ -436,11 +436,14 @@ export class Model implements Span, DrawnTable {
 	}
 
 	/**
-	 * Opens a cell once its row is drawn, after an edit that changed the table's rows: the element drawn there now can be
-	 * a row from before, until the next measure draws the rows again.
+	 * Runs `run` once a cell's row is drawn again, after an edit that changed the table's rows: the element drawn there now
+	 * can be a row from before, and after an edit that changed the header, no row is drawn until the next measure. The
+	 * cell is near where the pane is, so nothing scrolls first, which would move the note to the row's estimated place;
+	 * a row the next draw doesn't reach is brought into view then.
 	 */
-	openWhenDrawn(cell: Cell): void {
-		this.whenDrawn(cell, () => this.open(this, cell, null));
+	afterDraw(cell: Cell, run: () => void): void {
+		this.toOpen = { cell, run, near: true };
+		this.schedule(true);
 	}
 
 	get rtl(): boolean {
@@ -1660,7 +1663,7 @@ export class Model implements Span, DrawnTable {
 		if (waiting && this.cellElement(waiting.cell)?.isConnected) {
 			this.toOpen = null;
 			queueMicrotask(waiting.run);
-		}
+		} else if (waiting?.near) this.whenDrawn(waiting.cell, waiting.run);
 	}
 
 	/** Measures cells' pictures and players on the next measure, and widens their columns to fit, as Obsidian's table does. */

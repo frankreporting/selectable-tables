@@ -461,17 +461,24 @@ export class OpenCell implements OwnCell {
 		if (text) this.padding = paddingFor(doc, model, this.cell);
 		const shown = toCellEditor(place.source);
 		const now = view.state.doc.toString();
+		const own = toCellSource(now);
 		// Padding and trailing spaces typed are the same to the note, and so is a line break in code, which is written
 		// `<br>` and reads back as `<br>`: only a change to the text the cell writes comes in.
-		const same = shown.text === now || shown.text === now.trim() || toCellSource(now).text.trim() === place.source;
+		const same = shown.text === now || shown.text === now.trim() || own.text.trim() === place.source;
 		const changes = text && !same ? { from: 0, to: now.length, insert: shown.text } : undefined;
 		const { main } = note.state.selection;
 		let next: EditorSelection | undefined;
 		const inside = this.holds(Math.min(main.anchor, main.head), Math.max(main.anchor, main.head));
 		if (inside) {
-			// Mapped into the cell's text as it will be once the note's text is in.
-			const length = changes ? shown.text.length : now.length;
-			const map = (pos: number) => clamp(shown.changes.mapPos(clamp(pos - place.from, 0, place.source.length), 1), 0, length);
+			// Mapped into the cell's text as it will be once the note's text is in. Text the cell keeps is mapped as the cell
+			// wrote it, by its own text: a space typed at its end is padding to the note, which trims it from the cell's
+			// source, and a caret after that space stays after it.
+			let map: (pos: number) => number;
+			if (changes) map = (pos) => clamp(shown.changes.mapPos(clamp(pos - place.from, 0, place.source.length), 1), 0, shown.text.length);
+			else {
+				const back = own.changes.invertedDesc;
+				map = (pos) => clamp(back.mapPos(clamp(pos - place.from, 0, own.text.length), 1), 0, now.length);
+			}
 			next = EditorSelection.single(map(main.anchor), map(main.head));
 			if (!changes && next.eq(view.state.selection)) next = undefined;
 		} else if (selection) {

@@ -4018,6 +4018,26 @@
 					await app.vault.modify(file, cellsText);
 					await sleep(500);
 
+					// A space typed at a cell's end is only padding to the note. A change from elsewhere then, the parser's on a long
+					// note (a transaction with no text), or another plugin's write to another line, keeps the caret after it.
+					await openText(view, 'Tomato');
+					await realType(' ');
+					view.dispatch({});
+					await settle();
+					const spaceKept = where(view) === '3,1 7';
+					await realType('x ');
+					editor.replaceRange('z', { line: view.state.doc.lineAt(seed.from).number - 5, ch: 0 });
+					await settle();
+					await realType('y');
+					const spacesText = oc(view)?.view.state.doc.toString();
+					const spacesLine = lineOf(view, '| Tomato');
+					check('Own 58: a space typed at a cell\'s end stays before the next letter through a change from elsewhere, with no text or on another line', spaceKept && spacesText === 'Tomato x y' && spacesLine?.includes('| Tomato x y ') && cellSteadyOk(cellSteady(view)), { spaceKept, spacesText, spacesLine, steady: cellSteady(view) });
+					await key('Escape');
+					await key('Escape');
+					await restore(view, cellsText);
+					await app.vault.modify(file, cellsText);
+					await sleep(500);
+
 					// An input method in a cell: a composition finishes, and an edit from elsewhere during it waits for its end.
 					await openText(view, 'Tomato');
 					await realCompose({ key: 'n', code: 'KeyN' }, ['n', 'に'], 'に');
@@ -4043,6 +4063,9 @@
 					await key('Escape');
 					await restore(view, cellsText);
 					view = await open('Table 50 by 8');
+					// The note may open at its top, where its table is past the drawn range.
+					if (models(view)[0]) view.dispatch({ effects: view.constructor.scrollIntoView(models(view)[0].from, { y: 'start' }) });
+					await sleep(400);
 					const drawsAfter = ownBoxes(view).length > 0;
 					check('Own 59: a composition in a cell finishes, an edit from elsewhere during it comes in after it ends, and tables still draw afterwards', composeOk && drawsAfter, { composed, waited, after, drawsAfter });
 

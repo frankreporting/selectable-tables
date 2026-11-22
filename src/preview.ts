@@ -36,8 +36,8 @@ interface Saved {
 /**
  * The preview switch: a command that has the plugin draw Live Preview tables itself, for the whole vault, with no
  * restart. Only a preview build has it (esbuild.config.mjs); a release build puts preview-off.ts here. With the
- * switch on, the plugin's own table takes the place of Obsidian's, and the keys run on it. Frozen tables don't work on
- * it yet, and nor do the freeze items in a table's menu, which is Obsidian's.
+ * switch on, the plugin's own table takes the place of Obsidian's, and the keys run on it. Its frozen rows and columns
+ * pin on a computer (pins.ts); the freeze commands and the items in a table's menu, which is Obsidian's, don't reach it yet.
  * The setting is saved with the plugin's data, which Sync can carry to other devices.
  */
 export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {

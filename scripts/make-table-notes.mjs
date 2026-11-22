@@ -1,8 +1,9 @@
-// Writes the test vault's two notes for the plugin's own table, as STA-20 and STA-57's spikes wrote theirs, so their
+// Writes the test vault's notes for the plugin's own table, as STA-20 and STA-57's spikes wrote theirs, so their
 // timing figures compare: "Table 50 by 8", which git keeps, and "Table 2000 by 12", about 860 KB, which git
-// ignores and `npm run test-vault` writes when it's missing. Invented text only. The first column counts the rows.
-//   node scripts/make-table-notes.mjs [vault folder]          both notes
-//   node scripts/make-table-notes.mjs --if-missing [folder]   only the large one, and only when it isn't there
+// ignores and `npm run test-vault` writes when it's missing, and "Frozen table 2000 by 12", the same table with two
+// rows and one column frozen, also ignored. Invented text only. The first column counts the rows.
+//   node scripts/make-table-notes.mjs [vault folder]          every note
+//   node scripts/make-table-notes.mjs --if-missing [folder]   only the large ones, and only those that aren't there
 import { existsSync, writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -27,19 +28,20 @@ function cell(row, col) {
 	}
 }
 // Padded the way Obsidian's table editor pads a table, so a click in a cell leaves the note as it is.
-function table(rows, cols) {
-	const data = [Array.from({ length: cols }, (_, c) => (c === 0 ? 'Name' : `Column ${c} ${long(c)}`))];
+function table(rows, cols, mark = '') {
+	const data = [Array.from({ length: cols }, (_, c) => (c === 0 ? `${mark}Name` : `Column ${c} ${long(c)}`))];
 	for (let r = 1; r < rows; r++) data.push(Array.from({ length: cols }, (_, c) => (c === 0 ? `Row ${r}` : cell(r, c))));
 	const widths = data[0].map((_, c) => Math.max(3, ...data.map((row) => row[c].length)));
 	const line = (cells) => `| ${cells.map((v, c) => v.padEnd(widths[c])).join(' | ')} |`;
 	return [line(data[0]), line(widths.map((w) => '-'.repeat(w))), ...data.slice(1).map(line)];
 }
-const note = (name, rows, cols, first) => {
+const note = (name, rows, cols, first, mark) => {
 	let n = first;
 	const text = (count) => Array.from({ length: count }, () => sentence(n++));
-	writeFileSync(`${vault}/${name}.md`, [`# ${name}`, '', ...text(40), '', ...table(rows, cols), '', ...text(40)].join('\n') + '\n');
+	writeFileSync(`${vault}/${name}.md`, [`# ${name}`, '', ...text(40), '', ...table(rows, cols, mark), '', ...text(40)].join('\n') + '\n');
 };
 
-const big = `${vault}/Table 2000 by 12.md`;
-if (!args.includes('--if-missing') || !existsSync(big)) note('Table 2000 by 12', 2000, 12, 81);
+const missing = (name) => !args.includes('--if-missing') || !existsSync(`${vault}/${name}.md`);
+if (missing('Table 2000 by 12')) note('Table 2000 by 12', 2000, 12, 81);
+if (missing('Frozen table 2000 by 12')) note('Frozen table 2000 by 12', 2000, 12, 81, '%%freeze 2 1%% ');
 if (!args.includes('--if-missing')) note('Table 50 by 8', 50, 8, 1);

@@ -115,13 +115,17 @@ function stack(element: Element | null, end: Element | null, colors: string[]): 
 
 const quiet = (row: HTMLTableRowElement) => !row.matches(':hover, :focus-within');
 
-/** The body's first row of each kind, odd then even, passing over any under the pointer or holding an open cell. */
-function bodyRows(table: HTMLTableElement): [HTMLTableRowElement | undefined, HTMLTableRowElement | undefined] {
+/**
+ * The body's first row of each kind, odd then even, passing over any under the pointer or holding an open cell, and
+ * any that only stands in for rows, in the plugin's own table (`drawn`).
+ */
+function bodyRows(table: HTMLTableElement, drawn: (row: HTMLTableRowElement) => boolean): [HTMLTableRowElement | undefined, HTMLTableRowElement | undefined] {
 	const rows = table.tBodies[0]?.rows;
 	const pick = (parity: number) => {
 		let first: HTMLTableRowElement | undefined;
 		for (let index = parity; rows && index < rows.length; index += 2) {
 			const row = rows[index];
+			if (row && !drawn(row)) continue;
 			first ??= row;
 			if (row && quiet(row)) return row;
 		}
@@ -136,7 +140,7 @@ function bodyRows(table: HTMLTableElement): [HTMLTableRowElement | undefined, HT
  * read as they are. Also what shows at the cells' corners: the browser draws a cell's color, and its row's and
  * its header's or body's, inside the cell's rounding, so the corners show the table's color, over what's behind it.
  */
-export function readPaint(widget: HTMLElement, table: HTMLTableElement): Paint {
+export function readPaint(widget: HTMLElement, table: HTMLTableElement, drawn: (row: HTMLTableRowElement) => boolean = () => true, head?: HTMLTableRowElement): Paint {
 	const behind: string[] = [];
 	const solid = stack(widget, null, behind);
 	const page = solid ? (behind.pop() ?? PAGE_FALLBACK) : PAGE_FALLBACK;
@@ -148,8 +152,9 @@ export function readPaint(widget: HTMLElement, table: HTMLTableElement): Paint {
 	const corners: string[] = [];
 	if (!stack(table, widget, corners)) corners.push(...behind, page);
 
-	const header = table.tHead?.rows[0] ?? table.rows[0];
-	const [odd, even] = bodyRows(table);
+	// The plugin's own table can give its header from elsewhere: a block of its table past the first has none.
+	const header = head ?? table.tHead?.rows[0] ?? table.rows[0];
+	const [odd, even] = bodyRows(table, drawn);
 	const rows = [header, odd, even];
 	const variables: Paint['variables'] = [
 		[PAGE_VARIABLE, page],

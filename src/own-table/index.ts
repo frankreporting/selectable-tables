@@ -406,11 +406,11 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 		}
 
 		/** The pane's width or the theme changed: every table is laid out again, once its editor can be measured. */
-		resize(view: EditorView) {
+		resize(view: EditorView, look = false) {
 			forgetMetrics(view);
 			const metrics = metricsFor(view);
 			for (const model of this.models) {
-				model.resize();
+				model.resize(look);
 				model.ensureShape(view.state.doc, metrics);
 				if (model.view === view) model.refresh();
 			}
@@ -457,7 +457,7 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 		 */
 		themeChanged() {
 			lookChanged();
-			for (const editor of editors) editor.resize(editor.view);
+			for (const editor of editors) editor.resize(editor.view, true);
 		},
 		/** For the check script: an editor's tables, every table found from scratch, and where each parser puts tables. */
 		debug: {

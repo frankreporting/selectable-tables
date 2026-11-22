@@ -72,9 +72,13 @@
 	const attachedHere = !cdp.isAttached();
 	if (attachedHere) cdp.attach('1.3');
 	const virtualKeys = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, PageUp: 33, PageDown: 34, End: 35, Home: 36 };
+	// The key's own character, which macOS needs to match a Cmd or Ctrl shortcut to its menu item: without one it takes the
+	// first item with no key of its own, About Obsidian, whose dialog then holds every Obsidian window until someone answers it.
+	const macChars = { Escape: '\u001b', Enter: '\r', Tab: '\t', Backspace: '\u007f', ArrowUp: '\uf700', ArrowDown: '\uf701', ArrowLeft: '\uf702', ArrowRight: '\uf703', Home: '\uf729', End: '\uf72b', PageUp: '\uf72c', PageDown: '\uf72d' };
+	const macChar = (name) => macChars[name] ?? (name.length === 1 ? name.toLowerCase() : '');
 	async function real(key, { altKey, ctrlKey, metaKey, shiftKey } = {}, wait = settle) {
 		const modifiers = (altKey ? 1 : 0) | (ctrlKey ? 2 : 0) | (metaKey ? 4 : 0) | (shiftKey ? 8 : 0);
-		const event = { key, code: key, windowsVirtualKeyCode: virtualKeys[key], modifiers };
+		const event = { key, code: key, windowsVirtualKeyCode: virtualKeys[key], modifiers, unmodifiedText: macChar(key) };
 		await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
 		await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
 		await wait();
@@ -2598,7 +2602,8 @@
 		}
 
 		// --- Own table (preview builds only): the plugin draws Live Preview tables itself, behind its switch. Run
-		// alone with window.__checkOwnOnly = true. The note texts are put back as they were, and so is the switch.
+		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too.
+		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
 			const frames = async (n = 2) => {
@@ -2661,6 +2666,9 @@
 			const notes = app.vault.getMarkdownFiles().map((file) => file.basename).filter((name) => !/Test Plan$/.test(name)).sort();
 			const small = notes.filter((name) => app.vault.getAbstractFileByPath(`${name}.md`).stat.size < 60000);
 			try {
+				// Every own-table section before the cells', which window.__checkCellsOnly skips.
+				earlier: {
+				if (window.__checkCellsOnly) break earlier;
 				// Switch off: Obsidian's tables, drawn, against where its parser puts them.
 				preview.use(false);
 				await sleep(400);
@@ -2782,10 +2790,11 @@
 				view.dispatch({ effects: view.constructor.scrollIntoView(table.from, { y: 'start' }) });
 				await sleep(400);
 				[table] = models(view);
-				const cell = firstBox(table).querySelector('tbody tr:not(.selectable-tables-spacer) td:nth-child(3)');
+				// Beside the cells: a press on a cell opens it (STA-81).
+				const cell = firstBox(table);
 				await click(cell);
 				const chosen = view.state.selection.main;
-				check('Own 4: a press on a cell selects the whole table, tinted, framed, with no caret', chosen.from === table.from && chosen.to === table.to && firstBox(table).classList.contains('is-selected') && view.dom.classList.contains('selectable-tables-selected') && getComputedStyle(view.dom.querySelector('.cm-cursorLayer')).display === 'none', { chosen: [chosen.from, chosen.to], table: [table.from, table.to] });
+				check('Own 4: a press beside the cells selects the whole table, tinted, framed, with no caret', chosen.from === table.from && chosen.to === table.to && firstBox(table).classList.contains('is-selected') && view.dom.classList.contains('selectable-tables-selected') && getComputedStyle(view.dom.querySelector('.cm-cursorLayer')).display === 'none', { chosen: [chosen.from, chosen.to], table: [table.from, table.to] });
 				view.dispatch({ ...view.state.replaceSelection('x'), userEvent: 'input.type' });
 				await settle();
 				check('Own 4: typing over the selected table does nothing', view.state.doc.toString() === original);
@@ -3122,7 +3131,15 @@
 				// A selected table, moved to its middle: tinted, and its box clips the table and the tint.
 				view = await open('Table 2000 by 12');
 				await toRow(100);
-				await realClick(drawnRow(100).cells[1]);
+				{
+					// Beside the cells, in the box's padding: a press on a cell opens it (STA-81).
+					const box = shownBoxes(big)[0].parentElement.getBoundingClientRect();
+					const row = drawnRow(100).getBoundingClientRect();
+					const point = { x: box.left + 4, y: row.top + row.height / 2, button: 'left', clickCount: 1 };
+					await cdp.sendCommand('Input.dispatchMouseEvent', { ...point, type: 'mousePressed' });
+					await cdp.sendCommand('Input.dispatchMouseEvent', { ...point, type: 'mouseReleased' });
+					await sleep(400);
+				}
 				await swipe(250, 0);
 				const tintBox = shownBoxes(big)[0].parentElement;
 				const tinted = shownBoxes(big).filter((b) => b.classList.contains('is-selected')).length;
@@ -3472,14 +3489,18 @@
 					walk.push(cellOf(view));
 					check('Own 37: Enter on the selected table selects its first cell and takes the tint off; the arrows stop at the edges, Tab and Shift+Tab wrap between rows', first === '0,0' && tintOff && walk.join(' ') === '0,1 0,2 0,2 1,2 2,2 3,2 4,2 4,2 4,1 3,1 3,2 3,0' && view.state.doc.toString() === cellsText && steadyOk(steady(view), true), { first, tintOff, walk: walk.join(' '), steady: steady(view) });
 					await press(view, 'Enter');
-					const enterQuiet = cellOf(view) === '3,0' && view.state.doc.toString() === cellsText;
+					// Enter on the selected cell opens it (STA-81); Escape in it selects it again.
+					const opened = preview.openCell(view);
+					const enterOpens = !!opened && opened.cell.row === 3 && opened.cell.column === 0 && view.state.doc.toString() === cellsText;
+					if (opened) await press(opened.view, 'Escape');
+					const backToCell = !preview.openCell(view) && cellOf(view) === '3,0';
 					await press(view, 'Escape');
 					const backToTable = !cellOf(view) && whole(view, seed) && tint(seed);
 					await press(view, 'Enter');
 					const sameCell = cellOf(view) === '3,0';
 					await press(view, 'Escape');
 					await press(view, 'Escape');
-					check('Own 38: Enter on a selected cell does nothing yet; Escape goes back to the table, Enter to the same cell, and Escape twice to the line above', enterQuiet && backToTable && sameCell && sel(view).line === aboveSeed, { enterQuiet, backToTable, sameCell, line: sel(view).line });
+					check('Own 38: Enter on a selected cell opens it, Escape selects it again, Escape goes back to the table, Enter to the same cell, and Escape twice to the line above', enterOpens && backToCell && backToTable && sameCell && sel(view).line === aboveSeed, { enterOpens, backToCell, backToTable, sameCell, line: sel(view).line });
 
 					// Copy gives the cell's Markdown; Cut and Paste do nothing; Toggle checkbox and Toggle comment change nothing; typing goes below.
 					await caretOnLine(view, aboveSeed);
@@ -3711,6 +3732,543 @@
 					await press(view, 'Escape');
 					await press(view, 'Escape');
 					await restore(view, bigText);
+					preview.use(false);
+					await sleep(300);
+				}
+				}
+
+				{
+					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
+					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
+					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
+					preview.use(true);
+					await sleep(400);
+					const codes = { Escape: 27, Enter: 13, Tab: 9, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Backspace: 8, Home: 36, End: 35, PageUp: 33, PageDown: 34 };
+					const key = async (name, { alt, ctrl, meta, shift, repeat } = {}) => {
+						const modifiers = (alt ? 1 : 0) | (ctrl ? 2 : 0) | (meta ? 4 : 0) | (shift ? 8 : 0);
+						const code = codes[name] ?? name.toUpperCase().charCodeAt(0);
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: code, modifiers, autoRepeat: !!repeat, unmodifiedText: macChar(name) };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await settle();
+					};
+					const clickAt = async ({ x, y }) => {
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+						await sleep(300);
+					};
+					// The drawn cell holding a text, and where its text ends on screen.
+					const cellNamed = (view, text) => Array.from(view.contentDOM.querySelectorAll('.selectable-tables-own td, .selectable-tables-own th')).find((td) => td.isConnected && td.textContent.trim() === text) ?? null;
+					const endOf = (td) => {
+						const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+						let last = null;
+						for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.data.trim()) last = node;
+						const range = document.createRange();
+						range.setStart(last, last.data.trimEnd().length);
+						range.collapse(true);
+						const r = range.getBoundingClientRect();
+						return { x: r.right - 1, y: r.top + r.height / 2 };
+					};
+					const openText = async (view, text) => {
+						let td = cellNamed(view, text);
+						if (!td) {
+							// CodeMirror draws only what's near the pane: the cell's line is scrolled to first.
+							const at = view.state.doc.toString().indexOf(`| ${text}`);
+							if (at >= 0) view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'center' }) });
+							await sleep(400);
+							td = cellNamed(view, text);
+						}
+						if (!td) return false;
+						td.scrollIntoView({ block: 'center' });
+						await sleep(200);
+						await clickAt(endOf(cellNamed(view, text)));
+						return !!preview.openCell(view);
+					};
+					const oc = (view) => preview.openCell(view);
+					const where = (view) => {
+						const c = oc(view);
+						if (!c) return null;
+						const { anchor, head } = c.view.state.selection.main;
+						return `${c.cell.row},${c.cell.column} ${anchor === head ? head : `${anchor}-${head}`}`;
+					};
+					const lineOf = (view, text) => {
+						for (let n = 1; n <= view.state.doc.lines; n++) if (view.state.doc.line(n).text.includes(text)) return view.state.doc.line(n).text;
+						return null;
+					};
+					const outlined = (view) => {
+						const el = view.contentDOM.querySelector('.selectable-tables-cell');
+						if (!el) return null;
+						const tr = el.parentElement;
+						return `${tr.parentElement.localName === 'thead' ? 0 : Number(tr.getAttribute('aria-rowindex')) - 1},${el.cellIndex}`;
+					};
+					const whole = (view, model) => view.state.selection.ranges.length === 1 && view.state.selection.main.from === model.from && view.state.selection.main.to === model.to;
+					// After every step: nothing crashed, every drawn row shows its line, and an open cell holds its note text.
+					const cellSteady = (view) => {
+						const c = oc(view);
+						const texts = c?.texts();
+						// What the cell writes is what the note holds: a line break in code is written <br> and reads back as <br>.
+						return { crashed: crashed(view), rows: rowsRight(view).length, cell: !c || (texts.source !== null && texts.source.trim() === texts.written.trim() && c.view.dom.isConnected) };
+					};
+					const cellSteadyOk = (s) => s.crashed === 0 && s.rows === 0 && s.cell;
+					let view;
+					// The notes this section edits, as on disk now, written back at its end: an edit the editor takes back can
+					// still have been saved.
+					const touched = ['Markdown in cells', 'Cell moves', 'Table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+
+					// A press right after a word opens its cell, in Obsidian's own editor, with the caret there.
+					view = await open('Markdown in cells');
+					const mdText = view.state.doc.toString();
+					const colWidths = (model) => Array.from(firstBox(model).querySelectorAll('col')).map((col) => col.style.width).join();
+					const widthsBefore = colWidths(models(view)[0]);
+					await openText(view, 'Basil');
+					const basil = oc(view);
+					check('Own 50: a press right after a word opens its cell in Obsidian\'s own editor, with the caret right after the word and the column at its width', basil && basil.editor.borrowed && basil.view.state.doc.toString() === '**Basil**' && where(view) === '2,0 7' && basil.view.hasFocus && colWidths(models(view)[0]) === widthsBefore && cellSteadyOk(cellSteady(view)), { where: where(view), borrowed: basil?.editor.borrowed, widths: [widthsBefore, colWidths(models(view)[0])], steady: cellSteady(view) });
+
+					// Typed Markdown shows as in Obsidian's cell: the stars hide once the caret leaves them. Link suggestions take
+					// the keys first.
+					await openText(view, 'Office');
+					await realType(' **x** y');
+					const shown = oc(view)?.view.contentDOM.textContent;
+					await realType(' [[');
+					await sleep(400);
+					const suggesting = !!app.workspace.editorSuggest?.isShowingSuggestion?.();
+					await key('Escape');
+					const stillOpen = !!oc(view) && !app.workspace.editorSuggest?.isShowingSuggestion?.();
+					check('Own 51: typed Markdown hides its stars once the caret leaves them, [[ shows link suggestions, and Escape closes them first, the cell still open', shown === 'Office x y' && lineOf(view, 'Office **x** y') !== null && suggesting && stillOpen && cellSteadyOk(cellSteady(view)), { shown, suggesting, stillOpen, line: lineOf(view, 'Office') });
+					await restore(view, mdText);
+
+					// Commands act in the cell: Bold bolds there, and Toggle checkbox leaves the row alone.
+					await openText(view, 'Balcony');
+					const balcony = oc(view);
+					balcony?.view.dispatch({ selection: { anchor: 0, head: balcony.view.state.doc.length } });
+					await settle();
+					const editor = app.workspace.activeLeaf.view.editor;
+					const answered = editor.inTableCell === true && app.workspace.activeLeaf.view.editMode.activeCM === balcony?.view;
+					app.commands.executeCommandById('editor:toggle-bold');
+					await settle();
+					const bolded = oc(view)?.view.state.doc.toString() === '**Balcony**' && lineOf(view, '**Balcony**') !== null;
+					const beforeCheckbox = view.state.doc.toString();
+					app.commands.executeCommandById('editor:toggle-checklist-status');
+					await settle();
+					const checkboxQuiet = view.state.doc.toString() === beforeCheckbox;
+					await key('Escape');
+					await key('Escape');
+					const released = editor.inTableCell === false && app.workspace.activeLeaf.view.editMode.activeCM === view;
+					check('Own 52: with a cell open the note\'s editor answers for it, Bold bolds in the cell, Toggle checkbox leaves the row alone, and the answers come off as it closes', answered && bolded && checkboxQuiet && released, { answered, bolded, checkboxQuiet, released });
+					await restore(view, mdText);
+
+					// The keys in an open cell, as Obsidian's own cell has them.
+					view = await open('Cell moves');
+					const cellsText = view.state.doc.toString();
+					const seed = models(view)[0];
+					const steps = [];
+					await openText(view, 'Tomato');
+					steps.push(where(view));
+					for (const [name, mods] of [['ArrowRight'], ['ArrowLeft'], ['ArrowDown'], ['ArrowUp'], ['Tab'], ['Tab', { shift: true }], ['Enter'], ['Escape'], ['Enter'], ['Enter'], ['ArrowRight', { meta: true }], ['ArrowLeft', { meta: true }]]) {
+						await key(name, mods);
+						steps.push(where(view) ?? `selected ${outlined(view)}`);
+					}
+					check('Own 53: ← → ↑ ↓ at a text\'s edges, Tab, Shift+Tab and Enter move between cells as Obsidian\'s cell does, and Cmd+← and Cmd+→ at the edges too', steps.join(' | ') === '3,1 6 | 3,2 0 | 3,1 6 | 4,1 0 | 3,1 0 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | selected 4,1 | 4,1 10 | 4,1 10 | 4,2 0 | 4,1 10', steps.join(' | '));
+					await key('Escape');
+					await key('Escape');
+					// Out of the table at its four edges, to the start of the line beyond.
+					const aboveSeed = view.state.doc.lineAt(seed.from).number - 1;
+					const belowSeed = view.state.doc.lineAt(seed.to).number + 1;
+					const leaves = [];
+					for (const [text, name, toStart] of [['Tray', 'ArrowUp', true], ['Tray', 'ArrowLeft', true], ['Water twice', 'ArrowDown', false], ['Water twice', 'ArrowRight', false]]) {
+						await openText(view, text);
+						const c = oc(view);
+						if (toStart) c?.view.dispatch({ selection: { anchor: 0 } });
+						await settle();
+						await key(name);
+						const line = view.state.doc.lineAt(view.state.selection.main.head);
+						leaves.push(`${name}:${!oc(view) && view.hasFocus && view.state.selection.main.empty && view.state.selection.main.head === line.from ? line.number : 'no'}`);
+					}
+					check('Own 53: at the table\'s edges the keys leave it, to the start of the line above or below, with the note\'s keyboard', leaves.join(' ') === `ArrowUp:${aboveSeed} ArrowLeft:${aboveSeed} ArrowDown:${belowSeed} ArrowRight:${belowSeed}`, leaves.join(' '));
+					// The cell Tab leaves, in the same row, is drawn with its new text.
+					await openText(view, 'Tomato');
+					await realType('z');
+					await key('Tab');
+					await frames(3);
+					const leftDrawn = !!cellNamed(view, 'Tomatoz') && where(view) === '3,2 0-5';
+					await key('z', { meta: true });
+					await key('Escape');
+					await key('Escape');
+					check('Own 53: the cell Tab leaves in the same row is drawn with what was typed in it', leftDrawn, { leftDrawn, at: where(view) });
+					await restore(view, cellsText);
+
+					// Shift+Enter makes a line break, written <br>; a pipe is written \|; a dead key finishes. A table Obsidian
+					// wrote stays written that way, its rows as long as each other.
+					await openText(view, 'a | b');
+					await realType(' c | d');
+					await key('Enter', { shift: true });
+					await realType('e');
+					await realCompose({ key: 'Dead', code: 'KeyE', altKey: true }, ['´'], 'é');
+					const typedLine = lineOf(view, '| B1');
+					const seedNow = models(view)[0];
+					const seedLines = [];
+					for (let n = view.state.doc.lineAt(seedNow.from).number; n <= view.state.doc.lineAt(seedNow.to).number; n++) seedLines.push(view.state.doc.line(n).text.length);
+					check('Own 54: a pipe, a line break and a dead key typed in a cell are written as Obsidian\'s cell writes them, the column padded again in every row', typedLine?.includes('| a \\| b c \\| d<br>eé |') && new Set(seedLines).size === 1 && !oc(view)?.view.composing && cellSteadyOk(cellSteady(view)), { typedLine, seedLines: [...new Set(seedLines)], steady: cellSteady(view) });
+					await key('z', { meta: true });
+					await key('Escape');
+					await key('Escape');
+					await restore(view, cellsText);
+
+					// Tab held runs along the rows and stops at the table's last cell; Tab and Enter there do nothing.
+					await tableUnder(view, 'Tall table');
+					const tall = models(view).find((model) => view.state.doc.sliceString(model.from, model.from + 7) === '| Row |');
+					const tallLines = view.state.doc.lines;
+					await openText(view, '1');
+					for (let i = 0; i < tall.count * 3 + 6; i++) await key('Tab', { repeat: i > 0 });
+					const lastCell = `${tall.count},2`;
+					const heldStops = where(view)?.startsWith(lastCell);
+					await key('Tab');
+					await key('Enter');
+					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, and Tab and Enter there do nothing, adding no row', heldStops && where(view)?.startsWith(lastCell) && view.state.doc.lines === tallLines && view.state.doc.toString() === cellsText, { at: where(view), lastCell, lines: [tallLines, view.state.doc.lines] });
+					await key('Escape');
+					await key('Escape');
+
+					// Escape in two steps, Enter back in; clicking out.
+					await openText(view, 'Tomato');
+					await key('Escape');
+					const first = !oc(view) && outlined(view) === '3,1' && whole(view, models(view)[0]);
+					await key('Escape');
+					const second = !oc(view) && !outlined(view) && whole(view, models(view)[0]);
+					await key('Enter');
+					await key('Enter');
+					const reopened = where(view) === '3,1 6';
+					check('Own 56: Escape closes the cell and selects it, Escape again selects the table, and Enter, Enter opens the cell again with the caret at its end', first && second && reopened, { first, second, at: where(view) });
+					const lineBelow = Array.from(view.contentDOM.querySelectorAll('.cm-line')).find((line) => line.textContent.startsWith('A line of text below'));
+					const below = lineBelow.getBoundingClientRect();
+					await clickAt({ x: below.left + 40, y: below.top + below.height / 2 });
+					const out = !oc(view) && view.hasFocus && view.state.doc.lineAt(view.state.selection.main.head).text.startsWith('A line of text below');
+					await openText(view, 'Seed');
+					const top = view.scrollDOM.scrollTop;
+					const header = firstBox(models(view)[0]).querySelector('thead tr').getBoundingClientRect();
+					const strip = firstBox(models(view)[0]).getBoundingClientRect();
+					await clickAt({ x: strip.left + 4, y: header.top + header.height / 2 });
+					const besideOk = !oc(view) && whole(view, models(view)[0]) && firstBox(models(view)[0]).classList.contains('is-selected') && Math.abs(view.scrollDOM.scrollTop - top) <= 1;
+					check('Own 56: a click on the line below closes the cell with the caret there, and a click beside the cells selects the whole table, tinted, the note still', out && besideOk, { out, besideOk, moved: view.scrollDOM.scrollTop - top });
+					await key('Escape');
+
+					// Undo and redo: from the cell, the cell stays open; from the note, the cell is selected; Enter opens it.
+					await openText(view, 'Tomato');
+					await realType(' red');
+					await sleep(700);
+					await key('z', { meta: true });
+					const undoneInCell = where(view) === '3,1 6' && lineOf(view, '| B1').includes('| Tomato ');
+					await key('z', { meta: true, shift: true });
+					const redoneInCell = !!oc(view) && oc(view).view.state.doc.toString() === 'Tomato red';
+					await key('Escape');
+					await key('Escape');
+					await caretOnLine(view, belowSeed);
+					await key('z', { meta: true });
+					await sleep(100);
+					const undoneFromNote = !oc(view) && outlined(view) === '3,1' && lineOf(view, '| B1').includes('| Tomato ');
+					await key('Enter');
+					const openedAfter = where(view) === '3,1 6';
+					await key('z', { meta: true, shift: true });
+					const redoneAfter = oc(view)?.view.state.doc.toString() === 'Tomato red';
+					check('Own 57: Undo and Redo in a cell keep it open, Undo from the note selects the cell instead of opening it, and Enter then opens it', undoneInCell && redoneInCell && undoneFromNote && openedAfter && redoneAfter, { undoneInCell, redoneInCell, undoneFromNote, openedAfter, redoneAfter });
+					await key('Escape');
+					await key('Escape');
+					await restore(view, cellsText);
+
+					// Edits from elsewhere reach the open cell, its caret kept: another plugin's write, a second pane in Source
+					// mode, a write to the file on disk, and a rewrite of the whole table.
+					await openText(view, 'Tomato');
+					const tomatoLine = () => view.state.doc.line(view.state.doc.lineAt(seed.from).number + 4);
+					editor.replaceRange('X', { line: tomatoLine().number - 1, ch: 4 });
+					await settle();
+					const pluginWrite = where(view) === '3,1 6' && cellNamed(view, 'B1X') !== null && oc(view).view.hasFocus;
+					const file = app.workspace.activeLeaf.view.file;
+					const ownLeaf = app.workspace.activeLeaf;
+					const otherLeaf = app.workspace.getLeaf('split', 'vertical');
+					await otherLeaf.openFile(file, { state: { mode: 'source', source: true } });
+					await sleep(400);
+					const otherCm = otherLeaf.view.editor.cm;
+					const otherAt = otherCm.state.doc.toString().indexOf('Tomato') + 'Tomato'.length;
+					otherCm.dispatch({ changes: { from: otherAt, insert: 'es' }, userEvent: 'input.type' });
+					await sleep(300);
+					const fromPane = oc(view)?.view.state.doc.toString() === 'Tomatoes' && where(view) === '3,1 6';
+					otherLeaf.detach();
+					app.workspace.setActiveLeaf(ownLeaf, { focus: false });
+					await sleep(300);
+					await ownLeaf.view.save();
+					const onDisk = view.state.doc.toString().replace('Tomatoes', 'Tomatoes and beans');
+					await app.vault.modify(file, onDisk);
+					await sleep(800);
+					const fromDisk = oc(view)?.view.state.doc.toString() === 'Tomatoes and beans';
+					// The second pane took the keyboard: the cell takes it back, as a click in it would.
+					oc(view)?.view.focus();
+					await settle();
+					const rewritten = view.state.doc.sliceString(seed.from, models(view)[0].to).replace('Tomatoes and beans', 'Tomatillo');
+					view.dispatch({ changes: { from: models(view)[0].from, to: models(view)[0].to, insert: rewritten } });
+					await sleep(300);
+					const throughRewrite = where(view)?.startsWith('3,1') && oc(view)?.view.state.doc.toString() === 'Tomatillo' && oc(view).view.hasFocus;
+					const table = models(view)[0];
+					view.dispatch({ changes: { from: table.from, to: table.to, insert: view.state.doc.sliceString(table.from, view.state.doc.line(view.state.doc.lineAt(table.from).number + 2).to) } });
+					await sleep(300);
+					const goneCloses = !oc(view) && view.hasFocus;
+					check('Own 58: another plugin\'s write, a second pane in Source mode and a write to the file on disk reach the open cell, its caret kept, and a rewrite of the whole table keeps it open, while one that takes its row closes it with the note keeping the keys', pluginWrite && fromPane && fromDisk && throughRewrite && goneCloses, { pluginWrite, fromPane, fromDisk, throughRewrite, goneCloses });
+					await restore(view, cellsText);
+					await app.vault.modify(file, cellsText);
+					await sleep(500);
+
+					// A space typed at a cell's end is only padding to the note. A change from elsewhere then, the parser's on a long
+					// note (a transaction with no text), or another plugin's write to another line, keeps the caret after it.
+					await openText(view, 'Tomato');
+					await realType(' ');
+					view.dispatch({});
+					await settle();
+					const spaceKept = where(view) === '3,1 7';
+					await realType('x ');
+					editor.replaceRange('z', { line: view.state.doc.lineAt(seed.from).number - 5, ch: 0 });
+					await settle();
+					await realType('y');
+					const spacesText = oc(view)?.view.state.doc.toString();
+					const spacesLine = lineOf(view, '| Tomato');
+					check('Own 58: a space typed at a cell\'s end stays before the next letter through a change from elsewhere, with no text or on another line', spaceKept && spacesText === 'Tomato x y' && spacesLine?.includes('| Tomato x y ') && cellSteadyOk(cellSteady(view)), { spaceKept, spacesText, spacesLine, steady: cellSteady(view) });
+					await key('Escape');
+					await key('Escape');
+					await restore(view, cellsText);
+					await app.vault.modify(file, cellsText);
+					await sleep(500);
+
+					// An input method in a cell: a composition finishes, and an edit from elsewhere during it waits for its end.
+					await openText(view, 'Tomato');
+					await realCompose({ key: 'n', code: 'KeyN' }, ['n', 'に'], 'に');
+					const composed = oc(view)?.view.state.doc.toString() === 'Tomatoに';
+					const remote = view.state.update({}).constructor.remote;
+					const event = { key: 'k', code: 'KeyK', windowsVirtualKeyCode: 229 };
+					let waited = false;
+					try {
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.imeSetComposition', { text: 'k', selectionStart: 1, selectionEnd: 1 });
+						const b1 = view.state.doc.toString().indexOf('| B1') + 4;
+						view.dispatch({ changes: { from: b1, insert: 'Q' }, annotations: remote.of(true) });
+						await settle();
+						waited = oc(view)?.view.composing === true;
+					} finally {
+						await cdp.sendCommand('Input.insertText', { text: 'か' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+					}
+					await sleep(300);
+					const after = oc(view)?.texts();
+					const composeOk = composed && waited && after?.cell === 'Tomatoにか' && after.note === after.cell && !oc(view).view.composing && lineOf(view, '| B1Q') !== null;
+					await key('Escape');
+					await key('Escape');
+					await restore(view, cellsText);
+					view = await open('Table 50 by 8');
+					// The note may open at its top, where its table is past the drawn range.
+					if (models(view)[0]) view.dispatch({ effects: view.constructor.scrollIntoView(models(view)[0].from, { y: 'start' }) });
+					await sleep(400);
+					const drawsAfter = ownBoxes(view).length > 0;
+					check('Own 59: a composition in a cell finishes, an edit from elsewhere during it comes in after it ends, and tables still draw afterwards', composeOk && drawsAfter, { composed, waited, after, drawsAfter });
+
+					// With a cell open, scroll 20,000 px away and type: the letter goes in the cell, and the note comes back to it.
+					view = await open('Table 2000 by 12');
+					const bigText = view.state.doc.toString();
+					await openText(view, 'Row 5');
+					view.scrollDOM.scrollTop += 20000;
+					await sleep(500);
+					const keptAway = !!oc(view)?.view.dom.isConnected && oc(view).view.hasFocus;
+					await realType('q');
+					await sleep(300);
+					const cellRect = oc(view)?.view.dom.getBoundingClientRect();
+					const pane = view.scrollDOM.getBoundingClientRect();
+					const back = !!cellRect && cellRect.bottom > pane.top && cellRect.top < pane.bottom;
+					// Past row 100, the cell's block moves into the box CodeMirror makes anew as the first block drawn changes: the
+					// cell keeps the keyboard.
+					await key('Escape');
+					await key('Escape');
+					await openText(view, 'Row 150');
+					for (const dy of [-6000, 3000, 3000]) {
+						view.scrollDOM.scrollTop += dy;
+						await sleep(300);
+					}
+					await realType('k');
+					await sleep(300);
+					const farKept = oc(view)?.view.state.doc.toString() === 'Row 150k';
+					check('Own 60: a cell open past row 100 keeps the keyboard as the note scrolls up past the table\'s start and back', farKept, { text: oc(view)?.view.state.doc.toString(), active: document.activeElement?.className });
+					await key('z', { meta: true });
+					await restore(view, bigText);
+					await openText(view, 'Row 5');
+					view.scrollDOM.scrollTop += 20000;
+					await sleep(500);
+					await realType('q');
+					await sleep(300);
+					check('Own 60: an open cell stays in the page while the note scrolls 20,000 px away, a letter typed goes in it, and the note comes back to it', keptAway && back && oc(view)?.view.state.doc.toString() === 'Row 5q' && lineOf(view, '| Row 5q') !== null && cellSteadyOk(cellSteady(view)), { keptAway, back, text: oc(view)?.view.state.doc.toString(), steady: cellSteady(view) });
+					await key('Escape');
+					await key('Escape');
+					await restore(view, bigText);
+
+					// Switching notes, or turning the switch off, closes the cell, and nothing typed is lost.
+					view = await open('Cell moves');
+					await openText(view, 'Tomato');
+					await realType('w');
+					view = await open('Watering schedule');
+					view = await open('Cell moves');
+					const switched = !oc(view) && lineOf(view, '| Tomatow') !== null;
+					await openText(view, 'Tomatow');
+					preview.use(false);
+					await sleep(500);
+					const offCloses = obsidianBoxes(view).length > 0 && !view.contentDOM.querySelector('.selectable-tables-own');
+					preview.use(true);
+					await sleep(500);
+					view = await open('Cell moves');
+					check('Own 61: switching notes closes the cell and keeps what was typed, and turning the switch off closes it, the tables Obsidian\'s again', switched && offCloses, { switched, offCloses });
+					await restore(view, cellsText);
+
+					// The plain editor: forced, cells open in it, write, undo and close, and Toggle checkbox leaves the row alone.
+					preview.forcePlain(true);
+					await openText(view, 'Tomato');
+					const plain = oc(view);
+					await realType(' **b**');
+					const plainShown = plain?.view.contentDOM.textContent;
+					const plainAnswer = editor.inTableCell === true;
+					const plainBefore = view.state.doc.toString();
+					app.commands.executeCommandById('editor:toggle-checklist-status');
+					await settle();
+					const plainQuiet = view.state.doc.toString() === plainBefore;
+					await key('Escape');
+					const drawnBold = !!cellNamed(view, 'Tomato b')?.querySelector('strong');
+					await key('Enter');
+					await key('z', { meta: true });
+					const plainUndo = lineOf(view, '| B1').includes('| Tomato ');
+					await key('Escape');
+					await key('Escape');
+					preview.forcePlain(false);
+					check('Own 62: forced, cells open in the plain editor, its Markdown shown as text, written to the note, drawn once it closes, with Toggle checkbox leaving the row alone and Undo working', plain && !plain.editor.borrowed && plainShown === 'Tomato **b**' && plainAnswer && plainQuiet && drawnBold && plainUndo, { borrowed: plain?.editor.borrowed, plainShown, plainAnswer, plainQuiet, drawnBold, plainUndo });
+					await restore(view, cellsText);
+					// Each private piece the borrowed editor needs, taken away in turn, is named.
+					const ownerNow = app.workspace.activeLeaf.view;
+					const suggest = app.workspace.editorSuggest;
+					suggest.isShowingSuggestion = undefined;
+					const noSuggest = preview.missingPiece(view);
+					delete suggest.isShowingSuggestion;
+					const pieces = {
+						all: preview.missingPiece(view),
+						base: preview.missingPieceOf({ editMode: {}, editor: ownerNow.editor }),
+						tableCell: preview.missingPieceOf({ editMode: Object.assign(Object.create(ownerNow.editMode), { editor: {} }), editor: ownerNow.editor }),
+						suggest: noSuggest,
+					};
+					check('Own 62: the borrowed editor finds every private piece it needs, and names each one taken away', pieces.all === null && pieces.base === 'the base Markdown editor class' && pieces.tableCell === "the editor's inTableCell" && pieces.suggest === 'editorSuggest.isShowingSuggestion', pieces);
+
+					// The right-click menu in an open cell is Obsidian's editor menu, drawn by Obsidian for the check.
+					const config = app.vault.config;
+					const hadNative = Object.hasOwn(config, 'nativeMenus');
+					const nativeBefore = config.nativeMenus;
+					let menuItems = [];
+					try {
+						config.nativeMenus = false;
+						app.updateUseNativeMenu();
+						await openText(view, 'Tomato');
+						const r = oc(view).view.contentDOM.getBoundingClientRect();
+						const point = { x: r.left + 8, y: r.top + r.height / 2, button: 'right', clickCount: 1 };
+						await cdp.sendCommand('Input.dispatchMouseEvent', { ...point, type: 'mousePressed' });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { ...point, type: 'mouseReleased' });
+						await sleep(500);
+						const menu = Array.from(document.querySelectorAll('.menu')).pop();
+						menuItems = Array.from(menu?.querySelectorAll('.menu-item-title') ?? []).map((item) => item.textContent);
+						menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+						await sleep(200);
+					} finally {
+						if (hadNative) config.nativeMenus = nativeBefore;
+						else delete config.nativeMenus;
+						app.updateUseNativeMenu();
+					}
+					check('Own 63: a right-click in an open cell shows Obsidian\'s editor menu, and the cell stays open', menuItems.includes('Paste') && !!oc(view), { menuItems, open: !!oc(view) });
+					await key('Escape');
+					await key('Escape');
+					await restore(view, cellsText);
+
+					// Three seeded runs of 200 random steps each: typing, line breaks, pipes, emptying a cell, Undo, Redo, Tab,
+					// Enter, Escape, Bold, clicks, scrolling away and edits from elsewhere.
+					let cellsBad = null;
+					const fuzzLog = [];
+					for (const [run, note] of [[1, 'Markdown in cells'], [2, 'Cell moves'], [3, 'Table 2000 by 12']]) {
+						view = await open(note);
+						const text = view.state.doc.toString();
+						let seedValue = 8100 + run;
+						const random = () => {
+							seedValue = (seedValue * 1103515245 + 12345) % 2147483648;
+							return seedValue / 2147483648;
+						};
+						const pick = (list) => list[Math.floor(random() * list.length)];
+						for (let step = 0; step < 200 && !cellsBad; step++) {
+							const roll = random();
+							let what;
+							if (!oc(view) || roll < 0.08) {
+								const cells = Array.from(view.contentDOM.querySelectorAll('.selectable-tables-own td, .selectable-tables-own th')).filter((td) => {
+									const r = td.getBoundingClientRect();
+									const p = view.scrollDOM.getBoundingClientRect();
+									return td.isConnected && td.textContent.trim() && !td.querySelector('a') && r.top > p.top + 4 && r.bottom < p.bottom - 4 && r.left > p.left && r.right < p.right && !td.closest('tr.selectable-tables-spacer');
+								});
+								const td = pick(cells);
+								what = `click ${td?.textContent.trim().slice(0, 12)}`;
+								if (td) await clickAt(endOf(td));
+							} else if (roll < 0.35) {
+								const word = pick(['a', 'mint', ' sage', ' | ', '**b**', ' x', '`c`']);
+								what = `type ${JSON.stringify(word)}`;
+								await realType(word);
+							} else if (roll < 0.42) {
+								what = 'shift enter';
+								await key('Enter', { shift: true });
+							} else if (roll < 0.5) {
+								what = 'backspace';
+								for (let i = 0; i < 1 + Math.floor(random() * 8); i++) await key('Backspace');
+							} else if (roll < 0.58) {
+								what = 'undo';
+								await key('z', { meta: true });
+							} else if (roll < 0.63) {
+								what = 'redo';
+								await key('z', { meta: true, shift: true });
+							} else if (roll < 0.71) {
+								what = pick(['Tab', 'Tab shift', 'Enter']);
+								await key(what.split(' ')[0], { shift: what.endsWith('shift') });
+							} else if (roll < 0.76) {
+								what = pick(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+								await key(what);
+							} else if (roll < 0.81) {
+								what = 'escape';
+								await key('Escape');
+							} else if (roll < 0.86) {
+								what = 'bold';
+								app.commands.executeCommandById('editor:toggle-bold');
+								await settle();
+							} else if (roll < 0.92) {
+								what = 'scroll away and back';
+								const was = view.scrollDOM.scrollTop;
+								view.scrollDOM.scrollTop += 3000;
+								await sleep(150);
+								view.scrollDOM.scrollTop = was;
+								await sleep(150);
+							} else {
+								what = 'edit elsewhere';
+								const line = view.state.doc.line(1);
+								view.dispatch({ changes: { from: line.to, insert: ' e' }, annotations: remote.of(true) });
+								await settle();
+							}
+							await frames(2);
+							const s = cellSteady(view);
+							fuzzLog.push(what);
+							if (!cellSteadyOk(s)) cellsBad = { run, step, what, steady: s, texts: oc(view)?.texts(), last: fuzzLog.slice(-8) };
+						}
+						await key('Escape');
+						await key('Escape');
+						await restore(view, text);
+					}
+					check('Own 64: after each of 3 × 200 seeded random steps in open cells, nothing crashed, the drawing matches the text, and the open cell holds its note text', !cellsBad, cellsBad);
+					view = await open('Watering schedule');
+					await sleep(300);
+					for (const name of touched) {
+						const file = app.vault.getAbstractFileByPath(`${name}.md`);
+						if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+					}
 					preview.use(false);
 					await sleep(300);
 				}

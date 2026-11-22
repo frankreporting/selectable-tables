@@ -2,9 +2,9 @@ import { ensureSyntaxTree, forceParsing, type Language, language, syntaxTree } f
 import { EditorState, type Extension, Prec, RangeSet, StateEffect, StateField, type Text, type Transaction } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, type PluginValue, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
-import { type App, editorEditorField } from 'obsidian';
-import { ownTables as ownTablesFacet } from '../editor/layout';
-import { frontmatterEnd, type Span } from '../editor/table-text';
+import { type App, editorEditorField, editorInfoField } from 'obsidian';
+import { inOwnCell, openCells, ownTables as ownTablesFacet } from '../editor/layout';
+import { type Cell, frontmatterEnd, type Span } from '../editor/table-text';
 import { endOfNextLine, findTables, type Found, lineChange, updateTables } from './find';
 import { OBSIDIAN_ROW, ROW_CLASS } from './hide-rows';
 import { isCopy, knownLanguages, languageCopy } from './language';
@@ -12,12 +12,14 @@ import { BARS_CLASS, useBoxes, usesBars } from './bar';
 import { blockSpans } from './blocks';
 import { BOX_CLASS, BOX_ID, type BoxRange, boxes } from './boxes';
 import { availableWidth, forgetMetrics, knownMetrics, lookChanged, metricsFor } from './metrics';
-import { Model, skewEstimates } from './model';
+import { type Click, Model, skewEstimates } from './model';
 import { profile, timed } from './profile';
 import { Swipes, wheelStep } from './sideways';
 import { linesOf } from './shape';
 import { lineClassProp, treeRows } from './tree-rows';
 import { FIND_CLASS, FLASH_CLASS, type Match } from './matches';
+import { type CellSetup, OpenCell } from './open-cell';
+import { forcePlain, missingPiece, plainBecause, resetFallback } from './cell-editor';
 
 /**
  * The plugin's own table, for Live Preview notes: it draws each table Obsidian would draw, as one block, with only
@@ -171,7 +173,11 @@ function retire(models: Iterable<Model>): void {
 }
 
 /** The tables field, the editor plugin and the rest, for one copy of the plugin. */
-export function ownTables(app: App, failed: () => void) {
+export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, 'app'>) {
+	const setup: CellSetup = { app, ...cells };
+	const open = (model: Model, cell: Cell, at: Click | null) => {
+		OpenCell.open(setup, model, cell, at ?? 'end');
+	};
 	const select = (model: Model) => {
 		const view = model.view;
 		if (!view) return;
@@ -182,7 +188,7 @@ export function ownTables(app: App, failed: () => void) {
 	const modelsFor = (state: EditorState, found: readonly Found[], before: readonly Model[]) => {
 		const metrics = knownMetrics(state.field(editorEditorField, false) ?? null);
 		return found.map((table) => {
-			const model = table.was >= 0 ? before[table.was]! : new Model(app, table.from, table.to, select);
+			const model = table.was >= 0 ? before[table.was]! : new Model(app, table.from, table.to, select, open);
 			model.from = table.from;
 			model.to = table.to;
 			// Shaped now, so CodeMirror has its height before it's drawn.
@@ -228,7 +234,7 @@ export function ownTables(app: App, failed: () => void) {
 			const change = tr.docChanged ? lineChange(tr.changes, startState.doc, state.doc, old.from, endOfNextLine(startState.doc, old.to)) : null;
 			model.from = table.from;
 			model.to = table.to;
-			model.track(startState.doc, state.doc, linesOf(startState.doc, old), change);
+			model.track(startState.doc, state.doc, linesOf(startState.doc, old), change, tr.docChanged ? tr.changes : null);
 		}
 		const used = new Set(found.map((table) => table.was));
 		retire(before.filter((_, index) => !used.has(index)));
@@ -264,6 +270,13 @@ export function ownTables(app: App, failed: () => void) {
 		},
 	});
 
+	/** Obsidian's commands, acting at the note's selection inside an open cell, write into the cell as it writes (open-cell.ts). */
+	const cellCommands = EditorState.transactionFilter.of((tr) => {
+		const view = tr.startState.field(editorEditorField, false);
+		const cell = view ? openCells.get(view) : undefined;
+		return cell instanceof OpenCell && cell.note === view ? (cell.reconcile(tr) ?? tr) : tr;
+	});
+
 	const tableEvents = EditorView.domEventHandlers({
 		/**
 		 * A press on the box around a table's blocks, beside the table, selects it, as a press on a table's one block
@@ -292,7 +305,11 @@ export function ownTables(app: App, failed: () => void) {
 		private redecorating = false;
 		private readonly swipes = new Swipes();
 
+		/** In an open cell's own editor, where Obsidian loads the plugin's extensions too: nothing to do. */
+		private readonly inert: boolean;
+
 		constructor(readonly view: EditorView) {
+			this.inert = view.state.facet(inOwnCell);
 			this.models = view.state.field(tables, false)?.models ?? [];
 			this.width = -1;
 			view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
@@ -341,7 +358,12 @@ export function ownTables(app: App, failed: () => void) {
 		};
 
 		update(update: ViewUpdate) {
+			if (this.inert) return;
+			const before = this.models;
 			timed('editor', () => this.catchUp(update));
+			// The open cell takes the note's changes from anywhere else, after the tables have taken them.
+			const cell = openCells.get(update.view);
+			if (cell instanceof OpenCell) cell.noteUpdate(update, before, this.models);
 		}
 
 		private catchUp(update: ViewUpdate) {
@@ -359,8 +381,10 @@ export function ownTables(app: App, failed: () => void) {
 				const selected = selectedModel(update.state);
 				for (const model of this.models) model.setSelected(model === selected);
 			}
-			// Find and the Search pane mark their matches with effects; an edit moves them.
-			if (update.docChanged || update.transactions.some((tr) => tr.effects.length > 0)) {
+			// Find and the Search pane mark their matches with effects; an edit moves those already in a table. Typing in a
+			// cell, with no match anywhere, looks for none.
+			const marked = update.transactions.some((tr) => tr.effects.length > 0);
+			if (marked || (update.docChanged && this.models.some((model) => model.hasMatches))) {
 				const spans = update.state.field(tables, false)?.spans ?? [];
 				const matches = matchesIn(update.state, spans);
 				// A table not drawn yet takes them too, for when Find's scroll brings it into view.
@@ -408,6 +432,8 @@ export function ownTables(app: App, failed: () => void) {
 		}
 
 		destroy() {
+			const cell = openCells.get(this.view);
+			if (cell instanceof OpenCell) cell.close();
 			this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
 			this.view.contentDOM.removeEventListener('wheel', this.onWheel);
 			this.boxes.disconnect();
@@ -424,7 +450,7 @@ export function ownTables(app: App, failed: () => void) {
 	});
 
 	return {
-		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, forKeys, Prec.highest(tableEvents)] : unsupported) as Extension,
+		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, forKeys, Prec.highest(tableEvents), cellCommands] : unsupported) as Extension,
 		/**
 		 * Obsidian's `css-change`, a new theme, font or snippet, or a font that finished loading: every table is laid
 		 * out again, with text measured anew, since a font that loads measures differently under the same name.
@@ -436,6 +462,14 @@ export function ownTables(app: App, failed: () => void) {
 		/** For the check script: an editor's tables, every table found from scratch, and where each parser puts tables. */
 		debug: {
 			models: (view: EditorView) => view.state.field(tables, false)?.models ?? [],
+			/** The note's open cell, its editor, and why cells open in the plain editor, if they do. */
+			openCell: (view: EditorView) => openCells.get(view) ?? null,
+			plainBecause,
+			forcePlain,
+			resetFallback,
+			missingPiece: (view: EditorView) => missingPiece(app, view.state.field(editorInfoField, false) as never),
+			/** Which piece the borrowed editor would miss with this owner, as with one an Obsidian update changed. */
+			missingPieceOf: (owner: object) => missingPiece(app, owner),
 			scan: (state: EditorState) => (lineClassProp && drawsTables(state) ? findTables(state.doc, treeRows(syntaxTree(state), lineClassProp)) : []),
 			drawsTables,
 			forceParse: (view: EditorView) => forceParsing(view, view.state.doc.length, 10000),

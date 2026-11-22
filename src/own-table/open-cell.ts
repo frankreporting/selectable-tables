@@ -407,9 +407,12 @@ export class OpenCell implements OwnCell {
 		const view = this.editor.view;
 		view.requestMeasure({
 			key: this,
-			read: () => (this.closed ? null : view.coordsAtPos(view.state.selection.main.head)),
-			write: (coords) => {
-				if (coords && !this.closed) this.model.showCaret(this.cell, coords);
+			read: () => {
+				const coords = this.closed ? null : view.coordsAtPos(view.state.selection.main.head);
+				return coords ? { coords, room: this.model.caretRoom(this.cell) } : null;
+			},
+			write: (found) => {
+				if (found && !this.closed) this.model.showCaret(this.cell, found.coords, found.room);
 			},
 		});
 	}

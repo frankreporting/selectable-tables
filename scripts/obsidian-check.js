@@ -4415,6 +4415,29 @@
 					check('Own 65: ← into a frozen column takes the table back to its start', plants.cell.column === 0 && plants.sideways().scroll === 0, { cell: plants.cell, scroll: plants.sideways().scroll });
 					check('Own 65: the selected cell\'s copy in the frozen column shows its outline, once', view.contentDOM.querySelectorAll('.selectable-tables-strip .selectable-tables-cell').length === 1 && realMarked(view).length === 1);
 					await leave();
+					// Every key that moves a cell, in Plants, Tools and the 2,000-row table, scrolled down and sideways: the cell is
+					// never under what's pinned. A cell of a long table that isn't drawn yet is drawn before the frame is painted.
+					const everyKey = [['ArrowDown'], ['ArrowDown'], ['ArrowRight'], ['ArrowRight'], ['Tab'], ['End'], ['PageDown'], ['ArrowDown'], ['Home'], ['ArrowRight'], ['PageDown'], ['Tab', { shift: true }], ['PageUp'], ['ArrowDown', { meta: true }], ['ArrowLeft'], ['ArrowUp'], ['ArrowUp', { meta: true }], ['ArrowDown', { ctrl: true }], ['End'], ['ArrowUp', { ctrl: true }]];
+					const keyed = [];
+					for (const [note, heading] of [['Frozen tables', 'Plants'], ['Frozen tables', 'Tools'], ['Frozen table 2000 by 12', null]]) {
+						view = await open(note);
+						await sleep(note === 'Frozen tables' ? 400 : 800);
+						const table = () => (heading ? named(view, heading) : models(view)[0]);
+						await selectAbove(view, table());
+						await key('Enter');
+						for (const [k, mods] of everyKey) {
+							await key(k, mods);
+							await frames(2);
+							const at = clear(view, table());
+							keyed.push([note === 'Frozen tables' ? heading : '2000', `${mods ? Object.keys(mods)[0] + '+' : ''}${k}`, table().cell && `${table().cell.row},${table().cell.column}`, at]);
+						}
+						await leave();
+						await leave();
+					}
+					check('Own 65: every key that moves a cell, in Plants, Tools and the 2,000-row table, leaves the selected cell clear of the pinned rows and columns, and drawn', keyed.every((step) => step[3] === 'clear'), keyed.filter((step) => step[3] !== 'clear'));
+					view = await open('Frozen tables');
+					await sleep(400);
+					plants = named(view, 'Plants');
 
 					// A press on a row half under the pinned rows opens it below them, and its caret stays in view as it grows.
 					await toRow(view, plants, 6);
@@ -4591,6 +4614,9 @@
 					try {
 						config.nativeMenus = false;
 						app.updateUseNativeMenu();
+						// The parser reads only so far past the screen, so Sheds is found once it's scrolled to.
+						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.toString().indexOf('## Sheds'), { y: 'start' }) });
+						await sleep(500);
 						let sheds = named(view, 'Sheds');
 						view.dispatch({ effects: view.constructor.scrollIntoView(sheds.from, { y: 'start', yMargin: 120 }) });
 						await sleep(400);
@@ -4649,6 +4675,40 @@
 					await toRow(view, big, 520);
 					check('Own 71: after Escape, the pinned header deep down shows what was typed', copyCell(2)?.textContent === `${pressedText}q`, { copy: copyCell(2)?.textContent });
 					for (let i = 0; i < 4 && view.state.doc.toString() !== bigText; i++) await key('z', { meta: true });
+					await leave();
+					await restore(view, bigText);
+					// With the header cell open at the table's top, scrolled on within the first block past where its rows are
+					// drawn, the frozen body row still pins under the header.
+					view.scrollDOM.scrollTop = 0;
+					await sleep(300);
+					await toRow(view, big, 0);
+					view.scrollDOM.scrollTop -= 200;
+					await sleep(300);
+					await frames(3);
+					await pointAt(middle(big.cellElement({ row: 0, column: 3 }), -6));
+					const topOpen = oc(view);
+					view.scrollDOM.scrollTop += 2400;
+					await sleep(400);
+					await frames(4);
+					const below = big.cellElement({ row: 0, column: 3 })?.getBoundingClientRect();
+					const hitRow = below && document.elementFromPoint(below.left + below.width / 2, paneOf(view).top + below.height + 6)?.closest('tr');
+					const rowOne = !!hitRow && (hitRow.getAttribute('data-selectable-tables-row') === '1' || hitRow.getAttribute('aria-rowindex') === '2');
+					check('Own 71: with the header cell open and the note scrolled on within the first block, the header and the frozen row under it stay pinned', topOpen?.cell.row === 0 && shows(topOpen.view.contentDOM) && rowOne, { open: topOpen?.cell, shows: topOpen && shows(topOpen.view.contentDOM), hitRow: hitRow?.outerHTML.slice(0, 120) });
+					await leave();
+					// Selected from above, Freeze rows up to a header cell, then Undo: Undo scrolls to the table's far end, and the
+					// cell still ends in view.
+					view.scrollDOM.scrollTop = 0;
+					await sleep(300);
+					await selectAbove(view, big);
+					await key('Enter');
+					await key('ArrowRight');
+					app.commands.executeCommandById('selectable-tables:freeze-rows');
+					await sleep(400);
+					await key('z', { meta: true });
+					await sleep(600);
+					await frames(4);
+					const undoneSeen = big.pins.chosenCopies.some((el) => shows(el)) || shows(big.cellElement(big.cell));
+					check('Own 71: Undo of a freeze on the long table leaves the selected header cell in view', view.state.doc.toString() === bigText && big.cell?.row === 0 && undoneSeen, { cell: big.cell, seen: undoneSeen, text: view.state.doc.toString() === bigText });
 					await leave();
 					await restore(view, bigText);
 					view.scrollDOM.scrollTop = 0;

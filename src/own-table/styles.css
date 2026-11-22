@@ -277,7 +277,6 @@ body {
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > :is(.selectable-tables-copy-slides, .selectable-tables-corner) {
 	position: absolute;
 	top: 0;
-	pointer-events: auto;
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > .selectable-tables-corner {
@@ -415,13 +414,13 @@ body {
 /*
  * A copy over a cell that's open: the open row's in the strip, and, for an open cell in a frozen row of a table of more
  * blocks, the first block's copy of the frozen rows, which lies over its real rows, while those pin themselves. Only
- * the strip's cells take presses, so one where its row is hidden reaches the open cell under it.
+ * the copies' cells take presses, so one where a copy's row is hidden reaches the open cell under it.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip {
 	pointer-events: none;
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip :is(th, td) {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > :is(.selectable-tables-strip, .selectable-tables-rail) :is(th, td) {
 	pointer-events: auto;
 }
 

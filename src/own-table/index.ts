@@ -401,9 +401,16 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 				const selected = selectedModel(update.state);
 				for (const model of this.models) model.setSelected(model === selected);
 			}
-			// A freeze command's write, Undo or Redo: the selected cell is shown once the new freeze is drawn.
+			// A freeze command's write, Undo or Redo that changed a table's header line: its selected cell is shown once the new
+			// freeze is drawn.
 			if (update.docChanged && update.transactions.some(showsCellAfter)) {
-				for (const model of this.models) if (model.view === update.view) model.showCellAfterFreeze();
+				const back = update.changes.invertedDesc;
+				const old = update.startState.doc;
+				for (const model of this.models) {
+					if (model.view !== update.view) continue;
+					const header = old.lineAt(Math.min(old.length, back.mapPos(model.from, 1)));
+					if (update.changes.touchesRange(header.from, header.to)) model.showCellAfterFreeze();
+				}
 			}
 			// Find and the Search pane mark their matches with effects; an edit moves those already in a table. Typing in a
 			// cell, with no match anywhere, looks for none.

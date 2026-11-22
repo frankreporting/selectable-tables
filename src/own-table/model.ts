@@ -223,6 +223,13 @@ function statusInset(scroller: HTMLElement, pane: DOMRect, box: DOMRect): number
  * to the note, and its DOM is kept while it lives, so CodeMirror can put it back when the table scrolls into view.
  */
 /** What showing a cell reads from the page: the cell, the pane, and how much of the pane's bottom the status bar hides. */
+/** What an open cell's caret has to stay clear of: the pinned rows' bottom on the screen, and the strip's room. */
+export interface CaretRoom {
+	under: number | null;
+	sideways: boolean;
+	clear: number;
+}
+
 interface ShowRead {
 	cell: DOMRect;
 	/** The cell's scroll margin above and below it, as `scrollIntoView` keeps it. */
@@ -414,9 +421,14 @@ export class Model implements Span, DrawnTable {
 	/** CodeMirror is scrolling a range into view: a cell waiting for Undo's or Redo's scroll is shown after it. */
 	afterScroll(): void {
 		const again = this.againAfterScroll;
+		const view = this.view;
 		this.againAfterScroll = null;
-		if (again && again.until > performance.now() && this.cell === again.cell) this.showCell(again.cell);
+		if (!again || !view || again.until < performance.now() || this.cell !== again.cell) return;
+		// The handler runs before the scroll: the cell is shown on the measure's next pass, once the scroll has run.
+		view.requestMeasure({ key: this.afterScrollKey, read: () => null, write: () => this.cell === again.cell && this.showCell(again.cell) });
 	}
+
+	private readonly afterScrollKey = {};
 
 	/** Opens a cell for editing, with the caret at the end of its text: Enter on the selected cell. */
 	openCell(cell: Cell): void {
@@ -531,8 +543,8 @@ export class Model implements Span, DrawnTable {
 		// A cell of the pinned rows is shown where they're pinned, so it needn't be drawn, unless a key goes up into
 		// them, which takes the table back to its top.
 		const pinnedRow = cell.row < this.pins.room.rows;
-		if (toward === 'up' && pinnedRow && !this.blocks[0]?.dom.isConnected) this.scrollToEstimate(-1);
-		else if (!pinnedRow && !this.cellElement(cell)?.isConnected) this.scrollToEstimate(cell.row - 1);
+		if (toward === 'up' && pinnedRow && !this.cellElement(cell)?.isConnected) this.scrollToEstimate(-1);
+		else if ((!pinnedRow || !this.shown) && !this.cellElement(cell)?.isConnected) this.scrollToEstimate(cell.row - 1);
 		this.requestShow();
 	}
 
@@ -549,17 +561,22 @@ export class Model implements Span, DrawnTable {
 	 * Keeps an open cell's caret in view, sideways and clear of what's pinned: its editor scrolls the note to the caret
 	 * itself, and takes a caret under the pinned rows for one in view. Runs in a measure's write, with the caret's place.
 	 */
-	showCaret(cell: Cell, caret: Rect): void {
+	showCaret(cell: Cell, caret: Rect, room: CaretRoom): void {
 		const view = this.view;
 		if (!view) return;
-		const room = this.pins.room;
-		if (room.rows && cell.row >= room.rows) {
-			const scroller = view.scrollDOM;
-			const under = scroller.getBoundingClientRect().top + scroller.clientTop + room.height + 4;
-			if (caret.top < under) scroller.scrollTop -= under - caret.top;
-		}
+		if (room.under !== null && caret.top < room.under) view.scrollDOM.scrollTop -= room.under - caret.top;
 		// A frozen column's cell stays where the strip is, so its caret is always in view sideways.
-		if (cell.column >= room.columns) this.showSideways(caret.left - 4, caret.right + 4, room.columns ? this.stripClear() : 0);
+		if (room.sideways) this.showSideways(caret.left - 4, caret.right + 4, room.clear);
+	}
+
+	/** What an open cell's caret has to stay clear of, read in a measure's read: the pinned rows' bottom, and the strip. */
+	caretRoom(cell: Cell): CaretRoom {
+		const view = this.view;
+		const room = this.pins.room;
+		const scroller = view?.scrollDOM;
+		const under = scroller && room.rows && cell.row >= room.rows ? scroller.getBoundingClientRect().top + scroller.clientTop + room.height + 4 : null;
+		const sideways = cell.column >= room.columns;
+		return { under, sideways, clear: sideways && room.columns ? this.stripClear() : 0 };
 	}
 
 	/** How far in from the table's box the strip of frozen columns covers, read from the page. */
@@ -626,7 +643,8 @@ export class Model implements Span, DrawnTable {
 			bottom,
 			under: room.rows && cell.row >= room.rows ? room.height : 0,
 			clear: room.columns && cell.column >= room.columns ? this.stripClear() : 0,
-			pinned: { rows: !!pinned?.rows, columns: !!pinned?.columns },
+			// A cell about to open in a frozen column opens where the strip is: the table stays where it is sideways.
+			pinned: { rows: !!pinned?.rows, columns: !!pinned?.columns || (this.showReal && cell.column < room.columns) },
 			stuck: !!pinned?.stuck,
 			tableTop,
 		};
@@ -959,8 +977,10 @@ export class Model implements Span, DrawnTable {
 			});
 		}
 		this.refresh();
-		// A block coming into the page may hold rows near the pane that weren't drawn while it was out.
+		// A block coming into the page may hold rows near the pane that weren't drawn while it was out, and what it pins
+		// is placed for where it is now.
 		if (this.blockCount > 1) this.schedule(true);
+		this.pins.measure();
 		this.placeBar();
 		return block.dom;
 	}

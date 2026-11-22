@@ -8,6 +8,7 @@ import { usesBars } from './bar';
 import { type LineMatch, paintMatches } from './matches';
 import { frozenIn, pinsFit, railOf, stickyTops, stripWidth } from './pin-sums';
 import { timed } from './profile';
+import { cellsOf } from './shape';
 
 /**
  * Frozen rows and columns in the plugin's table, on a computer (STA-91). On a computer no box scrolls the table
@@ -106,10 +107,11 @@ export interface PinHost {
 	rowHeight(row: number): number;
 }
 
-/** A copied row in the strip, for a row of the block, and what it was copied from. */
+/** A copied row in the strip, for a row of the block, and what it was copied from: its line, and its frozen cells. */
 interface Mirror {
 	tr: HTMLTableRowElement;
 	text: string | undefined;
+	cells: string | undefined;
 	height: string;
 }
 
@@ -221,8 +223,11 @@ export interface PinnedCell {
 /** One table's frozen rows and columns. */
 export class Pins {
 	private freeze: Freeze = NONE;
-	/** The frozen rows as rendered for the copies, header first, and the lines they were rendered from. */
-	private source: { lines: string[]; rows: HTMLTableRowElement[]; generation: number } | null = null;
+	/**
+	 * The frozen rows as rendered for the copies, header first, the lines they were rendered from, and those lines' cells:
+	 * a column padded again, as typing in a table Obsidian wrote does to every row, changes the lines and not the cells.
+	 */
+	private source: { lines: string[]; cells: string; rows: HTMLTableRowElement[]; generation: number } | null = null;
 	private generation = 0;
 	private paint: Paint | null = null;
 	private fit = { rows: false, columns: false };
@@ -269,19 +274,35 @@ export class Pins {
 		if (!freeze.rows && !freeze.columns) {
 			this.drop();
 			if (this.marked) this.clearAll();
+			this.shapeKey = '';
 			return;
 		}
 		this.marked = true;
 		const lines = host.lines(Math.max(0, freeze.rows - 1));
 		const source = this.source;
+		let changed = false;
 		if (!source || source.lines.length !== lines.length || source.lines.some((line, index) => line !== lines[index])) {
-			this.drop();
-			const rows = host.render(lines.slice(1));
-			rows.forEach((tr, index) => tr.setAttribute(ROW_ATTRIBUTE, String(index)));
-			this.source = { lines, rows, generation: ++this.generation };
+			const cells = lines.map((line) => cellsOf(line, host.columns).join('\u0000')).join('\n');
+			if (source && source.cells === cells) source.lines = lines;
+			else {
+				this.drop();
+				const rows = host.render(lines.slice(1));
+				rows.forEach((tr, index) => tr.setAttribute(ROW_ATTRIBUTE, String(index)));
+				this.source = { lines, cells, rows, generation: ++this.generation };
+				changed = true;
+			}
 		}
-		this.measure();
+		// Placed again only when what places them changed: typing in a cell changes none of it, and a row that grows, a
+		// strip copy drawn anew or a block coming into the page measures through its own way.
+		const shape = `${freeze.rows} ${freeze.columns} ${host.count} ${host.blockCount} ${host.slides} ${host.tableWidth} ${host.appliedWidths.join(',')}`;
+		if (changed || shape !== this.shapeKey) {
+			this.shapeKey = shape;
+			this.measure();
+		}
 	}
+
+	/** What placed the pins last, as `refresh` compares it. */
+	private shapeKey = '';
 
 	/** The theme or the pane changed: the theme's colors are read again, before what pins is painted again. */
 	forget(look: boolean): void {
@@ -326,7 +347,7 @@ export class Pins {
 	 * The open cell, or none. In a frozen column, while the table moves sideways, its row's frozen cells take the
 	 * opposite move, so the cell stays where the strip is, with the editor in the real cell, and its row's copy in the
 	 * strip hides. In a frozen row of a table of more blocks, the first block's rows pin themselves, as a table of one
-	 * block's do, and its copy of them hides, since the copy lies over the real rows there.
+	 * block's do, and its copy of the open row hides, since the copy lies over the real rows there.
 	 */
 	openCell(tr: HTMLTableRowElement | null, cell: Cell | null): void {
 		const was = this.opened;
@@ -404,9 +425,12 @@ export class Pins {
 			}
 		}
 		if (this.liftsRows()) {
+			// Only the open row's copy in the first block hides, so the real row, which pins itself there and is always in
+			// the page, shows through, and the other frozen rows' copies stay.
 			const first = this.host.pinBlocks[0];
 			const rail = first ? this.parts.get(first)?.rail : null;
-			if (rail) this.hiddenCopies.push(rail.box);
+			const row = open.cell.row;
+			for (const tr of [rail?.table.table.rows[row], rail?.corner?.table.rows[row]]) if (tr) this.hiddenCopies.push(tr);
 		}
 		for (const el of this.hiddenCopies) el.addClass(HIDDEN_CLASS);
 	}
@@ -462,8 +486,8 @@ export class Pins {
 			if (rows && !single) {
 				const box = block.dom.getBoundingClientRect();
 				if (box.top > pinAt || box.bottom <= pinAt) continue;
-				// The first block's own rows pin there for an open cell in them.
-				if (block.index === 0 && this.liftsRows()) {
+				// The open row pins itself there, in the first block.
+				if (block.index === 0 && this.liftsRows() && this.opened?.cell.row === row) {
 					const copy = columns && !lifted && real ? this.stripCopy(block, real)?.cells[column] : null;
 					return { el: copy ?? null, rows, columns, stuck: true };
 				}
@@ -546,7 +570,6 @@ export class Pins {
 	}
 
 	private drop(): void {
-		this.matchedCopies.clear();
 		if (!this.source) return;
 		for (const tr of this.source.rows) this.host.release(tr);
 		this.source = null;
@@ -826,19 +849,31 @@ export class Pins {
 		const columns = this.freeze.columns;
 		let made = false;
 		const want: HTMLTableRowElement[] = [];
+		const lifted = this.opened && this.opened.cell.column < columns ? this.opened.tr : null;
 		for (const tr of Array.from(block.tbody.rows)) {
 			const spacer = tr.hasClass(SPACER_CLASS);
 			const text = spacer ? undefined : this.host.textOf(tr);
 			let mirror = strip.mirrors.get(tr);
-			if (!mirror || (!spacer && mirror.text !== text)) {
-				mirror = { tr: spacer ? spacerCopy(tr, columns) : rowCopy(tr, columns, null), text, height: '' };
+			// A row whose frozen cells read the same keeps its copy, as when a cell past them is typed in, or the column
+			// padded again; and so does the open cell's row while its copy hides, until the cell closes and it's drawn anew.
+			if (mirror && !spacer && mirror.text !== text && tr !== lifted) {
+				const cells = text === undefined ? undefined : cellsOf(text, this.host.columns).slice(0, columns).join('\u0000');
+				if (cells === mirror.cells) mirror.text = text;
+				else mirror = undefined;
+			}
+			if (!mirror) {
+				const cells = text === undefined ? undefined : cellsOf(text, this.host.columns).slice(0, columns).join('\u0000');
+				mirror = { tr: spacer ? spacerCopy(tr, columns) : rowCopy(tr, columns, null), text, cells, height: '' };
 				strip.mirrors.set(tr, mirror);
 				strip.real.set(mirror.tr, tr);
 				if (!spacer) {
 					made = true;
 					const row = this.host.matchedRow(tr);
 					const found = row === null ? null : this.host.matchesOf(row);
-					if (found) paintMatches(mirror.tr, found.line, found.matches, columns);
+					if (found && row !== null) {
+						paintMatches(mirror.tr, found.line, found.matches, columns);
+						this.matchedCopies.add(row);
+					}
 				}
 			}
 			if (spacer) {

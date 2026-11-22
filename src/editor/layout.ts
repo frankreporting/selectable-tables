@@ -33,6 +33,8 @@ export interface DrawnTable {
 	afterDraw(cell: Cell, run: () => void): void;
 	/** Whether the table reads right to left, from its first header cell, as Obsidian's does. */
 	readonly rtl: boolean;
+	/** Whether any of the table's blocks is in the page. */
+	readonly shown: boolean;
 }
 
 /** On the editor of an open cell of the plugin's own table: the plugin's other editor extensions stand aside in it. */

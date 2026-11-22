@@ -118,7 +118,8 @@ export function runEdit(view: EditorView, edit: TableEdit, end: EditEnd = {}): b
 		cells?.opening();
 		now?.openCell(at);
 	};
-	if (changes.length && now) now.afterDraw(at, finish);
+	// A table out of the page draws nothing: the cell is shown from its estimated place at once, as a key would show it.
+	if (changes.length && now?.shown) now.afterDraw(at, finish);
 	else finish();
 	return true;
 }

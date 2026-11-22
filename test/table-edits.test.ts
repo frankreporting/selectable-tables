@@ -42,6 +42,7 @@ test('a row of only dashes, which the plugin draws and Obsidian drops, doesn\'t 
 	const dashed = ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |', '| ----- | ---- |', '| Mint  | Den  |', '| Sage  | Loft |'];
 	assert.deepEqual(edit(dashed, 'row-delete', cell(3, 0)).lines, ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |', '| Sage  | Loft |']);
 	assert.deepEqual(edit(dashed, 'row-up', cell(3, 1)).lines?.slice(2), ['| Mint  | Den  |', '| Fern  | Hall |', '| Sage  | Loft |']);
+	assert.deepEqual(edit(dashed, 'row-delete', cell(2, 0)), { lines: ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |', '| Mint  | Den  |', '| Sage  | Loft |'], cell: cell(1, 0) });
 });
 
 test('Add row above and below put an empty row there and go to its cell in the same column', () => {

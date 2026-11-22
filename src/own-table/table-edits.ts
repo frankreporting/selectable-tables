@@ -43,6 +43,8 @@ export interface Grid {
 	 * dashes, which Obsidian drops, is the row kept before it.
 	 */
 	drawn: number[];
+	/** The rows the plugin draws that Obsidian drops, by their place in `drawn`. */
+	dropped: Set<number>;
 }
 
 /** A row of only dashes, which Obsidian's table parser drops rather than read as a row. */
@@ -58,17 +60,19 @@ export function readTable(lines: readonly string[]): Grid {
 	const alignments = cellsOf(lines[1] ?? '').map(alignmentOf);
 	const rows: string[][] = [];
 	const drawn: number[] = [];
+	const dropped = new Set<number>();
 	lines.forEach((line, index) => {
 		if (index === 1) return;
 		const cells = cellsOf(line).map((cell) => cell.trim());
 		if (index === 0 || !cells.every((cell) => dashCell.test(cell))) rows.push(cells);
+		else dropped.add(drawn.length);
 		drawn.push(rows.length - 1);
 	});
 	const columns = Math.max(alignments.length, ...rows.map((row) => row.length));
 	while (alignments.length < columns) alignments.push(null);
 	for (const row of rows) while (row.length < columns) row.push('');
 	const widths = alignments.map((_, column) => Math.max(MIN_COLUMN_WIDTH, ...rows.map((row) => row[column]!.length + CELL_PADDING)));
-	return { rows, alignments, widths, drawn };
+	return { rows, alignments, widths, drawn, dropped };
 }
 
 /** A table's lines as Obsidian's table editor writes them, the delimiter included, each column at its width. */
@@ -114,8 +118,11 @@ const clamp = (value: number, low: number, high: number) => Math.max(low, Math.m
 export function editTable(lines: readonly string[], edit: TableEdit, { row, column }: Cell, options: EditOptions = {}): Edited | null {
 	const grid = readTable(lines);
 	const { rows, alignments, widths } = grid;
-	// The cell's row as the plugin draws it, among the rows Obsidian reads.
-	row = grid.drawn[clamp(row, 0, grid.drawn.length - 1)] ?? 0;
+	// The cell's row as the plugin draws it, among the rows Obsidian reads. Delete row on a row of dashes deletes only it:
+	// writing the table again leaves it out.
+	const drawnRow = clamp(row, 0, grid.drawn.length - 1);
+	const onDashes = grid.dropped.has(drawnRow);
+	row = grid.drawn[drawnRow] ?? 0;
 	const header = lines[0] ?? '';
 	const mark = hasMark(header) ? markText(readFreeze(header)) : null;
 	// Which of the rows before the edit each row is, so the header's own row can be found wherever it goes.
@@ -146,6 +153,7 @@ export function editTable(lines: readonly string[], edit: TableEdit, { row, colu
 			break;
 		}
 		case 'row-delete':
+			if (onDashes) break;
 			rows.splice(row, 1);
 			origins.splice(row, 1);
 			if (!rows.length) return { lines: null, cell: { row: 0, column: 0 } };

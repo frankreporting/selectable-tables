@@ -5118,8 +5118,15 @@
 							}
 							return { out, text };
 						};
+						const sorted = (text) => text.slice(text.indexOf('## Seeds')).split('\n').slice(6, 12).map((line) => line.split('|')[1].trim());
 						const offItems = await itemsRun(false, 'Seeds', 2, 1);
 						const onItems = await itemsRun(true, 'Seeds', 2, 1);
+						// The two sorts on Seed too: names in mixed case, and bold ones.
+						const allItems = items.splice(0, items.length, ...items.filter(([under]) => under === null));
+						const offSeed = await itemsRun(false, 'Seeds', 0, 0);
+						const onSeed = await itemsRun(true, 'Seeds', 0, 0);
+						items.splice(0, items.length, ...allItems);
+						check('Own 75: Sort A to Z and Z to A on Seed order the rows as Obsidian\'s own table does, apple beside Apricot and bold by its words', onSeed.out.length === 2 && onSeed.out.every((each, i) => each.after === offSeed.out[i]?.after && each.after !== onSeed.text), onSeed.out.map((each, i) => ({ title: each.title, on: sorted(each.after), off: sorted(offSeed.out[i]?.after ?? '') })));
 						const differ = onItems.out.filter((each, i) => each.after !== offItems.out[i]?.after || each.after === onItems.text).map((each) => each.title);
 						const seedsOf = (text) => text.slice(text.indexOf('## Seeds'), text.indexOf('A line between'));
 						const firstDiffer = onItems.out.findIndex((each, i) => each.after !== offItems.out[i]?.after || each.after === onItems.text);
@@ -5127,7 +5134,6 @@
 						check('Own 75: Undo takes each edit back alone, and Redo puts it back', onItems.out.every((each) => each.undone && each.redone), onItems.out.filter((each) => !each.undone || !each.redone).map((each) => each.title));
 						const ended = Object.fromEntries(onItems.out.map((each) => [each.title, each.where.open]));
 						check('Own 76: after an item from an open cell, the new row\'s or column\'s cell opens, the moved cell opens in its place, and Delete opens the cell above or to the left', ended['Add row above'] === '2,1' && ended['Add row below'] === '3,1' && ended['Move row up'] === '1,1' && ended['Move row down'] === '3,1' && ended['Delete row'] === '1,1' && ended['Add column to the left'] === '2,1' && ended['Add column to the right'] === '2,2' && ended['Move column left'] === '2,0' && ended['Move column right'] === '2,2' && ended['Delete column'] === '2,0' && ended['Sort by column (A to Z)'] === '2,1', ended);
-						const sorted = (text) => text.slice(text.indexOf('## Seeds')).split('\n').slice(6, 12).map((line) => line.split('|')[1].trim());
 						const az = onItems.out.find((each) => each.title === 'Sort by column (A to Z)');
 						check('Own 75: Sort orders Count as numbers, the header kept on top', sorted(az.after).join() === 'bean,apple,Apricot,Basil,**Carrot top**,**Pear**', sorted(az.after));
 

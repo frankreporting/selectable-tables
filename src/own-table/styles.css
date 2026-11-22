@@ -249,10 +249,29 @@ body {
 	pointer-events: none;
 }
 
+/*
+ * The copy sticks inside its block, which clips it. Chromium paints only what of the copy was inside the clip when it
+ * last painted, and doesn't paint again as the copy sticks, which happens where the scroll runs: across a seam, the
+ * part of the next block's copy that slid into view showed its cells with no text, for a pinned rows' height of
+ * scrolling. A transform animation has Chromium paint everything under it, so the copy carries one that never moves
+ * anything, on the note's scroll, which runs where the scroll does.
+ */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-rail > .selectable-tables-copy {
 	position: sticky;
 	top: var(--selectable-tables-own-pin, 0);
 	height: 0;
+	animation: selectable-tables-still linear both;
+	animation-timeline: scroll();
+}
+
+@keyframes selectable-tables-still {
+	from {
+		transform: translateX(0);
+	}
+
+	to {
+		transform: translateX(0);
+	}
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > :is(.selectable-tables-copy-slides, .selectable-tables-corner) {

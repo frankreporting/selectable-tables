@@ -333,7 +333,11 @@ export class Pins {
 		const shown = host.pinBlocks.filter((block): block is PinBlock => !!block?.dom.isConnected);
 		if (!shown.length) return null;
 		const scroller = view.scrollDOM;
-		const pin = -(parseFloat(getComputedStyle(scroller).paddingTop) || 0);
+		// Rows pin at the pane's top, moved up to the start of the device pixel it falls in: where the pane starts part way
+		// into one, as under Minimal, that row of pixels showed the rows passing under.
+		const paneTop = scroller.getBoundingClientRect().top;
+		const ratio = window.devicePixelRatio || 1;
+		const pin = -(parseFloat(getComputedStyle(scroller).paddingTop) || 0) - (paneTop - Math.floor(paneTop * ratio + 0.001) / ratio);
 		// The theme's colors, read from the table as drawn before anything pins: styles.css paints what pins over them.
 		// The header comes from the first block, or from a copy of it, and the body's rows from a block with rows drawn.
 		let paint = this.paint;

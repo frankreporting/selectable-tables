@@ -4364,7 +4364,8 @@
 							if (want.join('\n') !== pins.source.lines.join('\n')) bad.push(`${model.from}: frozen rows' copy`);
 							for (const block of model.blocks) {
 								const strip = block?.dom.isConnected ? pins.parts.get(block)?.strip : null;
-								if (!strip) continue;
+								// A strip that steps aside for an open cell in a frozen row and a frozen column draws nothing.
+								if (!strip || strip.box.classList.contains('selectable-tables-strip-off')) continue;
 								for (const tr of Array.from(block.tbody.rows)) {
 									if (tr.classList.contains('selectable-tables-spacer')) continue;
 									const mirror = strip.mirrors.get(tr);
@@ -4554,6 +4555,33 @@
 					await leave();
 					for (let i = 0; i < 24 && view.state.doc.toString() !== frozenText; i++) await key('z', { meta: true });
 					check('Own 67: Cmd+Z takes the typing back', view.state.doc.toString() === frozenText);
+
+					// A cell in a frozen row and a frozen column, opened with the rows pinned and the table moved sideways: the table
+					// goes back to its start and the strip steps aside, so the open cell shows at the pane's top, and rows passing
+					// under the pinned rows don't cover it (STA-92's hand check, 11/22). Escape brings the strip back.
+					await toRow(view, plants, 12);
+					plants.slideToStart();
+					await sleep(150);
+					plants.slideBy(200);
+					await sleep(250);
+					await frames(3);
+					const cornerCopy = strip().querySelector('thead tr')?.cells[0];
+					if (cornerCopy) await pointAt(middle(cornerCopy, -6));
+					await frames(3);
+					const corner = oc(view);
+					const cornerInk = [corner ? await inked(corner.view.contentDOM) : 0];
+					plants.slideBy(150);
+					view.scrollDOM.scrollTop += 90;
+					await sleep(250);
+					await frames(3);
+					cornerInk.push(corner ? await inked(corner.view.contentDOM) : 0);
+					const cornerTop = corner?.view.dom.closest('th')?.getBoundingClientRect().top;
+					check('Own 67: a cell in a frozen row and a frozen column opens at the pane\'s top with the table at its start, and stays drawn as rows pass under it', corner?.cell.row === 0 && corner.cell.column === 0 && plants.sideways().scroll === 0 && cornerInk.every((ink) => ink > 20) && Math.abs(cornerTop - paneOf(view).top) <= 2, { open: corner?.cell, scroll: plants.sideways().scroll, ink: cornerInk, top: cornerTop, pane: paneOf(view).top });
+					await leave();
+					await frames(2);
+					const headCopy = strip().querySelector('thead tr');
+					check('Own 67: closed, the strip and its copy of the header are back', !!headCopy && getComputedStyle(strip()).display !== 'none' && getComputedStyle(headCopy).visibility === 'visible', { display: getComputedStyle(strip()).display });
+					for (let i = 0; i < 6 && view.state.doc.toString() !== frozenText; i++) await key('z', { meta: true });
 
 					// Find shows its matches in the frozen column's copies, moved sideways, and leaves the table where it is.
 					view.scrollDOM.scrollTop = view.lineBlockAt(plants.from).top - 50;

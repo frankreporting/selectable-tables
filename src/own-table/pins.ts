@@ -60,6 +60,8 @@ const LIFTED_CLASS = 'selectable-tables-lifted';
 const LIFTED_ROW_CLASS = 'selectable-tables-lifted-row';
 /** On a copy hidden so the real cells under it show: the open cell's row in the strip, or the first block's rail. */
 const HIDDEN_CLASS = 'selectable-tables-hidden-copy';
+/** On a block's strip while it steps aside for an open cell in a frozen row and a frozen column (`holdsStart`). */
+const STRIP_OFF_CLASS = 'selectable-tables-strip-off';
 
 
 const NONE: Freeze = { rows: 0, columns: 0 };
@@ -358,6 +360,16 @@ export class Pins {
 		if (this.liftsRows() || (was && was.cell.row < this.freeze.rows)) this.measure();
 	}
 
+	/**
+	 * Whether the open cell is in a frozen row and a frozen column, while both pin. The strip's rows pass behind a pinned
+	 * row, so no copy hidden in the strip can show such a cell: instead the table stays at its start sideways while it's
+	 * open, and the strip of the block holding it steps aside, so the real cells show in place.
+	 */
+	get holdsStart(): boolean {
+		const open = this.opened;
+		return !!open && this.fit.rows && this.fit.columns && open.cell.row < this.freeze.rows && open.cell.column < this.freeze.columns;
+	}
+
 	/** Whether the first block's own rows pin, for an open cell in a frozen row of a table of more blocks. */
 	private liftsRows(): boolean {
 		return !!this.opened && this.opened.cell.row < this.freeze.rows && this.fit.rows && this.host.blockCount > 1;
@@ -406,12 +418,19 @@ export class Pins {
 		this.chosenCopies = this.chosen ? this.copiesOf(this.chosen) : [];
 		for (const el of this.chosenCopies) el.addClass(CELL_CLASS);
 		for (const el of this.liftedCells) el.removeClass(LIFTED_CLASS, LIFTED_ROW_CLASS);
-		for (const el of this.hiddenCopies) el.removeClass(HIDDEN_CLASS);
+		for (const el of this.hiddenCopies) el.removeClass(HIDDEN_CLASS, STRIP_OFF_CLASS);
 		this.liftedCells = [];
 		this.hiddenCopies = [];
 		const open = this.opened;
 		if (!open || !open.tr.isConnected) return;
-		if (this.fit.columns && open.cell.column < this.freeze.columns) {
+		if (this.holdsStart) {
+			const first = this.host.pinBlocks[0];
+			const strip = first ? this.parts.get(first)?.strip : null;
+			if (strip) {
+				strip.box.addClass(STRIP_OFF_CLASS);
+				this.hiddenCopies.push(strip.box);
+			}
+		} else if (this.fit.columns && open.cell.column < this.freeze.columns) {
 			open.tr.addClass(LIFTED_ROW_CLASS);
 			this.liftedCells.push(open.tr);
 			for (let column = 0; column < this.freeze.columns; column++) {

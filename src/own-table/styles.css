@@ -339,6 +339,21 @@ body {
 	background-image: var(--selectable-tables-even-cell, none);
 }
 
+/*
+ * Beside the strip, over the table's box padding, from just above the table to just below it: the table moved sideways
+ * passes there, its cells, and the selected table's frame, which would run on past the strip's corner. The strip's
+ * first column covers the rows; this covers the frame's edges above and below them.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins > .selectable-tables-strip::before {
+	content: "";
+	position: absolute;
+	top: -4px;
+	bottom: -4px;
+	inset-inline-end: 100%;
+	width: var(--table-drag-handle-size);
+	background-color: var(--selectable-tables-page, var(--background-primary));
+}
+
 /* The strip's first column covers the table's padding beside it, where cells passing sideways would show. */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-corner) tr:not(.selectable-tables-spacer) > :is(th, td):first-child,
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tr.selectable-tables-lifted-row > .selectable-tables-lifted:first-child {
@@ -426,6 +441,10 @@ body {
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-hidden-copy {
 	visibility: hidden;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip.selectable-tables-strip-off {
+	display: none;
 }
 
 /*

@@ -3873,12 +3873,15 @@
 						await key(name, mods);
 						steps.push(where(view) ?? `selected ${outlined(view)}`);
 					}
-					check('Own 53: ← → ↑ ↓ at a text\'s edges, Tab, Shift+Tab and Enter move between cells as Obsidian\'s cell does, and Cmd+← and Cmd+→ at the edges too', steps.join(' | ') === '3,1 6 | 3,2 0 | 3,1 6 | 4,1 0 | 3,1 0 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | selected 4,1 | 4,1 10 | 4,1 10 | 4,2 0 | 4,1 10', steps.join(' | '));
+					// Enter on the last row, a fresh press, adds a row below and opens its cell (STA-97).
+					check('Own 53: ← → ↑ ↓ at a text\'s edges, Tab, Shift+Tab and Enter move between cells as Obsidian\'s cell does, and Cmd+← and Cmd+→ at the edges too', steps.join(' | ') === '3,1 6 | 3,2 0 | 3,1 6 | 4,1 0 | 3,1 0 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | selected 4,1 | 4,1 10 | 5,1 0 | 5,2 0 | 5,1 0', steps.join(' | '));
 					await key('Escape');
 					await key('Escape');
+					await restore(view, cellsText);
+					await frames(3);
 					// Out of the table at its four edges, to the start of the line beyond.
-					const aboveSeed = view.state.doc.lineAt(seed.from).number - 1;
-					const belowSeed = view.state.doc.lineAt(seed.to).number + 1;
+					const aboveSeed = view.state.doc.lineAt(models(view)[0].from).number - 1;
+					const belowSeed = view.state.doc.lineAt(models(view)[0].to).number + 1;
 					const leaves = [];
 					for (const [text, name, toStart] of [['Tray', 'ArrowUp', true], ['Tray', 'ArrowLeft', true], ['Water twice', 'ArrowDown', false], ['Water twice', 'ArrowRight', false]]) {
 						await openText(view, text);
@@ -3919,17 +3922,25 @@
 					await key('Escape');
 					await restore(view, cellsText);
 
-					// Tab held runs along the rows and stops at the table's last cell; Tab and Enter there do nothing.
+					// Tab held runs along the rows and stops at the table's last cell; a fresh Tab or Enter there adds a row.
 					await tableUnder(view, 'Tall table');
 					const tall = models(view).find((model) => view.state.doc.sliceString(model.from, model.from + 7) === '| Row |');
 					const tallLines = view.state.doc.lines;
 					await openText(view, '1');
 					for (let i = 0; i < tall.count * 3 + 6; i++) await key('Tab', { repeat: i > 0 });
 					const lastCell = `${tall.count},2`;
-					const heldStops = where(view)?.startsWith(lastCell);
+					const heldStops = where(view)?.startsWith(lastCell) && view.state.doc.lines === tallLines;
+					const tallRows = tall.count;
+					// A fresh press there adds a row and opens its first cell, and Enter on that new last row adds another (STA-97).
 					await key('Tab');
+					await sleep(300);
+					await frames(3);
+					const tabbed = { at: where(view), lines: view.state.doc.lines };
 					await key('Enter');
-					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, and Tab and Enter there do nothing, adding no row', heldStops && where(view)?.startsWith(lastCell) && view.state.doc.lines === tallLines && view.state.doc.toString() === cellsText, { at: where(view), lastCell, lines: [tallLines, view.state.doc.lines] });
+					await sleep(300);
+					await frames(3);
+					const entered = { at: where(view), lines: view.state.doc.lines };
+					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, adding no row; a fresh Tab there adds a row and opens its first cell, and a fresh Enter on that last row adds another', heldStops && tabbed.lines === tallLines + 1 && !!tabbed.at?.startsWith(`${tallRows + 1},0`) && entered.lines === tallLines + 2 && !!entered.at?.startsWith(`${tallRows + 2},0`), { heldStops, lastCell, tabbed, entered, tallLines });
 					await key('Escape');
 					await key('Escape');
 
@@ -5104,6 +5115,8 @@
 								await pointAt(menuAt(view, on, heading, row, column), 'right');
 								const picked = await pick(under, title);
 								await sleep(300);
+								// The cell opens again once its row is drawn: Undo is pressed once it has.
+								for (let i = 0; on && i < 20 && !oc(view); i++) await sleep(100);
 								const after = view.state.doc.toString();
 								const where = on ? { open: openAtNow(view), selected: tableAt(view, heading)?.cell ?? null } : null;
 								await key('z', { meta: true });
@@ -5112,7 +5125,8 @@
 								await key('z', { meta: true, shift: true });
 								await sleep(300);
 								const redone = view.state.doc.toString();
-								out.push({ title, opened, picked, after, undone: undone === text, redone: redone === after, where });
+								const lines = (doc) => doc.slice(doc.indexOf('## Seeds')).split('\n').slice(4, 7).join(' / ');
+								out.push({ title, opened, picked, after, undone: undone === text, redone: redone === after, where, seen: undone === text && redone === after ? null : { after: lines(after), undone: lines(undone), redone: lines(redone), was: lines(text), openAfterUndo: openAtNow(view) } });
 								await leaveAll(view);
 								await restore(view, text);
 							}
@@ -5131,7 +5145,7 @@
 						const seedsOf = (text) => text.slice(text.indexOf('## Seeds'), text.indexOf('A line between'));
 						const firstDiffer = onItems.out.findIndex((each, i) => each.after !== offItems.out[i]?.after || each.after === onItems.text);
 						check('Own 75: each Row, Column and Sort item, from an open cell, writes the same text as Obsidian\'s own table does', differ.length === 0 && onItems.out.every((each) => each.opened && each.picked), { differ, unpicked: onItems.out.filter((each) => !each.opened || !each.picked).map((each) => each.title), offUnpicked: offItems.out.filter((each) => !each.opened || !each.picked).map((each) => each.title), first: firstDiffer >= 0 ? { title: onItems.out[firstDiffer].title, on: seedsOf(onItems.out[firstDiffer].after), off: seedsOf(offItems.out[firstDiffer].after), was: seedsOf(onItems.text) } : null });
-						check('Own 75: Undo takes each edit back alone, and Redo puts it back', onItems.out.every((each) => each.undone && each.redone), onItems.out.filter((each) => !each.undone || !each.redone).map((each) => each.title));
+						check('Own 75: Undo takes each edit back alone, and Redo puts it back', onItems.out.every((each) => each.undone && each.redone), onItems.out.filter((each) => !each.undone || !each.redone).map((each) => ({ title: each.title, ...each.seen })));
 						const ended = Object.fromEntries(onItems.out.map((each) => [each.title, each.where.open]));
 						check('Own 76: after an item from an open cell, the new row\'s or column\'s cell opens, the moved cell opens in its place, and Delete opens the cell above or to the left', ended['Add row above'] === '2,1' && ended['Add row below'] === '3,1' && ended['Move row up'] === '1,1' && ended['Move row down'] === '3,1' && ended['Delete row'] === '1,1' && ended['Add column to the left'] === '2,1' && ended['Add column to the right'] === '2,2' && ended['Move column left'] === '2,0' && ended['Move column right'] === '2,2' && ended['Delete column'] === '2,0' && ended['Sort by column (A to Z)'] === '2,1', ended);
 						const az = onItems.out.find((each) => each.title === 'Sort by column (A to Z)');

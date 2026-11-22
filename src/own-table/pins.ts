@@ -50,6 +50,8 @@ const OPEN_TEXT_CLASS = 'selectable-tables-open-text';
 const MATCH_CLASSES = ['selectable-tables-match-cell', 'selectable-tables-flash-cell'];
 
 const NONE: Freeze = { rows: 0, columns: 0 };
+/** Whether the browser can pin rows, read once. */
+let freezes: boolean | undefined;
 const px = (value: number) => `${Math.round(value * 64) / 64}px`;
 
 /** A block of the table, as model.ts holds it. */
@@ -204,9 +206,9 @@ export class Pins {
 
 	constructor(private readonly host: PinHost) {}
 
-	/** Whether this editor can pin: on a computer, with scroll-driven animations. */
+	/** Whether this editor can pin: on a computer, with scroll-driven animations, which `usesBars` checks too. */
 	private able(view: EditorView): boolean {
-		return usesBars(view) && canFreeze();
+		return usesBars(view) && (freezes ??= canFreeze());
 	}
 
 	/** What's frozen now, within the table's size, for the check script. */

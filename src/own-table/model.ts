@@ -16,6 +16,7 @@ import { measure, measureContent } from './metrics';
 import { timed } from './profile';
 import { type LineMatch, type Match, MATCH_SELECTOR, matchSpans, paintMatches } from './matches';
 import { barPlace, type BarPlace, clampSlide, maxSlide, revealDelta } from './sideways';
+import { type PinHost, Pins, ROW_ATTRIBUTE } from './pins';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
 /**
@@ -325,6 +326,9 @@ export class Model implements Span, DrawnTable {
 	/** A cell to open once its row is drawn. */
 	private toOpen: { cell: Cell; run: () => void } | null = null;
 
+	// Frozen rows and columns, on a computer.
+	private readonly pins = new Pins(this.pinHost());
+
 	constructor(
 		private readonly app: App,
 		public from: number,
@@ -374,6 +378,7 @@ export class Model implements Span, DrawnTable {
 		this.cell = cell;
 		if (!cell) this.showing = null;
 		for (const block of this.blocks) block?.table.toggleClass(HOLDS_CELL_CLASS, !!cell);
+		this.pins.holdCell(!!cell);
 		this.paintCell();
 	}
 
@@ -401,6 +406,11 @@ export class Model implements Span, DrawnTable {
 	private cellOf(el: HTMLTableCellElement): Cell | null {
 		const tr = el.parentElement;
 		if (!tr?.instanceOf(HTMLTableRowElement)) return null;
+		// A copy of the frozen rows, or of a row's frozen cells in the strip beside the table: its real cell.
+		const copied = tr.getAttribute(ROW_ATTRIBUTE);
+		if (copied !== null) return { row: Number(copied), column: el.cellIndex };
+		const real = this.pins.realRow(tr)?.cells[el.cellIndex];
+		if (real) return this.cellOf(real);
 		if (tr === this.blocks[0]?.thead?.firstElementChild) return { row: 0, column: el.cellIndex };
 		for (const [row, drawn] of this.rendered) if (drawn === tr) return { row: row + 1, column: el.cellIndex };
 		return null;
@@ -570,6 +580,7 @@ export class Model implements Span, DrawnTable {
 	}
 
 	destroy(): void {
+		this.pins.destroy();
 		this.toOpen = null;
 		this.component.unload();
 		this.bar?.destroy();
@@ -783,8 +794,9 @@ export class Model implements Span, DrawnTable {
 		this.dirty.clear();
 	}
 
-	/** The sizes changed, the theme's or the pane's: the shape is worked out again. */
-	resize(): void {
+	/** The sizes changed, the theme's (`look`) or the pane's: the shape is worked out again. */
+	resize(look = false): void {
+		this.pins.forget(look);
 		this.stale = true;
 		this.metrics = null;
 		this.todo = true;
@@ -910,6 +922,7 @@ export class Model implements Span, DrawnTable {
 		this.schedule(this.dirty.size > 0 || this.remeasure);
 		this.remeasure = false;
 		this.placeBar();
+		this.pins.refresh();
 	}
 
 	/**
@@ -944,9 +957,7 @@ export class Model implements Span, DrawnTable {
 		// Collapsed borders belong to the whole table, so every row added would repaint all of it on screen, and a
 		// hard flick would outrun that: the cells draw their own instead, as a frozen table's do.
 		const own = !!this.metrics?.collapsed;
-		// Joined, a column holds half of each line beside it. Drawn by its cells, the first column holds both its lines
-		// whole, half of each more, so it gets that room back and its text has the same room as in Obsidian's.
-		const widths = own ? this.widths.map((width, column) => (column === 0 ? width + this.metrics!.firstExtra : width)) : this.widths;
+		const widths = this.appliedWidths();
 		const key = `${this.columns}:${widths.join(',')}`;
 		const count = this.blockCount;
 		let changed = false;
@@ -963,9 +974,7 @@ export class Model implements Span, DrawnTable {
 			if (key === block.applied) continue;
 			block.colgroup.empty();
 			for (const width of widths) block.colgroup.createEl('col').style.width = `${width}px`;
-			// A table's width holds its own borders, which a theme may set beside its cells', and the space between cells.
-			const { tableBorder, spacing } = this.metrics!;
-			block.table.style.width = `${widths.reduce((sum, width) => sum + width, tableBorder + spacing * (this.columns + 1))}px`;
+			block.table.style.width = this.tableWidth(widths);
 			for (const row of [block.lead, block.above, block.parity, block.below, block.gap, block.tail]) (row.firstChild as HTMLTableCellElement).colSpan = Math.max(1, this.columns);
 			if (block.applied) changed = true;
 			block.applied = key;
@@ -1062,8 +1071,83 @@ export class Model implements Span, DrawnTable {
 					at = row.nextSibling;
 				} else block.tbody.insertBefore(row, at);
 			}
+			this.pins.arranged(block);
 		}
 		this.paintCell();
+	}
+
+	/**
+	 * The columns' widths on the page. Joined, a column holds half of each line beside it. Drawn by its cells, the first
+	 * column holds both its lines whole, half of each more, so it gets that room back and its text has the same room as
+	 * in Obsidian's.
+	 */
+	private appliedWidths(): number[] {
+		return this.metrics?.collapsed ? this.widths.map((width, column) => (column === 0 ? width + this.metrics!.firstExtra : width)) : this.widths;
+	}
+
+	/** A table's width holds its own borders, which a theme may set beside its cells', and the space between cells. */
+	private tableWidth(widths: number[]): string {
+		const { tableBorder = 0, spacing = 0 } = this.metrics ?? {};
+		return `${widths.reduce((sum, width) => sum + width, tableBorder + spacing * (this.columns + 1))}px`;
+	}
+
+	/** What the frozen rows and columns need from the table. */
+	private pinHost(): PinHost {
+		// eslint-disable-next-line @typescript-eslint/no-this-alias -- the host's getters read the model live
+		const model = this;
+		return {
+			get view() {
+				return model.view;
+			},
+			get pinBlocks() {
+				return model.blocks;
+			},
+			get blockCount() {
+				return model.blockCount;
+			},
+			get count() {
+				return model.count;
+			},
+			get columns() {
+				return model.columns;
+			},
+			get appliedWidths() {
+				return model.appliedWidths();
+			},
+			get tableWidth() {
+				return model.tableWidth(model.appliedWidths());
+			},
+			get spacing() {
+				return model.metrics?.spacing ?? 0;
+			},
+			get startBorder() {
+				return (model.metrics?.tableBorder ?? 0) / 2;
+			},
+			get slides() {
+				return model.slides;
+			},
+			lines(rows: number): string[] {
+				const doc = model.view?.state.doc;
+				if (!doc) return [];
+				const { header } = linesOf(doc, model);
+				const out = [doc.line(header).text];
+				for (let row = 0; row < Math.min(rows, model.count); row++) out.push(doc.line(header + 2 + row).text);
+				return out;
+			},
+			render(rows: string[]): HTMLTableRowElement[] {
+				const out = model.render(rows);
+				const head = out[0];
+				if (head) for (const column of markedCells(model.view!.state.doc.lineAt(model.from).text)) head.cells[column]?.addClass(MARK_CELL_CLASS);
+				return out;
+			},
+			release: (tr) => this.release(tr),
+			textOf: (tr) => this.drawnFrom.get(tr),
+			rowHeight: (row) => (row < 0 ? this.headHeight : this.heights.get(row)),
+			rowElement(row: number): HTMLTableRowElement | null {
+				const tr = row < 0 ? model.blocks[0]?.thead?.firstElementChild : model.rendered.get(row);
+				return tr?.instanceOf(HTMLTableRowElement) ? tr : null;
+			},
+		};
 	}
 
 	/**
@@ -1475,6 +1559,7 @@ export class Model implements Span, DrawnTable {
 		if (!changed) return;
 		this.arrange();
 		this.placeBar();
+		this.pins.measure();
 		if (anchor >= 0 && anchor < this.count) {
 			const delta = topInBlock(this.heights, anchor, this.headHeight) - anchorTop;
 			if (Math.abs(delta) > 0.01) view.scrollDOM.scrollTop += delta;
@@ -1571,6 +1656,7 @@ export class Model implements Span, DrawnTable {
 	private writeBar(read: BarRead | null): void {
 		const view = this.view;
 		if (!read || !view) return;
+		const was = this.slides ? this.slide : 0;
 		if (read.slide > 0 && read.place) {
 			this.bar ??= new Bar(view, `--selectable-tables-x-${this.id}`, this.onBar);
 			this.slide = read.slide;
@@ -1581,6 +1667,8 @@ export class Model implements Span, DrawnTable {
 			this.slide = 0;
 		}
 		for (const block of this.blocks) if (block) this.dress(block);
+		// Frozen columns pin only in a table that moves sideways: placed again when that changes, not on every scroll.
+		if ((this.slides ? this.slide : 0) !== was) this.pins.measure();
 	}
 
 	private readonly onBar = () => {

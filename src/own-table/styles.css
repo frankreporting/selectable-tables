@@ -210,3 +210,158 @@ body {
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own :is(th, td).selectable-tables-match-cell {
 	box-shadow: inset 0 0 0 3px var(--text-accent);
 }
+
+/*
+ * Frozen rows and columns, on a computer (pins.ts). No box scrolls the table sideways, so rows stick to the note with
+ * plain sticky: a table of one block's real frozen rows, and in a table of more blocks a copy of them in each block,
+ * on a rail the block clips, so at a seam one block's copy hands over to the next one's. The frozen columns are a strip
+ * beside the table that doesn't take its sideways move, with a corner over the copy where frozen rows and columns
+ * meet. Nothing shows until the theme's colors are read.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own:not(.selectable-tables-pins) > :is(.selectable-tables-strip, .selectable-tables-rail) {
+	display: none;
+}
+
+.markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows {
+	overflow-x: visible;
+	overflow-y: clip;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins thead.selectable-tables-pinned-row {
+	position: sticky;
+	z-index: 3;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins tr.selectable-tables-pinned-row {
+	position: sticky;
+	z-index: 2;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip {
+	position: absolute;
+	z-index: 1;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-rail {
+	position: absolute;
+	inset-inline: 0;
+	z-index: 2;
+	pointer-events: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-rail > .selectable-tables-copy {
+	position: sticky;
+	top: var(--selectable-tables-own-pin, 0);
+	height: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > :is(.selectable-tables-copy-slides, .selectable-tables-corner) {
+	position: absolute;
+	top: 0;
+	pointer-events: auto;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > .selectable-tables-corner {
+	z-index: 1;
+}
+
+/* The copy of the frozen rows moves sideways with the table; the strip and the corner stay. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-slides .selectable-tables-copy-slides {
+	will-change: transform;
+	animation: selectable-tables-slide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+.markdown-source-view.mod-cm6.mod-cm6 .cm-table-widget.selectable-tables-own :is(.selectable-tables-strip, .selectable-tables-copy) table {
+	margin: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own :is(.selectable-tables-strip, .selectable-tables-copy) td.selectable-tables-filler {
+	display: none;
+}
+
+/* What pins is solid, painted with what shows behind each cell unfrozen, odd and even, as theme-paint.ts reads it. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins {
+	--selectable-tables-strip-offset: calc(-1 * var(--table-drag-handle-size));
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins:dir(rtl) {
+	--selectable-tables-strip-offset: var(--table-drag-handle-size);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) thead > tr,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins thead.selectable-tables-pinned-row > tr {
+	--selectable-tables-odd-cell: var(--selectable-tables-head-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-head-even-cell);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tbody > tr:nth-child(odd),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tbody > tr.selectable-tables-pinned-row:nth-child(odd) {
+	--selectable-tables-odd-cell: var(--selectable-tables-odd-row-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-odd-row-even-cell);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tbody > tr:nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tbody > tr.selectable-tables-pinned-row:nth-child(even) {
+	--selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer) > :is(th, td),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr) > :is(th, td) {
+	background-color: var(--selectable-tables-page, var(--background-primary));
+	background-image: var(--selectable-tables-odd-cell, none);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer) > :is(th, td):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr) > :is(th, td):nth-child(even) {
+	background-image: var(--selectable-tables-even-cell, none);
+}
+
+/* The strip's first column covers the table's padding beside it, where cells passing sideways would show. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-corner) tr:not(.selectable-tables-spacer) > :is(th, td):first-child {
+	box-shadow: var(--selectable-tables-strip, calc(-1 * var(--table-drag-handle-size)) 0 0 var(--background-primary));
+}
+
+/*
+ * Where a theme rounds its cells, what's pinned lays what shows at a cell's corners at rest under its cells, as
+ * theme-paint.ts reads it, so cells passing under don't show there.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr) {
+	box-shadow: var(--selectable-tables-corners, inset 0 0 0 100vmax var(--background-primary));
+}
+
+/*
+ * A table selected whole: the tint lies over what pins too, each piece's own. The frame is the table's: the strip and
+ * the corner draw its edge at the table's start, the strip its ends too, and the copy none.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins.is-selected table::after {
+	z-index: 4;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) table.selectable-tables-holds-cell::after {
+	display: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.selectable-tables-pins.is-selected .selectable-tables-strip table::after {
+	inset-inline-end: 0;
+	border-inline-end-width: 0;
+	border-start-end-radius: 0;
+	border-end-end-radius: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.selectable-tables-pins.is-selected .selectable-tables-copy-slides table::after {
+	inset: 0;
+	border-width: 0;
+	border-radius: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.selectable-tables-pins.is-selected .selectable-tables-corner table::after {
+	top: 0;
+	bottom: 0;
+	inset-inline-end: 0;
+	border-block-width: 0;
+	border-inline-end-width: 0;
+	border-radius: 0;
+}

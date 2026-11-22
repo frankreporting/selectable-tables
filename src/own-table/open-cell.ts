@@ -2,7 +2,7 @@ import { redo, undo } from '@codemirror/commands';
 import { Annotation, EditorSelection, type Extension, type SelectionRange, Transaction, type TransactionSpec } from '@codemirror/state';
 import { Direction, type EditorView, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { type App, editorInfoField, MarkdownView, Notice } from 'obsidian';
-import { writesCell } from '../editor/decide';
+import { writesCell, writesTable } from '../editor/decide';
 import { type OwnCell, openCells } from '../editor/layout';
 import { type Cell, type Span, toCellEditor, toCellSource } from '../editor/table-text';
 import { type CellEditor, type CellHooks, makeCellEditor, suggesting } from './cell-editor';
@@ -33,6 +33,8 @@ export interface CellSetup {
 	plain: () => Extension;
 	/** Escape in the cell: closes it and selects it, in two steps back to the table. */
 	escape: (view: EditorView) => void;
+	/** A fresh press of Tab at the table's last cell, or Enter on its last row: a row is added below, and its cell opens. */
+	addRow?: (cell: OwnCell, firstColumn: boolean) => void;
 }
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
@@ -72,6 +74,8 @@ export class OpenCell implements OwnCell {
 	private closed = false;
 	/** A change from elsewhere waits while a composition runs in the cell. */
 	private waiting = false;
+	/** Whether the key being handled is a held key's repeat, read as each key comes in, before its bindings run. */
+	private repeat = false;
 	/**
 	 * Whether the cell's editor has the keyboard, kept by its focus events: an editor whose element a rewrite took out
 	 * of the page no longer says it has the focus, and the note should take it then.
@@ -165,7 +169,7 @@ export class OpenCell implements OwnCell {
 	 * and `\|`, and the column is padded again, rather than splitting the row. Null for any other transaction.
 	 */
 	reconcile(tr: Transaction): TransactionSpec | null {
-		if (this.closed || !tr.docChanged || tr.annotation(writesCell) || tr.annotation(Transaction.remote)) return null;
+		if (this.closed || !tr.docChanged || tr.annotation(writesCell) || tr.annotation(writesTable) || tr.annotation(Transaction.remote)) return null;
 		if (['undo', 'redo', 'set', 'input.type.compose'].some((event) => tr.isUserEvent(event))) return null;
 		const doc = tr.startState.doc;
 		const place = cellPlace(doc, this.model, this.cell);
@@ -278,6 +282,12 @@ export class OpenCell implements OwnCell {
 			return this.step(down ? 'down' : 'up', down ? 'start' : 'last-line', false);
 		};
 		return [
+			{
+				any: (_, event) => {
+					this.repeat = event.repeat;
+					return false;
+				},
+			},
 			{ key: 'ArrowLeft', run: live((view) => edge(view, side(view, 'left'))) },
 			{ key: 'ArrowRight', run: live((view) => edge(view, side(view, 'right'))) },
 			{ key: 'Mod-ArrowLeft', run: live((view) => edge(view, side(view, 'left'))) },
@@ -296,7 +306,8 @@ export class OpenCell implements OwnCell {
 
 	/**
 	 * To the next cell that way, or out of the table at its edge, to the start of the line beyond, as Obsidian's cell
-	 * goes. Tab and Enter stay at the table's end, and add no row.
+	 * goes. At the table's end, a fresh press of Tab or Enter adds a row, and a held key's repeat stays, so holding Tab to
+	 * go through the cells never adds one.
 	 */
 	private step(way: 'next' | 'previous' | 'up' | 'down', at: At, stay: boolean): boolean {
 		let { row, column } = this.cell;
@@ -305,7 +316,7 @@ export class OpenCell implements OwnCell {
 		if (way === 'next') {
 			if (column + 1 < columns) column++;
 			else if (row < rows) [row, column] = [row + 1, 0];
-			else return stay || this.leave(true);
+			else return stay ? this.addRow(true) : this.leave(true);
 		} else if (way === 'previous') {
 			if (column > 0) column--;
 			else if (row > 0) [row, column] = [row - 1, columns - 1];
@@ -314,8 +325,14 @@ export class OpenCell implements OwnCell {
 			if (row > 0) row--;
 			else return stay || this.leave(false);
 		} else if (row < rows) row++;
-		else return stay || this.leave(true);
+		else return stay ? this.addRow(false) : this.leave(true);
 		OpenCell.open(this.setup, this.model, { row, column }, at);
+		return true;
+	}
+
+	/** A row added below the last, on a fresh press: Tab's opens at its first cell, Enter's in the same column. */
+	private addRow(firstColumn: boolean): boolean {
+		if (!this.repeat) this.setup.addRow?.(this, firstColumn);
 		return true;
 	}
 

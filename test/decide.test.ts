@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
-import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, showsCellAfter, stay, stopsEdit, tab, typeBelow, typesText, writesFreeze } from '../src/editor/decide';
+import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, showsCellAfter, stay, stopsEdit, tab, typeBelow, typesText, writesTable } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
 
 const TABLE = '| Plant  | Room |\n| ------ | ---- |\n| Fern   | Hall |';
@@ -525,7 +525,7 @@ describe('the edit guard', () => {
 	});
 
 	test('a freeze command\'s own write passes, on a selected cell too', () => {
-		const write = note(text).update({ changes: { from: table.from, insert: 'x' }, annotations: writesFreeze.of(true), userEvent: 'freeze' });
+		const write = note(text).update({ changes: { from: table.from, insert: 'x' }, annotations: writesTable.of('freeze'), userEvent: 'freeze' });
 		assert.ok(!stopsEdit(write, table, true));
 		assert.ok(!stopsEdit(write, table, false));
 	});
@@ -543,7 +543,7 @@ describe('a freeze that changes under a selected cell', () => {
 	const header = (spec: { userEvent?: string; freeze?: boolean; remote?: boolean }) => note(text).update({
 		changes: { from: table.from + 1, insert: ' %%freeze 1 0%%' },
 		...(spec.userEvent ? { userEvent: spec.userEvent } : {}),
-		annotations: [...(spec.freeze ? [writesFreeze.of(true)] : []), ...(spec.remote ? [Transaction.remote.of(true)] : [])],
+		annotations: [...(spec.freeze ? [writesTable.of('freeze')] : []), ...(spec.remote ? [Transaction.remote.of(true)] : [])],
 	});
 
 	test('a freeze command\'s own write shows the cell after it', () => {

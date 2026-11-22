@@ -29,6 +29,10 @@ export interface DrawnTable {
 	showCell(cell: Cell, toward?: 'up' | 'left'): void;
 	/** Opens a cell for editing, with the caret at the end of its text. */
 	openCell(cell: Cell): void;
+	/** The same once the cell's row is drawn anew, after an edit that rewrote the table, or brought into view first. */
+	openWhenDrawn(cell: Cell): void;
+	/** Whether the table reads right to left, from its first header cell, as Obsidian's does. */
+	readonly rtl: boolean;
 }
 
 /** On the editor of an open cell of the plugin's own table: the plugin's other editor extensions stand aside in it. */

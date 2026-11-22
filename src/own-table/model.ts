@@ -435,6 +435,18 @@ export class Model implements Span, DrawnTable {
 		this.open(this, cell, null);
 	}
 
+	/**
+	 * Opens a cell once its row is drawn, after an edit that changed the table's rows: the element drawn there now can be
+	 * a row from before, until the next measure draws the rows again.
+	 */
+	openWhenDrawn(cell: Cell): void {
+		this.whenDrawn(cell, () => this.open(this, cell, null));
+	}
+
+	get rtl(): boolean {
+		return this.dir === 'rtl';
+	}
+
 	/** A cell's element, if its row is drawn: row 0 is the header. */
 	cellElement({ row, column }: Cell): HTMLTableCellElement | null {
 		const tr = row === 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(row - 1);

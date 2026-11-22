@@ -531,8 +531,11 @@ export function copied({ state, layout, cells }: TableContext): string | null {
 	return cells.selected.row === 0 ? withoutMark(source) : source;
 }
 
-/** On a command's write of a table's freeze mark, which the edit guard lets through. */
-export const writesFreeze = Annotation.define<boolean>();
+/**
+ * On a command's write to a table, which the edit guard lets through: a freeze mark, or a Row or Column edit of the
+ * plugin's own table (`rows`), which shows its cell itself.
+ */
+export const writesTable = Annotation.define<'freeze' | 'rows'>();
 
 /**
  * Whether a change to a table's header line shows the selected cell once the new freeze is drawn: a freeze
@@ -541,7 +544,7 @@ export const writesFreeze = Annotation.define<boolean>();
  * note, as an edit from Sync doesn't scroll to an open cell.
  */
 export function showsCellAfter(tr: Transaction): boolean {
-	return tr.annotation(writesFreeze) === true || tr.isUserEvent('undo') || tr.isUserEvent('redo');
+	return tr.annotation(writesTable) === 'freeze' || tr.isUserEvent('undo') || tr.isUserEvent('redo');
 }
 
 /**
@@ -553,11 +556,11 @@ export function showsCellAfter(tr: Transaction): boolean {
  * A selected cell looks like one cell over a selection of the whole table, so there every edit to the
  * table is dropped, with or without a user event: Obsidian's formatting commands send none. What passes
  * doesn't come from the selection: undo and redo, a search and replace, a reload from disk, which is how
- * Sync arrives (`set`), a remote edit, which is how a second pane arrives, and the freeze commands' own
- * write.
+ * Sync arrives (`set`), a remote edit, which is how a second pane arrives, and the commands' own writes:
+ * the freeze mark, and the plugin's table's Row and Column edits.
  */
 export function stopsEdit(tr: Transaction, table: Span, cellSelected: boolean): boolean {
-	if (!tr.changes.touchesRange(table.from, table.to) || tr.isUserEvent('input.type.compose') || tr.annotation(writesFreeze)) return false;
+	if (!tr.changes.touchesRange(table.from, table.to) || tr.isUserEvent('input.type.compose') || tr.annotation(writesTable) !== undefined) return false;
 	if (cellSelected) return !tr.annotation(Transaction.remote) && !['undo', 'redo', 'set', 'searchReplace'].some((event) => tr.isUserEvent(event));
 	if (tr.isUserEvent('input.paste') || tr.isUserEvent('input.drop')) return false;
 	return tr.isUserEvent('input') || tr.isUserEvent('indent');

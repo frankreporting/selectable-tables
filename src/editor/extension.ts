@@ -130,7 +130,7 @@ function run(view: EditorView, action: Action | null): boolean {
 			view.dispatch({ selection: EditorSelection.range(main.anchor, action.pos), scrollIntoView: true, userEvent: 'select' });
 			return true;
 		case 'cell':
-			view.plugin(cellSelection)?.select(action.cell);
+			view.plugin(cellSelection)?.select(action.cell, action.toward);
 			if (action.toward) view.plugin(frozenTables)?.backToStart(action.toward);
 			return true;
 		case 'table':
@@ -483,7 +483,8 @@ export function noteView(editor: Editor): EditorView | null {
 
 /**
  * The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. On the plugin's own
- * table (a preview build's switch), frozen tables aren't there yet (STA-82).
+ * table (a preview build's switch), its tables pin frozen rows and columns themselves (src/own-table/pins.ts), so
+ * `frozen` is off.
  */
 export function selectableTables({ frozen = true }: { frozen?: boolean } = {}): Extension {
 	const freezing = frozen ? [cellFollowsCaret, frozenTables] : [];

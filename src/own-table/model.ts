@@ -17,6 +17,7 @@ import { timed } from './profile';
 import { type LineMatch, type Match, MATCH_SELECTOR, matchSpans, paintMatches } from './matches';
 import { barPlace, type BarPlace, clampSlide, maxSlide, revealDelta } from './sideways';
 import { type PinHost, Pins, ROW_ATTRIBUTE } from './pins';
+import { showDown } from './pin-sums';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
 /**
@@ -230,6 +231,16 @@ interface ShowRead {
 	side: { left: number; right: number };
 	top: number;
 	bottom: number;
+	/** How far down from the pane's top the frozen rows cover, for a cell that passes under them. */
+	under: number;
+	/** How far in from the box's start the frozen columns cover, for a cell that passes under them. */
+	clear: number;
+	/** Whether the cell is pinned down the note, or sideways: then it's always in view that way. */
+	pinned: { rows: boolean; columns: boolean };
+	/** For a key that went up into a frozen row: where the table's top is, to take it back there. */
+	tableTop: number | null;
+	/** The cell's real row pins itself at the pane's top from the next frame: it's in view down the note. */
+	stuck: boolean;
 }
 
 export class Model implements Span, DrawnTable {
@@ -312,6 +323,8 @@ export class Model implements Span, DrawnTable {
 	private cellEl: HTMLTableCellElement | null = null;
 	/** A cell to bring into view once its row is drawn. */
 	private showing: Cell | null = null;
+	/** The way the key that's showing a cell went, toward the table's start, if it did. */
+	private toward: 'up' | 'left' | null = null;
 	/** Find's matches and the Search pane's in the table, by body row, the header being -1, in their lines. */
 	private matches = new Map<number, LineMatch[]>();
 	/** The first match, to bring into view sideways once its row is drawn. */
@@ -379,7 +392,30 @@ export class Model implements Span, DrawnTable {
 		if (!cell) this.showing = null;
 		for (const block of this.blocks) block?.table.toggleClass(HOLDS_CELL_CLASS, !!cell);
 		this.pins.holdCell(!!cell);
+		this.pins.markCell(cell);
 		this.paintCell();
+	}
+
+	/**
+	 * After a freeze command's write, or Undo or Redo, the selected cell is shown once the new freeze is drawn: an
+	 * unfrozen cell goes back to its place in the table, which can be above the pane or off to its left.
+	 */
+	showCellAfterFreeze(): void {
+		const cell = this.cell;
+		if (!cell) return;
+		this.pins.afterPlacing(() => this.cell === cell && this.showCell(cell));
+		// Undo and Redo scroll the note to the whole table after that, once CodeMirror measures it, a few frames on: the
+		// cell is shown again right after that scroll (`afterScroll`).
+		this.againAfterScroll = { cell, until: performance.now() + 500 };
+	}
+
+	private againAfterScroll: { cell: Cell; until: number } | null = null;
+
+	/** CodeMirror is scrolling a range into view: a cell waiting for Undo's or Redo's scroll is shown after it. */
+	afterScroll(): void {
+		const again = this.againAfterScroll;
+		this.againAfterScroll = null;
+		if (again && again.until > performance.now() && this.cell === again.cell) this.showCell(again.cell);
 	}
 
 	/** Opens a cell for editing, with the caret at the end of its text: Enter on the selected cell. */
@@ -402,6 +438,12 @@ export class Model implements Span, DrawnTable {
 		this.cellEl = el;
 	}
 
+	/** The cell an element of the table's blocks is in, a pinned copy's being its real cell; null outside its cells. */
+	cellAt(target: Element): Cell | null {
+		const el = target.closest('td, th');
+		return el?.instanceOf(HTMLTableCellElement) && this.blocks.some((block) => block?.dom.contains(el)) ? this.cellOf(el) : null;
+	}
+
 	/** The cell a drawn cell element is, or null for a filler row's. */
 	private cellOf(el: HTMLTableCellElement): Cell | null {
 		const tr = el.parentElement;
@@ -416,11 +458,21 @@ export class Model implements Span, DrawnTable {
 		return null;
 	}
 
-	/** Runs `run` once a cell's row is drawn, bringing it into view: a cell to open that isn't drawn yet. */
+	/**
+	 * Runs `run` once a cell's row is drawn, bringing the real row into view: a cell to open that isn't drawn yet, such as
+	 * one of the pinned rows pressed deep in a table of more blocks, whose real row is at the table's top.
+	 */
 	whenDrawn(cell: Cell, run: () => void): void {
 		this.toOpen = { cell, run };
-		this.showCell(cell);
+		this.showing = cell;
+		this.toward = null;
+		this.showReal = true;
+		if (!this.cellElement(cell)?.isConnected) this.scrollToEstimate(cell.row - 1);
+		this.requestShow();
 	}
+
+	/** Whether the cell showing is shown as its real cell, not where it's pinned: a cell about to open. */
+	private showReal = false;
 
 	/**
 	 * Keeps the open cell's row in the page while it's open, however far the note scrolls, so typing still reaches its
@@ -432,6 +484,8 @@ export class Model implements Span, DrawnTable {
 		const wasRow = this.openRow;
 		this.openRow = tr;
 		this.openColumn = column;
+		const row = tr ? this.rowOfOpen() : null;
+		this.pins.openCell(tr, row === null ? null : { row, column });
 		if (tr || was === null) return;
 		// The cell that closed still shows its text from before it opened, so the row is drawn again, in place if another
 		// of its cells opens before then.
@@ -468,12 +522,55 @@ export class Model implements Span, DrawnTable {
 	 * which the scroll's own measure draws, and the cell is then shown from where it's really drawn, before the frame is
 	 * painted. The note's scroll, not the cell's own `scrollIntoView`, which would scroll the box that clips the table.
 	 */
-	showCell(cell: Cell): void {
+	showCell(cell: Cell, toward?: 'up' | 'left'): void {
 		const view = this.view;
 		if (!view) return;
 		this.showing = cell;
-		if (!this.cellElement(cell)?.isConnected) this.scrollToEstimate(cell.row - 1);
+		this.toward = toward ?? null;
+		this.showReal = false;
+		// A cell of the pinned rows is shown where they're pinned, so it needn't be drawn, unless a key goes up into
+		// them, which takes the table back to its top.
+		const pinnedRow = cell.row < this.pins.room.rows;
+		if (toward === 'up' && pinnedRow && !this.blocks[0]?.dom.isConnected) this.scrollToEstimate(-1);
+		else if (!pinnedRow && !this.cellElement(cell)?.isConnected) this.scrollToEstimate(cell.row - 1);
 		this.requestShow();
+	}
+
+	/** Moves the table sideways back to its start, for a key that went left into a frozen column. */
+	slideToStart(): void {
+		if (this.bar) this.bar.scroll = 0;
+		else {
+			const box = this.boxNow();
+			if (box) box.scrollLeft = 0;
+		}
+	}
+
+	/**
+	 * Keeps an open cell's caret in view, sideways and clear of what's pinned: its editor scrolls the note to the caret
+	 * itself, and takes a caret under the pinned rows for one in view. Runs in a measure's write, with the caret's place.
+	 */
+	showCaret(cell: Cell, caret: Rect): void {
+		const view = this.view;
+		if (!view) return;
+		const room = this.pins.room;
+		if (room.rows && cell.row >= room.rows) {
+			const scroller = view.scrollDOM;
+			const under = scroller.getBoundingClientRect().top + scroller.clientTop + room.height + 4;
+			if (caret.top < under) scroller.scrollTop -= under - caret.top;
+		}
+		// A frozen column's cell stays where the strip is, so its caret is always in view sideways.
+		if (cell.column >= room.columns) this.showSideways(caret.left - 4, caret.right + 4, room.columns ? this.stripClear() : 0);
+	}
+
+	/** How far in from the table's box the strip of frozen columns covers, read from the page. */
+	private stripClear(): number {
+		const box = this.boxNow();
+		const rtl = this.dir === 'rtl';
+		const edge = box ? this.pins.stripEdge(rtl) : null;
+		if (!box || edge === null) return 0;
+		const rect = box.getBoundingClientRect();
+		const start = rect.left + box.clientLeft;
+		return Math.max(0, rtl ? start + box.clientWidth - edge : edge - start);
 	}
 
 	/** Scrolls the note so a row, -1 for the header, is in the pane by its estimated place, before it's drawn. */
@@ -499,29 +596,57 @@ export class Model implements Span, DrawnTable {
 		view.requestMeasure({ key: this.showKey, read: () => timed('measure', () => this.readShow()), write: (read) => timed('draw', () => this.writeShow(read)) });
 	}
 
+	/**
+	 * Where the cell to show is, and what covers the cells that pass under what's pinned. A pinned cell is measured where
+	 * it's drawn on top: a copy in the strip, or in the frozen rows' copy of the block crossing the pane's top.
+	 */
 	private readShow(): ShowRead | null {
 		const view = this.view;
-		const el = this.showing && this.cellElement(this.showing);
-		if (!view || !el?.isConnected) return null;
+		const cell = this.showing;
+		if (!view || !cell) return null;
 		const scroller = view.scrollDOM;
 		const pane = scroller.getBoundingClientRect();
-		const cell = el.getBoundingClientRect();
 		const top = pane.top + scroller.clientTop;
-		const bottom = top + scroller.clientHeight - statusInset(scroller, pane, cell);
+		const room = this.pins.room;
+		const pinned = this.showReal ? null : this.pins.pinnedCell(cell, top);
+		const real = this.cellElement(cell);
+		const el = (this.toward !== 'up' && pinned?.el?.isConnected ? pinned.el : null) ?? (real?.isConnected ? real : null);
+		if (!el) return null;
+		const rect = el.getBoundingClientRect();
+		const bottom = top + scroller.clientHeight - statusInset(scroller, pane, rect);
 		const style = getComputedStyle(el);
 		const side = { left: parseFloat(style.scrollMarginLeft) || 0, right: parseFloat(style.scrollMarginRight) || 0 };
-		return { cell, margin: parseFloat(style.scrollMarginTop) || 0, side, top, bottom };
+		const first = this.blocks[0]?.table;
+		const tableTop = this.toward === 'up' && pinned?.rows && first?.isConnected ? first.getBoundingClientRect().top : null;
+		return {
+			cell: rect,
+			margin: parseFloat(style.scrollMarginTop) || 0,
+			side,
+			top,
+			bottom,
+			under: room.rows && cell.row >= room.rows ? room.height : 0,
+			clear: room.columns && cell.column >= room.columns ? this.stripClear() : 0,
+			pinned: { rows: !!pinned?.rows, columns: !!pinned?.columns },
+			stuck: !!pinned?.stuck,
+			tableTop,
+		};
 	}
 
 	private writeShow(read: ShowRead | null): void {
 		const view = this.view;
 		if (!view || !read) return;
+		const toward = this.toward;
 		this.showing = null;
-		const { cell, margin, side, top, bottom } = read;
-		const scroller = view.scrollDOM;
-		if (cell.top - margin < top || cell.height + 2 * margin > bottom - top) scroller.scrollTop -= top - (cell.top - margin);
-		else if (cell.bottom + margin > bottom) scroller.scrollTop += cell.bottom + margin - bottom;
-		this.showSideways(cell.left - side.left, cell.right + side.right);
+		this.toward = null;
+		this.showReal = false;
+		const { cell, side, pinned } = read;
+		const down = read.stuck && read.tableTop === null ? 0 : showDown({ ...read, cellTop: cell.top, cellBottom: cell.bottom, pinned: pinned.rows });
+		if (down) view.scrollDOM.scrollTop += down;
+		// Sideways the same: a cell in a frozen column is always in view, and a key that went left into one takes the table
+		// back to its start.
+		if (pinned.columns) {
+			if (toward === 'left') this.slideToStart();
+		} else this.showSideways(cell.left - side.left, cell.right + side.right, read.clear);
 	}
 
 	/**
@@ -549,7 +674,10 @@ export class Model implements Span, DrawnTable {
 	private paintRowMatches(row: number): void {
 		const tr = row < 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(row);
 		const view = this.view;
-		if (!view || row >= this.count || !tr?.instanceOf(HTMLTableRowElement)) return;
+		if (!view || row >= this.count) return;
+		// The pinned rows' copies show them even where the real row isn't drawn, deep in a long table.
+		this.pins.paintMatches(row);
+		if (!tr?.instanceOf(HTMLTableRowElement)) return;
 		const { header } = linesOf(view.state.doc, this);
 		paintMatches(tr, view.state.doc.line(row < 0 ? header : header + 2 + row).text, this.matches.get(row) ?? []);
 	}
@@ -569,12 +697,15 @@ export class Model implements Span, DrawnTable {
 			key: this.matchKey,
 			read: () => {
 				const el = tr.isConnected ? tr.querySelector(MATCH_SELECTOR) : null;
-				return el ? el.getBoundingClientRect() : null;
+				const cell = el?.closest('td, th');
+				// A match in a frozen column shows where the strip is: the table stays where it is sideways.
+				const pinned = cell?.instanceOf(HTMLTableCellElement) && cell.cellIndex < this.pins.room.columns;
+				return el ? { rect: el.getBoundingClientRect(), pinned, clear: pinned ? 0 : this.stripClear() } : null;
 			},
-			write: (rect) => {
-				if (!rect) return;
+			write: (found) => {
+				if (!found) return;
 				this.revealMatch = false;
-				this.showSideways(rect.left, rect.right);
+				if (!found.pinned) this.showSideways(found.rect.left, found.rect.right, found.clear);
 			},
 		});
 	}
@@ -1142,6 +1273,17 @@ export class Model implements Span, DrawnTable {
 			},
 			release: (tr) => this.release(tr),
 			textOf: (tr) => this.drawnFrom.get(tr),
+			matchesOf: (row) => {
+				const list = this.matches.get(row);
+				const doc = this.view?.state.doc;
+				if (!list?.length || !doc || row >= this.count) return null;
+				const { header } = linesOf(doc, this);
+				return { line: doc.line(row < 0 ? header : header + 2 + row).text, matches: list };
+			},
+			matchedRow: (tr) => {
+				for (const row of this.matches.keys()) if ((row < 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(row)) === tr) return row;
+				return null;
+			},
 			rowHeight: (row) => (row < 0 ? this.headHeight : this.heights.get(row)),
 			rowElement(row: number): HTMLTableRowElement | null {
 				const tr = row < 0 ? model.blocks[0]?.thead?.firstElementChild : model.rendered.get(row);

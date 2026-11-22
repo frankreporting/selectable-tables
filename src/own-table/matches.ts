@@ -105,9 +105,10 @@ function wrap(box: Element, from: number, to: number, classes: string[]): void {
 /**
  * Draws a row's matches in its cells, after taking off those it had. A match shows on the matched words where the
  * cell draws them as typed: the same words, as often, in its drawn text as in its Markdown. Elsewhere, where Markdown
- * in the cell changes them, as across `**bold**`'s stars, the whole cell shows it.
+ * in the cell changes them, as across `**bold**`'s stars, the whole cell shows it. A copy of the first `columns` cells
+ * shows only theirs.
  */
-export function paintMatches(tr: HTMLTableRowElement, line: string, matches: readonly LineMatch[]): void {
+export function paintMatches(tr: HTMLTableRowElement, line: string, matches: readonly LineMatch[], columns = Infinity): void {
 	for (const span of Array.from(tr.querySelectorAll(`span.${MATCH_CLASS}`))) {
 		const parent = span.parentNode;
 		span.replaceWith(...Array.from(span.childNodes));
@@ -119,7 +120,8 @@ export function paintMatches(tr: HTMLTableRowElement, line: string, matches: rea
 	}
 	for (const { start, end, flash } of matches) {
 		const bounds = cellBounds(line, start);
-		const cell = tr.cells[bounds.column];
+		// A copy of a row's frozen cells ends with a hidden cell, which no match shows in.
+		const cell = bounds.column < columns ? tr.cells[bounds.column] : undefined;
 		if (!cell) continue;
 		const box = cell.querySelector(':scope > .table-cell-wrapper') ?? cell;
 		const source = line.slice(bounds.from, bounds.to);

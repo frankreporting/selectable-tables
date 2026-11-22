@@ -399,14 +399,17 @@ export class OpenCell implements OwnCell {
 		});
 	}
 
-	/** Keeps the caret in view sideways as it moves or the text grows: no box scrolls the table on a computer. */
+	/**
+	 * Keeps the caret in view sideways as it moves or the text grows, since no box scrolls the table on a computer, and
+	 * clear of the rows and columns that pin, which the editor's own scroll to the caret can't see.
+	 */
 	private followCaret(): void {
 		const view = this.editor.view;
 		view.requestMeasure({
 			key: this,
 			read: () => (this.closed ? null : view.coordsAtPos(view.state.selection.main.head)),
 			write: (coords) => {
-				if (coords) this.model.showSideways(coords.left - 4, coords.right + 4);
+				if (coords && !this.closed) this.model.showCaret(this.cell, coords);
 			},
 		});
 	}

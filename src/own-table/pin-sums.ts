@@ -73,6 +73,44 @@ export function railOf(block: RailBlock, pinned: number): { top: number; bottom:
 	};
 }
 
+/** Where a cell to show is, down the pane, and what it has to stay clear of, all on the screen. */
+export interface ShowDown {
+	/** The pane's top and bottom, the bottom above a status bar floating over it. */
+	top: number;
+	bottom: number;
+	cellTop: number;
+	cellBottom: number;
+	/** The cell's own scroll margin. */
+	margin: number;
+	/** How far down from the pane's top the pinned rows cover, for a cell that passes under them. */
+	under: number;
+	/** Whether the cell is in the pinned rows, which always show while the table crosses the pane's top. */
+	pinned: boolean;
+	/** For a key that went up into the pinned rows: where the table's top is, to take it back there. */
+	tableTop: number | null;
+}
+
+/**
+ * How far to scroll the note to show a cell, as `scrollIntoView` with `nearest` would, clear of the pinned rows: a cell
+ * that passes under them stays below them, and one of them is scrolled to only when it's out of the pane altogether, as
+ * past the table's end, since a scroll margin would move the note on every key there. A key that went up into them
+ * takes the table back to its top. Positive scrolls down.
+ */
+export function showDown(at: ShowDown): number {
+	const { bottom, cellTop, cellBottom } = at;
+	if (at.pinned) {
+		if (at.tableTop !== null && at.tableTop < at.top) return at.tableTop - at.top;
+		if (cellBottom <= at.top) return cellTop - at.top;
+		if (cellTop >= bottom) return cellBottom - bottom;
+		return 0;
+	}
+	const top = at.top + at.under;
+	const { margin } = at;
+	if (cellTop - margin < top || cellBottom - cellTop + 2 * margin > bottom - top) return cellTop - margin - top;
+	if (cellBottom + margin > bottom) return cellBottom + margin - bottom;
+	return 0;
+}
+
 /**
  * How wide the strip of frozen columns is: their widths, the space between them and before the first, and the
  * table's border at its start. It has none at its end, inside the table.

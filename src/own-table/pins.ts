@@ -2,9 +2,12 @@ import type { EditorView } from '@codemirror/view';
 import { CELL_CLASS, HOLDS_CELL_CLASS } from '../editor/cells';
 import { canFreeze } from '../editor/freeze';
 import { type Freeze, readFreeze } from '../editor/freeze-mark';
+import type { Cell } from '../editor/table-text';
 import { type Paint, readPaint } from '../editor/theme-paint';
 import { usesBars } from './bar';
+import { type LineMatch, paintMatches } from './matches';
 import { frozenIn, pinsFit, railOf, stickyTops, stripWidth } from './pin-sums';
+import { timed } from './profile';
 
 /**
  * Frozen rows and columns in the plugin's table, on a computer (STA-91). On a computer no box scrolls the table
@@ -48,6 +51,14 @@ const PARITY_CLASS = 'selectable-tables-parity';
 const OPEN_TEXT_CLASS = 'selectable-tables-open-text';
 /** Find's marks on a cell (matches.ts). */
 const MATCH_CLASSES = ['selectable-tables-match-cell', 'selectable-tables-flash-cell'];
+/**
+ * On the frozen cells of the open cell's row, and on that row, while the open cell is in a frozen column: they take
+ * the opposite of the table's sideways move, so they stay where the strip is, and the row's copy in the strip hides.
+ */
+const LIFTED_CLASS = 'selectable-tables-lifted';
+const LIFTED_ROW_CLASS = 'selectable-tables-lifted-row';
+/** On a copy hidden so the real cells under it show: the open cell's row in the strip, or the first block's rail. */
+const HIDDEN_CLASS = 'selectable-tables-hidden-copy';
 
 const NONE: Freeze = { rows: 0, columns: 0 };
 /** Whether the browser can pin rows, read once. */
@@ -85,6 +96,10 @@ export interface PinHost {
 	release(tr: HTMLTableRowElement): void;
 	/** The text a drawn row was drawn from. */
 	textOf(tr: HTMLTableRowElement): string | undefined;
+	/** A body row's Find matches and its line, -1 being the header, or null for none. */
+	matchesOf(row: number): { line: string; matches: readonly LineMatch[] } | null;
+	/** The body row a drawn row is, if any of the table's rows hold Find's matches; null otherwise. */
+	matchedRow(tr: HTMLTableRowElement): number | null;
 	/** A drawn body row's element, -1 being the header. */
 	rowElement(row: number): HTMLTableRowElement | null;
 	/** A body row's height as the table holds it, measured or estimated, -1 being the header. */
@@ -187,6 +202,22 @@ function setStyle(el: HTMLElement, name: string, value: string | null) {
 	} else if (el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value);
 }
 
+/** What pins now, for showing a cell clear of it: how many rows and columns, and how tall the rows are together. */
+export interface Room {
+	rows: number;
+	columns: number;
+	height: number;
+}
+
+/** Where a pinned cell is drawn on top: a copy, or null where the real cell pins itself; and which way it's pinned. */
+export interface PinnedCell {
+	el: HTMLTableCellElement | null;
+	rows: boolean;
+	columns: boolean;
+	/** The open cell's real row pins itself at the pane's top, in the first block, from the next frame. */
+	stuck?: boolean;
+}
+
 /** One table's frozen rows and columns. */
 export class Pins {
 	private freeze: Freeze = NONE;
@@ -271,12 +302,201 @@ export class Pins {
 	}
 
 	private holding = false;
+	/** The selected cell, whose copies show its outline too, and the copies that show it now. */
+	private chosen: Cell | null = null;
+	private chosenCopies: HTMLTableCellElement[] = [];
+	/** The open cell, and its real row, while it's open. */
+	private opened: { tr: HTMLTableRowElement; cell: Cell } | null = null;
+	private liftedCells: HTMLElement[] = [];
+	private hiddenCopies: HTMLElement[] = [];
+
+	/** What pins now: rows and columns only while they pin. */
+	get room(): Room {
+		const rows = this.fit.rows ? this.freeze.rows : 0;
+		return { rows, columns: this.fit.columns ? this.freeze.columns : 0, height: rows ? this.heights.reduce((sum, height) => sum + height, 0) : 0 };
+	}
+
+	/** The selected cell, or none: its copies show its outline, wherever they're drawn. */
+	markCell(cell: Cell | null): void {
+		this.chosen = cell;
+		this.marks();
+	}
+
+	/**
+	 * The open cell, or none. In a frozen column, while the table moves sideways, its row's frozen cells take the
+	 * opposite move, so the cell stays where the strip is, with the editor in the real cell, and its row's copy in the
+	 * strip hides. In a frozen row of a table of more blocks, the first block's rows pin themselves, as a table of one
+	 * block's do, and its copy of them hides, since the copy lies over the real rows there.
+	 */
+	openCell(tr: HTMLTableRowElement | null, cell: Cell | null): void {
+		const was = this.opened;
+		this.opened = tr && cell ? { tr, cell } : null;
+		if (was?.tr === this.opened?.tr && was?.cell.column === this.opened?.cell.column) return;
+		this.marks();
+		if (this.liftsRows() || (was && was.cell.row < this.freeze.rows)) this.measure();
+	}
+
+	/** Whether the first block's own rows pin, for an open cell in a frozen row of a table of more blocks. */
+	private liftsRows(): boolean {
+		return !!this.opened && this.opened.cell.row < this.freeze.rows && this.fit.rows && this.host.blockCount > 1;
+	}
+
+	/**
+	 * The copies of a cell, wherever they're drawn: in each block's copy of the frozen rows and its corner, and in the
+	 * strip, as a copy of a drawn row. Row 0 is the header.
+	 */
+	private copiesOf({ row, column }: Cell): HTMLTableCellElement[] {
+		const out: HTMLTableCellElement[] = [];
+		const add = (tr: HTMLTableRowElement | null | undefined) => {
+			const cell = tr?.cells[column];
+			if (cell) out.push(cell);
+		};
+		const rows = row < this.freeze.rows;
+		const columns = column < this.freeze.columns;
+		if (!rows && !columns) return out;
+		const real = this.host.rowElement(row - 1);
+		for (const block of this.host.pinBlocks) {
+			const parts = block ? this.parts.get(block) : null;
+			if (!block || !parts) continue;
+			if (rows && parts.rail) {
+				add(parts.rail.table.table.rows[row]);
+				if (columns && parts.rail.corner) add(parts.rail.corner.table.rows[row]);
+			}
+			if (columns && parts.strip) {
+				if (row === 0) add(parts.strip.thead.rows[0]);
+				else if (real && real.parentElement === block.tbody) add(parts.strip.mirrors.get(real)?.tr);
+			}
+		}
+		return out;
+	}
+
+	/** The open row's copy in a block's strip. */
+	private stripCopy(block: PinBlock, tr: HTMLTableRowElement): HTMLTableRowElement | null {
+		const strip = this.parts.get(block)?.strip;
+		if (!strip) return null;
+		if (tr.parentElement === block.thead) return strip.thead.rows[0] ?? null;
+		return tr.parentElement === block.tbody ? (strip.mirrors.get(tr)?.tr ?? null) : null;
+	}
+
+	/** Puts the selected cell's outline on its copies, and lifts the open cell out from under them. A few lookups. */
+	private marks(): void {
+		for (const el of this.chosenCopies) el.removeClass(CELL_CLASS);
+		this.chosenCopies = this.chosen ? this.copiesOf(this.chosen) : [];
+		for (const el of this.chosenCopies) el.addClass(CELL_CLASS);
+		for (const el of this.liftedCells) el.removeClass(LIFTED_CLASS, LIFTED_ROW_CLASS);
+		for (const el of this.hiddenCopies) el.removeClass(HIDDEN_CLASS);
+		this.liftedCells = [];
+		this.hiddenCopies = [];
+		const open = this.opened;
+		if (!open || !open.tr.isConnected) return;
+		if (this.fit.columns && open.cell.column < this.freeze.columns) {
+			open.tr.addClass(LIFTED_ROW_CLASS);
+			this.liftedCells.push(open.tr);
+			for (let column = 0; column < this.freeze.columns; column++) {
+				const cell = open.tr.cells[column];
+				if (!cell) continue;
+				cell.addClass(LIFTED_CLASS);
+				this.liftedCells.push(cell);
+			}
+			for (const block of this.host.pinBlocks) {
+				const copy = block ? this.stripCopy(block, open.tr) : null;
+				if (copy) this.hiddenCopies.push(copy);
+			}
+		}
+		if (this.liftsRows()) {
+			const first = this.host.pinBlocks[0];
+			const rail = first ? this.parts.get(first)?.rail : null;
+			if (rail) this.hiddenCopies.push(rail.box);
+		}
+		for (const el of this.hiddenCopies) el.addClass(HIDDEN_CLASS);
+	}
+
+	/** Draws a row's Find matches on its copies, -1 being the header, after taking off those they had. */
+	paintMatches(row: number): void {
+		const found = this.host.matchesOf(row);
+		const line = found?.line ?? '';
+		const matches = found?.matches ?? [];
+		if (!found && !this.matchedCopies.has(row)) return;
+		if (found) this.matchedCopies.add(row);
+		else this.matchedCopies.delete(row);
+		const body = row + 1;
+		const real = this.host.rowElement(row);
+		for (const block of this.host.pinBlocks) {
+			const parts = block ? this.parts.get(block) : null;
+			if (!block || !parts) continue;
+			if (parts.rail && body < this.freeze.rows) {
+				const tr = parts.rail.table.table.rows[body];
+				if (tr) paintMatches(tr, line, matches);
+				const corner = parts.rail.corner?.table.rows[body];
+				if (corner) paintMatches(corner, line, matches, this.freeze.columns);
+			}
+			const copy = parts.strip && real ? this.stripCopy(block, real) : null;
+			if (copy) paintMatches(copy, line, matches, this.freeze.columns);
+		}
+	}
+
+	/** Rows whose copies show Find's matches. */
+	private readonly matchedCopies = new Set<number>();
+
+	/** The frozen rows' copies were drawn anew: their matches go back on. */
+	private paintFrozenMatches(): void {
+		for (let row = -1; row < this.freeze.rows - 1; row++) if (this.matchedCopies.has(row) || this.host.matchesOf(row)) this.paintMatches(row);
+	}
+
+	/**
+	 * Where a pinned cell is drawn on top, for showing it: a copy in the strip, a copy of the frozen rows in the block
+	 * that holds where rows pin (`pinAt`, on the screen), or null where the real cell is what shows. Null for a cell
+	 * that doesn't pin.
+	 */
+	pinnedCell({ row, column }: Cell, pinAt: number): PinnedCell | null {
+		const rows = this.fit.rows && row < this.freeze.rows;
+		const columns = this.fit.columns && column < this.freeze.columns;
+		if (!rows && !columns) return null;
+		const host = this.host;
+		const lifted = this.opened && this.opened.cell.row === row && this.opened.cell.column < this.freeze.columns ? this.opened.tr : null;
+		const real = host.rowElement(row - 1);
+		const single = host.blockCount === 1;
+		for (const block of host.pinBlocks) {
+			const parts = block?.dom.isConnected ? this.parts.get(block) : null;
+			if (!block || !parts) continue;
+			if (rows && !single) {
+				const box = block.dom.getBoundingClientRect();
+				if (box.top > pinAt || box.bottom <= pinAt) continue;
+				// The first block's own rows pin there for an open cell in them.
+				if (block.index === 0 && this.liftsRows()) {
+					const copy = columns && !lifted && real ? this.stripCopy(block, real)?.cells[column] : null;
+					return { el: copy ?? null, rows, columns, stuck: true };
+				}
+				const tr = columns && parts.rail?.corner ? parts.rail.corner.table.rows[row] : parts.rail?.table.table.rows[row];
+				return { el: tr?.cells[column] ?? null, rows, columns };
+			}
+			if (columns && !lifted && real && (real.parentElement === block.tbody || real.parentElement === block.thead)) {
+				return { el: this.stripCopy(block, real)?.cells[column] ?? null, rows, columns };
+			}
+		}
+		return { el: null, rows, columns };
+	}
+
+	/** The strip's inner edge on the screen, its right in a table that runs left to right, or null with no strip shown. */
+	stripEdge(rtl: boolean): number | null {
+		if (!this.fit.columns) return null;
+		for (const block of this.host.pinBlocks) {
+			const strip = block?.dom.isConnected ? this.parts.get(block)?.strip : null;
+			if (!strip) continue;
+			const rect = strip.box.getBoundingClientRect();
+			if (rect.width) return rtl ? rect.left : rect.right;
+		}
+		return null;
+	}
 
 	/** The block's rows were put in order: the strip's copies follow, in the same order. */
 	arranged(block: PinBlock): void {
 		const strip = this.parts.get(block)?.strip;
-		// New copies take their real rows' heights on the next measure, in the same frame.
-		if (strip && this.mirror(block, strip)) this.measure();
+		// New copies take their real rows' heights on the next measure, in the same frame, and the marks.
+		if (strip && this.mirror(block, strip)) {
+			this.marks();
+			this.measure();
+		}
 		// So does a frozen row of a table of one block drawn anew, which has to stick.
 		else if (this.fit.rows && this.host.blockCount === 1) {
 			for (let row = 0; row < this.freeze.rows - 1; row++) {
@@ -288,6 +508,18 @@ export class Pins {
 		}
 	}
 
+	/** Runs once what pins is placed next, as after a freeze is written; at once when nothing's frozen. */
+	afterPlacing(run: () => void): void {
+		if (!this.freeze.rows && !this.freeze.columns) {
+			run();
+			return;
+		}
+		this.placed = run;
+		this.measure();
+	}
+
+	private placed: (() => void) | null = null;
+
 	/** Places what pins on CodeMirror's next measure. */
 	measure(): void {
 		const view = this.host.view;
@@ -298,9 +530,14 @@ export class Pins {
 			key: this.key,
 			read: () => {
 				this.pending = false;
-				return this.read();
+				return timed('measure', () => this.read());
 			},
-			write: (read) => this.write(read),
+			write: (read) => {
+				timed('draw', () => this.write(read));
+				const placed = this.placed;
+				this.placed = null;
+				placed?.();
+			},
 		});
 	}
 
@@ -309,6 +546,7 @@ export class Pins {
 	}
 
 	private drop(): void {
+		this.matchedCopies.clear();
 		if (!this.source) return;
 		for (const tr of this.source.rows) this.host.release(tr);
 		this.source = null;
@@ -421,6 +659,8 @@ export class Pins {
 		const tops = stickyTops(read.heights);
 		const pinned = read.heights.reduce((sum, height) => sum + height, 0);
 		let again = false;
+		let rebuilt = false;
+		const lifts = this.liftsRows();
 		// Until the theme's colors are read, what pins is built but not painted, and read on the next measure.
 		if (!read.paint) again = true;
 		for (const { block, start, top, bottom, height, rows } of read.blocks) {
@@ -431,7 +671,9 @@ export class Pins {
 			dom.toggleClass(SINGLE_CLASS, single);
 			for (const [name, value] of read.paint?.variables ?? []) setStyle(dom, name, any ? value : null);
 			const parts = this.partsOf(block);
-			this.realRows(block, single && this.fit.rows ? tops : null);
+			// The first block's own rows pin in a table of one block, and for an open cell in a frozen row.
+			const own = this.fit.rows && (single || (block.index === 0 && lifts));
+			if (block.index === 0) this.realRows(block, own ? tops : null);
 			// The strip of frozen columns.
 			if (this.fit.columns) {
 				parts.strip ??= { ...part(dom, STRIP_CLASS, this.holding), mirrors: new WeakMap(), real: new WeakMap(), source: -1 };
@@ -447,6 +689,7 @@ export class Pins {
 					strip.tbody.empty();
 					strip.mirrors = new WeakMap();
 					strip.real = new WeakMap();
+					rebuilt = true;
 				}
 				if (this.mirror(block, strip)) again = true;
 				for (const [tr, height] of rows) {
@@ -454,7 +697,7 @@ export class Pins {
 					if (mirror) setStyle(mirror, 'height', px(height));
 				}
 				// In a table of one block the strip's frozen rows stick with the real ones.
-				this.stickStrip(strip, single && this.fit.rows ? tops : null, block);
+				this.stickStrip(strip, own ? tops : null, block);
 			} else if (parts.strip) {
 				parts.strip.box.remove();
 				parts.strip = null;
@@ -478,6 +721,7 @@ export class Pins {
 					// Hidden, so the last frozen row isn't the table's last for a theme's rules.
 					rail.table.tbody.append(createEl('tr', { cls: [SPACER_CLASS, PARITY_CLASS] }));
 					if (rail.corner) rail.corner.applied = '';
+					rebuilt = true;
 				}
 				if (this.fit.columns) {
 					rail.corner ??= part(rail.copy, CORNER_CLASS, this.holding);
@@ -492,6 +736,7 @@ export class Pins {
 						if (head) corner.thead.append(rowCopy(head, this.freeze.columns, 0));
 						body.forEach((tr, index) => corner.tbody.append(rowCopy(tr, this.freeze.columns, index + 1)));
 						corner.tbody.append(createEl('tr', { cls: [SPACER_CLASS, PARITY_CLASS] }));
+						rebuilt = true;
 					}
 					Array.from(corner.table.rows)
 						.filter((tr) => !tr.hasClass(SPACER_CLASS))
@@ -505,6 +750,8 @@ export class Pins {
 				parts.rail = null;
 			}
 		}
+		if (rebuilt) this.paintFrozenMatches();
+		this.marks();
 		// What was just made is measured in the same frame: CodeMirror runs a measure asked for while it writes. Colors
 		// that can't be read yet, with no rows drawn, wait for the rows: drawing them measures again.
 		if ((again && (read.paint || this.tries++ < 2)) || (fitChanged && this.fit.rows && !single)) this.measure();
@@ -587,7 +834,12 @@ export class Pins {
 				mirror = { tr: spacer ? spacerCopy(tr, columns) : rowCopy(tr, columns, null), text, height: '' };
 				strip.mirrors.set(tr, mirror);
 				strip.real.set(mirror.tr, tr);
-				if (!spacer) made = true;
+				if (!spacer) {
+					made = true;
+					const row = this.host.matchedRow(tr);
+					const found = row === null ? null : this.host.matchesOf(row);
+					if (found) paintMatches(mirror.tr, found.line, found.matches, columns);
+				}
 			}
 			if (spacer) {
 				const height = (tr.firstElementChild as HTMLElement | null)?.style.height ?? '';
@@ -627,6 +879,7 @@ export class Pins {
 		}
 		this.fit = { rows: false, columns: false };
 		this.marked = false;
+		this.marks();
 		void view;
 	}
 }

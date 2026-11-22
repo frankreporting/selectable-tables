@@ -3,6 +3,8 @@ import { EditorState, type Extension, Prec, RangeSet, StateEffect, StateField, t
 import { Decoration, type DecorationSet, EditorView, type PluginValue, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
 import { type App, editorEditorField, editorInfoField } from 'obsidian';
+import { showsCellAfter } from '../editor/decide';
+import { canFreeze } from '../editor/freeze';
 import { inOwnCell, openCells, ownTables as ownTablesFacet } from '../editor/layout';
 import { type Cell, frontmatterEnd, type Span } from '../editor/table-text';
 import { endOfNextLine, findTables, type Found, lineChange, updateTables } from './find';
@@ -23,9 +25,9 @@ import { forcePlain, missingPiece, plainBecause, resetFallback } from './cell-ed
 
 /**
  * The plugin's own table, for Live Preview notes: it draws each table Obsidian would draw, as one block, with only
- * the rows near the pane in the page. A preview, behind a switch (preview.ts): it can't edit a cell or freeze a table
- * yet, and Obsidian's table controls aren't there. The navigation layer (src/editor) runs on it, reading its tables
- * through `ownTables` in layout.ts.
+ * the rows near the pane in the page. A preview, behind a switch (preview.ts): Obsidian's table controls aren't there
+ * yet. The navigation layer (src/editor) runs on it, reading its tables through `ownTables` in layout.ts, and so do
+ * the freeze commands and the freeze items of the right-click menu.
  */
 
 /** On every editor while the plugin runs. styles.css scopes what it changes in tables to it. */
@@ -268,6 +270,15 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 			const index = value?.spans.findIndex((span) => span.from === from) ?? -1;
 			return index >= 0 ? (value!.models[index] ?? null) : null;
 		},
+		pins: (view) => usesBars(view) && canFreeze(),
+		cellAt(view, target) {
+			const block = target.closest(`[${BOX_ID}]`);
+			const id = block ? Number(block.getAttribute(BOX_ID)) : -1;
+			const model = view.state.field(tables, false)?.models.find((each) => each.id === id && each.view === view);
+			const cell = model?.cellAt(target);
+			if (!model || !cell) return null;
+			return { cell, table: () => (model.view === view && view.state.field(tables, false)?.models.includes(model) ? { from: model.from, to: model.to } : null) };
+		},
 	});
 
 	/** Obsidian's commands, acting at the note's selection inside an open cell, write into the cell as it writes (open-cell.ts). */
@@ -275,6 +286,15 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 		const view = tr.startState.field(editorEditorField, false);
 		const cell = view ? openCells.get(view) : undefined;
 		return cell instanceof OpenCell && cell.note === view ? (cell.reconcile(tr) ?? tr) : tr;
+	});
+
+	/**
+	 * CodeMirror is about to scroll a range into view, as Undo and Redo do to the whole table: a selected cell waiting for
+	 * that is shown on the measure after it, when the scroll has run. The scroll itself goes ahead.
+	 */
+	const afterScrolls = EditorView.scrollHandler.of((view) => {
+		for (const model of view.state.field(tables, false)?.models ?? []) if (model.view === view) model.afterScroll();
+		return false;
 	});
 
 	const tableEvents = EditorView.domEventHandlers({
@@ -381,6 +401,10 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 				const selected = selectedModel(update.state);
 				for (const model of this.models) model.setSelected(model === selected);
 			}
+			// A freeze command's write, Undo or Redo: the selected cell is shown once the new freeze is drawn.
+			if (update.docChanged && update.transactions.some(showsCellAfter)) {
+				for (const model of this.models) if (model.view === update.view) model.showCellAfterFreeze();
+			}
 			// Find and the Search pane mark their matches with effects; an edit moves those already in a table. Typing in a
 			// cell, with no match anywhere, looks for none.
 			const marked = update.transactions.some((tr) => tr.effects.length > 0);
@@ -450,7 +474,7 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 	});
 
 	return {
-		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, forKeys, Prec.highest(tableEvents), cellCommands] : unsupported) as Extension,
+		extension: (boxes ? [Prec.highest(tables), languageCopy(failed), ViewPlugin.fromClass(Editor), attributes, forKeys, Prec.highest(tableEvents), cellCommands, afterScrolls] : unsupported) as Extension,
 		/**
 		 * Obsidian's `css-change`, a new theme, font or snippet, or a font that finished loading: every table is laid
 		 * out again, with text measured anew, since a font that loads measures differently under the same name.

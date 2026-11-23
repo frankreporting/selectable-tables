@@ -19,6 +19,9 @@ import { barPlace, type BarPlace, clampSlide, maxSlide, revealDelta } from './si
 import { type PinHost, Pins, ROW_ATTRIBUTE } from './pins';
 import { showDown } from './pin-sums';
 import { cellPlace } from './cell-write';
+import { ACTIVE_COLUMN_CLASS, ACTIVE_ROW_CLASS, addButtons, addGrips, BUTTONS, gripOf, GRIPS, tableControls } from './grips';
+import type { DragTable } from './drag';
+import { columnExtents, type Extent } from './drag-sums';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
 /**
@@ -256,7 +259,7 @@ interface ShowRead {
 	stuck: boolean;
 }
 
-export class Model implements Span, DrawnTable {
+export class Model implements Span, DrawnTable, DragTable {
 	readonly id = ++ids;
 	view: EditorView | null = null;
 	private readonly component = new Component();
@@ -464,13 +467,46 @@ export class Model implements Span, DrawnTable {
 		return tr?.instanceOf(HTMLTableRowElement) ? (tr.cells[column] ?? null) : null;
 	}
 
-	/** Puts the selected cell's mark on its element, as its row comes and goes. */
+	/** Puts the selected cell's mark on its element, as its row comes and goes, and the handles' marks for a phone. */
 	private paintCell(): void {
+		this.paintHandles();
 		const el = this.cell ? this.cellElement(this.cell) : null;
 		if (el === this.cellEl) return;
 		this.cellEl?.removeClass(CELL_CLASS);
 		el?.addClass(CELL_CLASS);
 		this.cellEl = el;
+	}
+
+	/** The cells whose handles show on a phone or tablet, as marked. */
+	private handleEls: [HTMLTableCellElement | null, HTMLTableCellElement | null] = [null, null];
+	private focusShown = false;
+
+	/**
+	 * On a phone or tablet, Obsidian shows the handles only for the open cell's row and column, and the + buttons only
+	 * while a cell is open (its `setActiveDragHandles` and `has-focus`). On the plugin's table they show for the selected
+	 * cell too, which a tap selects. Obsidian's classes do nothing on a computer, where `has-focus` marks an open cell's
+	 * table, as on Obsidian's own.
+	 */
+	private paintHandles(): void {
+		const open = this.openRow ? this.rowOfOpen() : null;
+		const cell = this.cell ?? (open === null ? null : { row: open, column: this.openColumn });
+		const row = cell ? this.cellElement({ row: cell.row, column: 0 }) : null;
+		const column = cell ? this.cellElement({ row: 0, column: cell.column }) : null;
+		const [wasRow, wasColumn] = this.handleEls;
+		if (wasRow !== row) {
+			wasRow?.removeClass(ACTIVE_ROW_CLASS);
+			row?.addClass(ACTIVE_ROW_CLASS);
+		}
+		if (wasColumn !== column) {
+			wasColumn?.removeClass(ACTIVE_COLUMN_CLASS);
+			column?.addClass(ACTIVE_COLUMN_CLASS);
+		}
+		this.handleEls = [row, column];
+		const mobile = !!this.view?.dom.ownerDocument.body.hasClass('is-mobile');
+		const focus = open !== null || (mobile && !!this.cell);
+		if (focus === this.focusShown && !focus) return;
+		this.focusShown = focus;
+		for (const block of this.blocks) block?.dom.toggleClass('has-focus', focus);
 	}
 
 	/** The cell an element of the table's blocks is in, a pinned copy's being its real cell; null outside its cells. */
@@ -567,6 +603,7 @@ export class Model implements Span, DrawnTable {
 		if (tr) this.coming = null;
 		const row = tr ? this.rowOfOpen() : null;
 		this.pins.openCell(tr, row === null ? null : { row, column });
+		this.paintHandles();
 		if (tr || was === null) return;
 		// The cell that closed still shows its text from before it opened, so the row is drawn again, in place if another
 		// of its cells opens before then.
@@ -832,10 +869,18 @@ export class Model implements Span, DrawnTable {
 		return this.shaped ? this.generation : 0;
 	}
 
-	/** A block's height, with the box's padding above the first and below the last, as estimated. */
+	/**
+	 * A block's height, with the box's padding above the first and below the last, as estimated: below a table that
+	 * slides, with room for its bar.
+	 */
 	blockHeight(block: number): number {
 		const padTop = this.metrics?.padTop ?? 0;
-		return blockHeight(this.heights, block, this.headHeight, padTop, (this.metrics?.pad ?? 0) - padTop);
+		return blockHeight(this.heights, block, this.headHeight, padTop, this.padBottom() + (this.slides ? BAR_HEIGHT : 0));
+	}
+
+	/** The padding below the table, as the theme gives a table's box. */
+	private padBottom(): number {
+		return (this.metrics?.pad ?? 0) - (this.metrics?.padTop ?? 0);
 	}
 
 	private shape(doc: Text, metrics: Metrics): void {
@@ -1135,7 +1180,8 @@ export class Model implements Span, DrawnTable {
 
 	private build(index: number): Block {
 		const dom = createDiv({ cls: ['cm-embed-block', 'cm-table-widget', 'markdown-rendered', OWN_CLASS] });
-		const table = dom.createDiv('table-wrapper').createEl('table', { cls: 'table-editor' });
+		const wrapper = dom.createDiv('table-wrapper');
+		const table = wrapper.createEl('table', { cls: 'table-editor' });
 		const colgroup = table.createEl('colgroup');
 		const thead = index === 0 ? table.createEl('thead') : null;
 		const tbody = table.createEl('tbody');
@@ -1155,11 +1201,17 @@ export class Model implements Span, DrawnTable {
 			if (!leftAlone(event)) event.preventDefault();
 		};
 		dom.addEventListener('pointerdown', (event) => {
+			// A drag handle drags its row or column, or shows its menu at a click.
+			const grip = gripOf(event.target as Element);
+			if (grip && dom.contains(grip.grip)) {
+				tableControls()?.press(this, event, grip.grip, grip.kind);
+				return;
+			}
 			if (event.pointerType === 'mouse') hold(event);
 		});
 		dom.addEventListener('mousedown', hold);
 		dom.addEventListener('click', (event) => {
-			if (leftAlone(event)) return;
+			if (leftAlone(event) || (event.target as Element).closest(`${GRIPS}, ${BUTTONS}`)) return;
 			const pressed = (event.target as Element).closest('td, th');
 			const el = pressed?.instanceOf(HTMLTableCellElement) ? (this.pins.pressBeneath(pressed, event.clientX, event.clientY) ?? pressed) : pressed;
 			const cell = el?.instanceOf(HTMLTableCellElement) && dom.contains(el) ? this.cellOf(el) : null;
@@ -1179,7 +1231,11 @@ export class Model implements Span, DrawnTable {
 		};
 		dom.addEventListener('load', loaded, true);
 		dom.addEventListener('loadedmetadata', loaded, true);
+		// The + buttons, below the table and at its side, as Obsidian's table has them.
+		addButtons(wrapper, (what) => tableControls()?.add(this, what));
 		dom.toggleClass('is-selected', this.selected);
+		dom.toggleClass('is-dragging', this.dragging);
+		dom.toggleClass('has-focus', this.focusShown);
 		table.toggleClass(HOLDS_CELL_CLASS, !!this.cell);
 		if (this.dir) dom.dir = this.dir;
 		// Which table a swipe over the block is for.
@@ -1467,7 +1523,7 @@ export class Model implements Span, DrawnTable {
 		if (!view || this.stale || !metrics) return null;
 		const last = this.blocks[this.blockCount - 1];
 		if (last?.table.isConnected) return last.table.getBoundingClientRect().bottom;
-		return view.documentTop + view.lineBlockAt(this.to).bottom - (metrics.pad - metrics.padTop);
+		return view.documentTop + view.lineBlockAt(this.to).bottom - (metrics.pad - metrics.padTop) - (this.slides ? BAR_HEIGHT : 0);
 	}
 
 	/**
@@ -1523,6 +1579,8 @@ export class Model implements Span, DrawnTable {
 				}
 			}
 			while (tr.cells.length < this.columns) tr.insertCell().append(cellBox(page));
+			// The handles for dragging a row or a column, as Obsidian's table puts them: the header comes first.
+			addGrips(tr, !out.length);
 			this.batchOf.set(tr, batch);
 			batch.rows++;
 			out.push(tr);
@@ -1973,8 +2031,12 @@ export class Model implements Span, DrawnTable {
 		const first = this.blocks[0];
 		const last = this.blocks[this.blockCount - 1];
 		const start = first?.thead?.isConnected ? first.thead.getBoundingClientRect().bottom - top : view.lineBlockAt(this.from).top + toContent + metrics.padTop + this.headHeight;
-		const end = last?.table.isConnected ? last.table.getBoundingClientRect().bottom - top : view.lineBlockAt(this.to).bottom + toContent - padBottom;
-		const height = Math.max(BAR_HEIGHT, padBottom);
+		// The bar sits below the + that adds a row, which takes the box's padding under the table: while the table slides,
+		// the last block's padding there is the bar's height taller (`dress`), as a box's own scrollbar adds its height.
+		const room = this.slides ? BAR_HEIGHT : 0;
+		const tableEnd = last?.table.isConnected ? last.table.getBoundingClientRect().bottom - top : view.lineBlockAt(this.to).bottom + toContent - padBottom - room;
+		const end = tableEnd + padBottom;
+		const height = BAR_HEIGHT;
 		const place = barPlace(start, end, height, scroller.clientHeight, statusInset(scroller, pane, rect));
 		// The bar's scroll range is the slide exactly: it's a whole number of pixels wide, and its content that much wider.
 		return { bars, slide, place, left: rect.left + (parseFloat(style.borderLeftWidth) || 0) - left, width: box.clientWidth, height };
@@ -2002,13 +2064,18 @@ export class Model implements Span, DrawnTable {
 		if (this.bar) this.scrollX = this.bar.scroll;
 	};
 
-	/** Has a block follow the table's scrollbar, or not, as the table is wide and the editor uses bars. */
+	/**
+	 * Has a block follow the table's scrollbar, or not, as the table is wide and the editor uses bars. The last block
+	 * makes room for the bar below the + that adds a row.
+	 */
 	private dress(block: Block): void {
 		const bar = this.bar;
 		const slide = bar ? `${this.dir === 'rtl' ? '' : '-'}${this.slide}px` : '';
-		const key = bar ? `${bar.name} ${slide}` : '';
+		const room = bar && block.index === this.blockCount - 1 ? this.padBottom() + BAR_HEIGHT : null;
+		const key = bar ? `${bar.name} ${slide} ${room}` : '';
 		if (key === block.dressed) return;
 		block.dressed = key;
+		block.dom.style.paddingBottom = room === null ? '' : `${room}px`;
 		block.dom.toggleClass(SLIDES_CLASS, !!bar);
 		if (bar) {
 			block.dom.style.setProperty(TIMELINE_VARIABLE, bar.name);
@@ -2047,6 +2114,89 @@ export class Model implements Span, DrawnTable {
 			return;
 		}
 		box.scrollLeft += delta;
+		if (box === this.sideBox) this.scrollX = box.scrollLeft;
+	}
+
+	// Dragging a row or a column ---------------------------------------------------------------------------------
+
+	private dragging = false;
+
+	/** A handle is being dragged: Obsidian's class on the table's box hides the other handles, on every block. */
+	setDragging(on: boolean): void {
+		this.dragging = on;
+		for (const block of this.blocks) block?.dom.toggleClass('is-dragging', on);
+	}
+
+	/** The blocks in the page, and the one whose box is nearest a place on the screen, or holds it. */
+	private nearestBlock(y: number): Block | null {
+		let best: Block | null = null;
+		let distance = Infinity;
+		for (const block of this.blocks) {
+			if (!block?.dom.isConnected) continue;
+			const rect = block.table.getBoundingClientRect();
+			const away = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+			if (away < distance) {
+				best = block;
+				distance = away;
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * Where the table's top is on the screen, as laid out, and its height, from its heights: measured from the block in
+	 * the page nearest `y`, since CodeMirror can leave a gap between blocks it draws, whose height is its own guess.
+	 * Pinned rows count at their own places in the table.
+	 */
+	rowLayout(y: number): { top: number; height: number } | null {
+		const block = this.nearestBlock(y);
+		if (!block) return null;
+		const bodyTop = block.tbody.getBoundingClientRect().top - this.heights.top(blockRows(this.count, block.index).first);
+		return { top: bodyTop - this.headHeight, height: this.headHeight + this.heights.total() };
+	}
+
+	/** The row at a height below the table's top, 0 being the header, and where it starts and ends. */
+	rowAtHeight(y: number): Extent {
+		const head = this.headHeight;
+		if (y < head || !this.count) return { index: 0, start: 0, end: head };
+		const row = this.heights.rowAt(y - head);
+		const start = head + this.heights.top(row);
+		return { index: row + 1, start, end: start + this.heights.get(row) };
+	}
+
+	/** The table's left on the screen, where its slide puts it, its width, and its columns from its left, by their widths. */
+	columnLayout(): { left: number; width: number; columns: Extent[] } | null {
+		const block = this.blocks.find((each) => each?.dom.isConnected);
+		if (!block || !this.metrics) return null;
+		const rect = block.table.getBoundingClientRect();
+		const { tableBorder = 0, spacing = 0 } = this.metrics;
+		return { left: rect.left, width: rect.width, columns: columnExtents(this.appliedWidths(), tableBorder, spacing, rect.width, this.rtl) };
+	}
+
+	/** The box around the table of the block in the page holding a place on the screen, else the nearest one. */
+	wrapperAt(y: number): HTMLElement | null {
+		return this.nearestBlock(y)?.table.parentElement ?? null;
+	}
+
+	/** The boxes around the tables of the blocks in the page. */
+	wrappers(): HTMLElement[] {
+		return this.blocks.flatMap((block) => (block?.dom.isConnected && block.table.parentElement ? [block.table.parentElement] : []));
+	}
+
+	/** Where the box the table moves sideways in is, on the screen. */
+	sidewaysBox(): DOMRect | null {
+		return this.boxNow()?.getBoundingClientRect() ?? null;
+	}
+
+	/** Moves the table sideways, by its bar on a computer, or its box on a phone or tablet. */
+	scrollSideways(dx: number): void {
+		if (this.bar) {
+			this.slideBy(dx);
+			return;
+		}
+		const box = this.boxNow();
+		if (!box) return;
+		box.scrollLeft += dx;
 		if (box === this.sideBox) this.scrollX = box.scrollLeft;
 	}
 

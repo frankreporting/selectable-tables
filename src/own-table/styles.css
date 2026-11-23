@@ -516,3 +516,41 @@ body {
 	background: none;
 	box-shadow: none;
 }
+
+/*
+ * Obsidian's drag handles and + buttons (grips.ts). While a handle is dragged, the one that moves is a copy that
+ * follows the pointer (drag.ts): every other handle hides, the one pressed too, which Obsidian keeps showing while
+ * it's held, and the copy looks as Obsidian's held handle does.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.is-dragging :is(.table-row-drag-handle, .table-col-drag-handle):not(.selectable-tables-dragged) {
+	display: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.is-dragging .selectable-tables-dragged {
+	z-index: 3;
+	display: flex;
+	opacity: 1;
+}
+
+@media (hover: hover) {
+	.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.is-dragging .selectable-tables-dragged {
+		cursor: grabbing;
+		background-color: var(--table-drag-handle-background-active);
+		color: var(--table-drag-handle-color-active);
+		box-shadow: 0 0 0 var(--table-selection-border-width) var(--table-selection-border-color);
+	}
+}
+
+/* A table of more than 100 rows has its + below on its last block only: the one at its side runs every block. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) .table-row-btn {
+	display: none;
+}
+
+/* The + at the side runs on across the seams between blocks, with no border of its own there. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-first) .table-col-btn {
+	border-top: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) .table-col-btn {
+	border-bottom: none;
+}

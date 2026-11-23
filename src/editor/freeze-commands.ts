@@ -146,7 +146,7 @@ export function selectAt(view: EditorView, place: Place): boolean {
  * Items a preview build puts before the freeze items, on the plugin's own table: Obsidian's Row, Column and Sort, which
  * its own table menu has over its own table (src/own-table/table-commands.ts).
  */
-type TableItems = (menu: Menu, view: EditorView, place: Place) => void;
+type TableItems = (menu: Menu, view: EditorView, place: Place, grip?: 'row' | 'column') => void;
 
 let tableItems: TableItems | null = null;
 
@@ -206,9 +206,17 @@ export const tableMenus = ViewPlugin.define((view) => {
 	// takes the event's target out of the page before the freeze items go in.
 	let caught: { event: MouseEvent; place: Place | null | undefined } | null = null;
 	const onOwnMenu = (event: MouseEvent) => {
-		const place = ownPlace(event.target as Element);
+		const target = event.target as Element;
+		const place = ownPlace(target);
 		caught = { event, place };
 		if (!place) return;
+		// A drag handle's menu is its row's or its column's, with no freeze items, as Obsidian's handles have it.
+		const handle = target.closest(HANDLES);
+		if (handle) {
+			caught = { event, place: null };
+			if (tableItems && place.table() && selectAt(view, place)) tableItems(Menu.forEvent(event), view, place, handle.matches('.table-row-drag-handle') ? 'row' : 'column');
+			return;
+		}
 		// The cell is selected first, so it shows which cell the menu is for. An open cell's empty space keeps it open.
 		const open = openCell(view)?.place.cell;
 		if (open?.row !== place.cell.row || open?.column !== place.cell.column) selectAt(view, place);

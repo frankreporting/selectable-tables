@@ -1,7 +1,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { EditorSelection } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { Command, IconName, Menu, MenuItem } from 'obsidian';
+import { type Command, type IconName, Menu, type MenuItem } from 'obsidian';
 import { cellSelection } from '../editor/cells';
 import { writesTable } from '../editor/decide';
 import { escapeCell, noteView, wholeTable } from '../editor/extension';
@@ -70,6 +70,8 @@ const sizeOf = (own: DrawnTable) => ({ rows: own.grid.rows, columns: own.grid.co
 interface EditEnd {
 	open?: boolean;
 	column?: number;
+	/** Where a drag puts its row or column. */
+	to?: number;
 }
 
 /**
@@ -84,13 +86,28 @@ export function runEdit(view: EditorView, edit: TableEdit, end: EditEnd = {}): b
 	const open = end.open ?? !!found.open;
 	if (found.open && !escapeCell(found.open)) return false;
 	const target = found.open ? targetIn(view) : found;
-	const own = target && ownTable(view, target.table);
-	if (!target || !own) return false;
-	const { table, cell } = target;
+	return !!target && editAt(view, target.table, target.cell, edit, { ...end, open });
+}
+
+/**
+ * Runs an edit at a cell of one of the note's own tables, with no cell selected first: the drag handles' moves and the +
+ * buttons' adds, which Obsidian runs from its table, not from a cell. An open cell closes first, as Escape closes it.
+ * `table` is the plugin's table itself, which keeps where it is in the note.
+ */
+export function runEditAt(view: EditorView, table: Span, cell: Cell, edit: TableEdit, end: EditEnd = {}): boolean {
+	const open = openCells.get(view);
+	if (open && open.note === view && !escapeCell(open.view)) return false;
+	return editAt(view, table, cell, edit, end);
+}
+
+function editAt(view: EditorView, table: Span, cell: Cell, edit: TableEdit, end: EditEnd): boolean {
+	const own = ownTable(view, table);
+	if (!own) return false;
+	const open = !!end.open;
 	const { doc } = view.state;
 	const lines: string[] = [];
 	for (let n = doc.lineAt(table.from).number; n <= doc.lineAt(table.to).number; n++) lines.push(doc.line(n).text);
-	const edited = editTable(lines, edit, cell, { rtl: own.rtl, shown: shownText });
+	const edited = editTable(lines, edit, cell, { rtl: own.rtl, shown: shownText, ...(end.to === undefined ? {} : { to: end.to }) });
 	if (!edited) {
 		// Nothing to do there: an open cell opens again.
 		if (open) own.openCell(cell);
@@ -105,7 +122,10 @@ export function runEdit(view: EditorView, edit: TableEdit, end: EditEnd = {}): b
 	}
 	const { changes, to } = lineChanges(doc, table, edited.lines, edited.from);
 	const { main } = view.state.selection;
-	if (changes.length) view.dispatch({ changes, selection: wholeTable({ from: table.from, to }, main.anchor < main.head), annotations, scrollIntoView: false });
+	const inTable = main.from >= table.from && main.to <= table.to;
+	if (changes.length) view.dispatch({ changes, selection: wholeTable({ from: table.from, to }, inTable && main.anchor < main.head), annotations, scrollIntoView: false });
+	// The keys go to the note, as they do after a menu's edit: a + button or a handle leaves them where they were.
+	if (!view.hasFocus) view.focus();
 	const at = { row: edited.cell.row, column: end.column ?? edited.cell.column };
 	const opens = open || ADDS.has(edit);
 	const now = ownTable(view, { from: table.from, to });
@@ -122,6 +142,20 @@ export function runEdit(view: EditorView, edit: TableEdit, end: EditEnd = {}): b
 	if (changes.length && now?.shown) now.afterDraw(at, finish);
 	else finish();
 	return true;
+}
+
+/** The + buttons: a row at the table's end, or a column, as Obsidian's buttons add them, its first cell open. */
+export function addAtEnd(view: EditorView, table: Span, what: 'row' | 'column'): void {
+	runEditAt(view, table, { row: 0, column: 0 }, what === 'row' ? 'row-end' : 'col-end', { open: true });
+}
+
+/**
+ * A drag handle let go: its row moves to the row it was let go on, or its column to the column, and the moved row's
+ * first cell, or the column's header cell, is selected, where Obsidian selects the row or column as a range of cells.
+ */
+export function moveTo(view: EditorView, table: Span, what: 'row' | 'column', from: number, to: number): void {
+	const cell = what === 'row' ? { row: from, column: 0 } : { row: 0, column: from };
+	runEditAt(view, table, cell, what === 'row' ? 'row-move' : 'col-move', { to });
 }
 
 /**
@@ -154,8 +188,12 @@ function group(menu: Menu, title: string, key: string): (item: Item, add: (item:
 	return (each, add) => (sub.menu ?? menu).addItem((item) => add(item.setSection(sub.menu ? each.section : `table-${key}`)));
 }
 
-/** The Row and Column submenus and Sort, for a right-clicked cell of the plugin's table, before the freeze items. */
-export function tableItems(menu: Menu, view: EditorView, place: Place): void {
+/**
+ * The Row and Column submenus and Sort, for a right-clicked cell of the plugin's table, before the freeze items. A drag
+ * handle's menu is its row's items, or Sort and its column's items, in the menu itself, as Obsidian's handles have them
+ * (`makeRowMenu`, then `makeSortMenu` and `makeColMenu`), with no freeze items.
+ */
+export function tableItems(menu: Menu, view: EditorView, place: Place, grip?: 'row' | 'column'): void {
 	const table = place.table();
 	const own = table && ownTable(view, table);
 	if (!own) return;
@@ -170,11 +208,24 @@ export function tableItems(menu: Menu, view: EditorView, place: Place): void {
 				if (selectAt(view, place)) runEdit(view, each.edit, { open });
 			});
 	const offered = (each: Item) => !each.offered || each.offered(cell, size);
+	const flat = (items: Item[]) => {
+		for (const each of items) if (offered(each)) menu.addItem((entry) => item(each)(entry.setSection(each.section)));
+	};
+	if (grip === 'row') return flat(ROW_ITEMS);
+	if (grip === 'column') return flat([...SORT_ITEMS, ...COLUMN_ITEMS]);
 	const rows = group(menu, 'Row', 'row');
 	for (const each of ROW_ITEMS) if (offered(each)) rows(each, item(each));
 	const columns = group(menu, 'Column', 'column');
 	for (const each of COLUMN_ITEMS) if (offered(each)) columns(each, item(each));
-	for (const each of SORT_ITEMS) menu.addItem((entry) => item(each)(entry.setSection(each.section)));
+	flat(SORT_ITEMS);
+}
+
+/** A drag handle's menu, at a click on it without a drag: the same items as a right-click on it. */
+export function gripMenu(view: EditorView, place: Place, grip: 'row' | 'column', at: MouseEvent): void {
+	if (!selectAt(view, place)) return;
+	const menu = new Menu();
+	tableItems(menu, view, place, grip);
+	menu.showAtMouseEvent(at);
 }
 
 /** The table commands, offered with a cell of the plugin's table selected or open, under Obsidian's names. */

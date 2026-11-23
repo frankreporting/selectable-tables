@@ -5199,8 +5199,15 @@
 						// the header cell sliding under it, as Obsidian's table does, and the note stays; a press on a frozen column's
 						// cell under the header still opens it.
 						const themeBefore = app.customCss.theme;
-						app.customCss.setTheme('Baseline');
-						await sleep(1500);
+						// A theme loads in its own time, and one set right after another may not stick: each is set till it reads back.
+						const useTheme = async (name) => {
+							for (let i = 0; i < 10; i++) {
+								if (app.customCss.theme !== name) app.customCss.setTheme(name);
+								await sleep(i ? 600 : 1500);
+								if (app.customCss.theme === name) break;
+							}
+						};
+						await useTheme('Baseline');
 						const corners = await both(async (on) => {
 							const v = await open('Frozen tables');
 							await sleep(400);
@@ -5227,8 +5234,7 @@
 							}
 							return result;
 						});
-						app.customCss.setTheme(themeBefore);
-						await sleep(800);
+						await useTheme(themeBefore);
 						const same = (a, b) => !!a && !!b && a.row === b.row && a.column === b.column;
 						check('Own 88: under Baseline, a press in the gap at a pinned header cell\'s rounded corner opens the header cell under it, with the note still, as with the switch off', same(corners.own.corner?.cell, corners.off.corner?.cell) && corners.own.corner.cell.row === 0 && corners.own.corner.cell.column >= 2 && corners.own.corner.scrolled === 0 && corners.off.corner.scrolled === 0, corners);
 						check('Own 88: a press on a frozen column\'s cell below the pinned header still opens that cell', corners.own.column?.cell?.row >= 1 && corners.own.column?.cell?.column === 0 && corners.off.column?.cell?.row >= 1 && corners.off.column?.cell?.column === 0, corners);
@@ -5483,10 +5489,7 @@
 							// A theme moves the table with its own layout, Minimal's line width say: only the pins are watched there, and
 							// the cell is back in its place once the theme is.
 							toggling = false;
-							for (const theme of ['Minimal', themeBefore]) {
-								app.customCss.setTheme(theme);
-								await sleep(1200);
-							}
+							for (const theme of ['Minimal', themeBefore]) await useTheme(theme);
 							looks.back = Math.abs((editor()?.getBoundingClientRect().left ?? -1e9) - base) <= 2;
 							sampling = false;
 							observer.disconnect();
@@ -5495,7 +5498,9 @@
 							await leave();
 							if (document.body.classList.contains('theme-dark') !== darkBefore) app.commands.executeCommandById('theme:toggle-light-dark');
 							await sleep(400);
+							await useTheme(themeBefore);
 						}
+						check('Own 91: the theme and light or dark are put back as they were', app.customCss.theme === themeBefore && document.body.classList.contains('theme-dark') === darkBefore, { theme: app.customCss.theme, themeBefore, dark: document.body.classList.contains('theme-dark'), darkBefore });
 						check('Own 91: through 20 switches between light and dark, a frozen column\'s open cell never moves sideways, and through those and a theme and back what pins never goes, in any frame', looks.open && looks.back && looks.frames > 200 && looks.moved === 0 && looks.unpinned === 0, looks);
 					}
 					view = await open('Watering schedule');

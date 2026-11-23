@@ -6431,16 +6431,18 @@
 						await restore(view, bigText);
 
 						// Own 98: scrolled to its end and moved sideways, the + below sits clear of the sideways scrollbar.
-						// The table's end well inside the pane, so its bar is at rest under it.
-						view.dispatch({ effects: view.constructor.scrollIntoView(big.to, { y: 'end', yMargin: 150 }) });
+						// The table's end well inside the pane, so its bar is at rest under it. Putting the text back made the table anew.
+						await sleep(600);
+						const bigNow = models(view)[0];
+						view.dispatch({ effects: view.constructor.scrollIntoView(bigNow.to, { y: 'end', yMargin: 150 }) });
 						await sleep(600);
 						await frames(4);
-						big.slideBy(100000);
+						bigNow.slideBy(100000);
 						await sleep(300);
-						const bar = big.sideways().bar?.getBoundingClientRect() ?? null;
-						const below = big.boxes.filter((b) => b.isConnected).pop()?.querySelector('.table-row-btn')?.getBoundingClientRect() ?? null;
+						const bar = bigNow.sideways().bar?.getBoundingClientRect() ?? null;
+						const below = bigNow.boxes.filter((b) => b.isConnected).pop()?.querySelector('.table-row-btn')?.getBoundingClientRect() ?? null;
 						// Aimed inside the table's box: the slide has moved the button's start out of it.
-						const shownLeft = Math.max(below?.left ?? 0, big.sidewaysBox()?.left ?? 0);
+						const shownLeft = Math.max(below?.left ?? 0, bigNow.sidewaysBox()?.left ?? 0);
 						const belowHit = below && document.elementFromPoint(shownLeft + 40, below.top + below.height / 2)?.closest('.table-row-btn');
 						check('Own 98: in Table 2000 by 12, scrolled to its end and sideways, the + below sits clear of the scrollbar, and a press there reaches it', !!bar && !!below && below.bottom <= bar.top + 0.5 && !!belowHit, { bar: bar && [bar.top, bar.bottom], below: below && [below.top, below.bottom], hit: !!belowHit });
 
@@ -6493,6 +6495,23 @@
 								await leaveAll(view);
 							}
 							await restore(view, text);
+							// The header at its place: Bed's grip dragged onto Sown.
+							view.dispatch({ effects: view.constructor.scrollIntoView(start, { y: 'start' }) });
+							await sleep(500);
+							await frames(4);
+							const bedHere = gripOf(view, on, 'Plants', 'column', 1);
+							if (bedHere) {
+								const from = centre(bedHere);
+								out.placeReachable = document.elementFromPoint(from.x, from.y) === bedHere || bedHere.contains(document.elementFromPoint(from.x, from.y));
+								const sown = cellOf(view, on, 'Plants', 0, 2).getBoundingClientRect();
+								const to = { x: sown.left + sown.width / 2, y: from.y };
+								await press(from);
+								await glide(from, to);
+								await release(to);
+								out.afterPlaceColumn = view.state.doc.toString();
+								await leaveAll(view);
+							}
+							await restore(view, text);
 							out.text = text;
 							return out;
 						};
@@ -6502,6 +6521,7 @@
 						check('Own 99: in Plants with its header pinned, a body row dragged up one row moves there, as with the switch off', frozenOn.pinned && frozenOn.row === frozenOff.row && frozenOn.afterRow === frozenOff.afterRow && frozenOn.afterRow !== frozenOn.text, { on: { pinned: frozenOn.pinned, row: frozenOn.row, text: plants(frozenOn.afterRow) }, off: { pinned: frozenOff.pinned, row: frozenOff.row, text: plants(frozenOff.afterRow) } });
 						results.push({ name: 'Own 99 pinned header\'s column grip reachable (switch on, off)', ok: true, detail: [frozenOn.columnReachable, frozenOff.columnReachable] });
 						check('Own 99: the pinned header\'s grips for its columns are where Obsidian\'s frozen table has them, above the pane\'s top, and a press there does what it does with the switch off', frozenOn.columnReachable === frozenOff.columnReachable && frozenOn.afterColumn === frozenOff.afterColumn, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn) }, off: { reachable: frozenOff.columnReachable, text: plants(frozenOff.afterColumn) } });
+						check('Own 99: with the header at its place, Bed\'s grip dragged onto Sown puts Bed after Sown, as with the switch off', frozenOn.placeReachable && frozenOn.afterPlaceColumn === frozenOff.afterPlaceColumn && /\| Sown +\| Bed/.test(plants(frozenOn.afterPlaceColumn) ?? ''), { on: { reachable: frozenOn.placeReachable, text: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.placeReachable, text: plants(frozenOff.afterPlaceColumn)?.slice(0, 300) } });
 						check('Own 99: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						await closeMenus();

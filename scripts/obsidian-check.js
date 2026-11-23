@@ -2609,7 +2609,8 @@
 
 		// --- Own table (preview builds only): the plugin draws Live Preview tables itself, behind its switch. Run
 		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too;
-		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells, and with
+		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells (with
+		// window.__checkCornersOnly too, only its checks against Obsidian's frozen tables, Own 87 to Own 91), and with
 		// window.__checkEditsOnly instead, only the section on editing its rows and columns.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
@@ -4426,6 +4427,8 @@
 					await sleep(400);
 					const frozenText = view.state.doc.toString();
 					let plants = named(view, 'Plants');
+					// window.__checkCornersOnly runs only STA-106's checks, after this.
+					if (!window.__checkCornersOnly) {
 
 					// The keys keep the selected cell clear of what's pinned, down the note and sideways, and going up or left
 					// into what's frozen takes the table back to its top or its start.
@@ -5112,6 +5115,394 @@
 						await restore(view, text);
 					}
 					check('Own 73: after each of 60 seeded random keys, presses on pinned cells and the strip, freezes, Undo, Redo, typing, scrolls and swipes, nothing crashed and the drawing matches the text, copies included', !bad, bad);
+					}
+
+					// --- Where the plugin's frozen table still differed from Obsidian's frozen table (STA-106), each case run with
+					// the switch off first, as the bar, then on. Run alone with window.__checkOwnOnly, __checkCellsOnly,
+					// __checkFrozenCellsOnly and __checkCornersOnly all true.
+					{
+						const both = async (run) => {
+							const out = {};
+							for (const on of [false, true]) {
+								preview.use(on);
+								await sleep(700);
+								out[on ? 'own' : 'off'] = await run(on);
+							}
+							preview.use(true);
+							await sleep(400);
+							return out;
+						};
+						const realCell = (v, first, column) => Array.from(v.contentDOM.querySelectorAll('td')).find((td) => td.parentElement.cells[0]?.textContent.trim() === first && td.cellIndex === column && !td.closest('.selectable-tables-strip, .selectable-tables-rail'));
+						const headerLine = (v) => v.state.doc.lineAt(v.state.doc.toString().indexOf('| %%freeze')).number;
+						const atLine = async (v, line, y = 'start', yMargin = 5) => {
+							v.dispatch({ effects: v.constructor.scrollIntoView(v.state.doc.line(line).from, { y, yMargin }) });
+							await sleep(600);
+							await frames(3);
+						};
+						// The table it's in, by its block, with the switch on.
+						const modelOf = (v, el) => models(v).find((model) => model.boxes.some((box) => box.contains(el)));
+						const opened = (v, on) => {
+							const editor = v.contentDOM.querySelector('.cm-table-widget .cm-editor');
+							const cell = editor?.closest('td, th');
+							if (!cell) return null;
+							if (on) return oc(v)?.cell ?? null;
+							return { row: cell.parentElement.rowIndex, column: cell.cellIndex };
+						};
+
+						// 1. ←, →, Tab and ↑ to a pinned cell of the 2,000-row table, scrolled one and three screens past its end: the
+						// note comes back up to show it where Obsidian's table draws it, at the table's end, or for ↑ at its top.
+						const pastEnd = await both(async () => {
+							const v = await open('Frozen table 2000 by 12');
+							await sleep(800);
+							const hl = headerLine(v);
+							let last = hl;
+							while (last < v.state.doc.lines && v.state.doc.line(last + 1).text.startsWith('|')) last++;
+							const seen = [];
+							for (const screens of [1, 3]) {
+								for (const k of ['ArrowRight', 'Tab', 'ArrowLeft', 'ArrowUp']) {
+									v.dispatch({ selection: { anchor: v.state.doc.line(hl - 2).from } });
+									await atLine(v, hl, 'start', 100);
+									const cell = realCell(v, 'Row 1', 2);
+									if (!cell) {
+										seen.push({ k, screens, missing: true });
+										continue;
+									}
+									await pointAt(middle(cell, 8));
+									await key('Escape');
+									const sc = v.scrollDOM;
+									const offset = v.documentTop - sc.getBoundingClientRect().top - sc.clientTop + sc.scrollTop;
+									sc.scrollTop = v.lineBlockAt(v.state.doc.line(last).to).bottom + offset + (screens - 1) * sc.clientHeight + 5;
+									await sleep(600);
+									await frames(4);
+									const before = sc.scrollTop;
+									await key(k);
+									await sleep(300);
+									await frames(4);
+									const shown = Array.from(v.contentDOM.querySelectorAll('.selectable-tables-cell')).find((el) => shows(el));
+									seen.push({ k, screens, scrolled: Math.round(sc.scrollTop - before), shows: !!shown, top: shown ? Math.round(shown.getBoundingClientRect().top - paneOf(v).top) : null, text: shown?.textContent.trim().slice(0, 14) });
+									await leave();
+								}
+							}
+							return seen;
+						});
+						// ↑ into the header takes the table back to its top, with the header at the pane's top. With the switch off,
+						// Obsidian's table goes back to its top too, but draws the header lower, or out of view from further down.
+						const matchesOff = pastEnd.own.every((seen, i) => {
+							const off = pastEnd.off[i];
+							if (seen.k === 'ArrowUp') return seen.shows && Math.abs(seen.top) <= 3 && seen.scrolled < -50000;
+							// Where the cell ends up: how far the note moves depends on where the scroll past the end landed.
+							return seen.shows && off?.shows && seen.text === off.text && Math.abs(seen.top - off.top) <= 3 && seen.scrolled < 0;
+						});
+						check('Own 87: ←, →, Tab and ↑ to a pinned cell of the 2,000-row table, scrolled one and three screens past its end, bring it into view where the switch off does, and ↑ to the header at the table\'s top', matchesOff, pastEnd);
+
+						// 2. A press where pinned cells meet, under Baseline, whose header cells are rounded: in a corner's gap it opens
+						// the header cell sliding under it, as Obsidian's table does, and the note stays; a press on a frozen column's
+						// cell under the header still opens it.
+						const themeBefore = app.customCss.theme;
+						// A theme loads in its own time, and one set right after another may not stick: each is set till it reads back.
+						const useTheme = async (name) => {
+							for (let i = 0; i < 10; i++) {
+								if (app.customCss.theme !== name) app.customCss.setTheme(name);
+								await sleep(i ? 600 : 1500);
+								if (app.customCss.theme === name) break;
+							}
+						};
+						await useTheme('Baseline');
+						const corners = await both(async (on) => {
+							const v = await open('Frozen tables');
+							await sleep(400);
+							const doc = v.state.doc.toString();
+							const line = v.state.doc.lineAt(doc.indexOf('| %%freeze 1 2%%', doc.indexOf('## Tools'))).number;
+							v.dispatch({ selection: { anchor: v.state.doc.line(line - 2).from } });
+							await atLine(v, line + 10);
+							const widget = Array.from(v.contentDOM.querySelectorAll('.cm-table-widget')).find((w) => w.querySelector('th')?.textContent.includes('Name') && w.textContent.includes('Tool 1'));
+							const model = on ? modelOf(v, widget) : null;
+							if (on) model?.slideBy(300);
+							else if (widget) widget.scrollLeft = 300;
+							await sleep(400);
+							await frames(4);
+							const name = on ? model?.boxes[0].querySelector('.selectable-tables-strip thead th') : widget?.querySelector('thead th');
+							if (!name) return { missing: true };
+							const r = name.getBoundingClientRect();
+							const result = {};
+							for (const [what, point] of [['corner', { x: Math.floor(r.right) - 1, y: Math.floor(r.bottom) - 1 }], ['column', { x: Math.round(r.left + r.width / 2), y: Math.round(r.bottom + 30) }]]) {
+								const before = v.scrollDOM.scrollTop;
+								await pointAt(point);
+								await sleep(300);
+								result[what] = { cell: opened(v, on), scrolled: Math.round(v.scrollDOM.scrollTop - before) };
+								await leave();
+							}
+							return result;
+						});
+						await useTheme(themeBefore);
+						const same = (a, b) => !!a && !!b && a.row === b.row && a.column === b.column;
+						check('Own 88: under Baseline, a press in the gap at a pinned header cell\'s rounded corner opens the header cell under it, with the note still, as with the switch off', same(corners.own.corner?.cell, corners.off.corner?.cell) && corners.own.corner.cell.row === 0 && corners.own.corner.cell.column >= 2 && corners.own.corner.scrolled === 0 && corners.off.corner.scrolled === 0, corners);
+						check('Own 88: a press on a frozen column\'s cell below the pinned header still opens that cell', corners.own.column?.cell?.row >= 1 && corners.own.column?.cell?.column === 0 && corners.off.column?.cell?.row >= 1 && corners.off.column?.cell?.column === 0, corners);
+
+						// 3. A right-click on a link in a cell: one menu, its items and their order as with the switch off. Obsidian
+						// draws its own menus for the check.
+						const config = app.vault.config;
+						const hadNative = Object.hasOwn(config, 'nativeMenus');
+						const nativeBefore = config.nativeMenus;
+						const menus = () => Array.from(document.querySelectorAll('.menu'));
+						const items = () => Array.from(menus().pop()?.querySelectorAll('.menu-item, .menu-separator') ?? []).map((item) => (item.classList.contains('menu-separator') ? '-' : `${item.querySelector('.menu-item-title')?.textContent}${item.dataset.section ? ` [${item.dataset.section}]` : ''}`)).join(', ');
+						const closeMenu = async () => {
+							menus().pop()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+							await sleep(250);
+						};
+						let linkMenus;
+						try {
+							config.nativeMenus = false;
+							app.updateUseNativeMenu();
+							linkMenus = await both(async (on) => {
+								const v = await open('Frozen table 2000 by 12');
+								await sleep(800);
+								const hl = headerLine(v);
+								const shown = {};
+								const rightClick = async (what, find) => {
+									let link = find()[0];
+									if (!link) {
+										shown[what] = 'no link';
+										return;
+									}
+									// Into view sideways, as a hand would scroll it, till it shows: past the table's box it's clipped.
+									for (let i = 0; i < 12 && !find().some((a) => shows(a)); i++) {
+										const at = find()[0];
+										if (on) modelOf(v, at)?.slideBy(150);
+										else if (at) at.closest('.cm-table-widget').scrollLeft += 150;
+										await sleep(250);
+										await frames(2);
+									}
+									const found = find();
+									link = found.find((a) => shows(a));
+									if (!link) {
+										const over = found[0] && document.elementFromPoint(middle(found[0]).x, middle(found[0]).y);
+										shown[what] = `not shown, under ${over?.tagName}.${over?.className}`;
+										return;
+									}
+									await pointAt(middle(link), 'right');
+									await sleep(500);
+									shown[what] = { menus: menus().length, items: items() };
+									await closeMenu();
+									await leave();
+								};
+								const pane = () => paneOf(v);
+								const links = (text, first) => Array.from(v.contentDOM.querySelectorAll('a')).filter((a) => {
+									const r = a.getBoundingClientRect();
+									return a.textContent.includes(text) && a.closest('tr')?.cells[0]?.textContent.trim() === first && r.width > 0 && r.top >= pane().top && r.bottom <= pane().bottom;
+								});
+								v.dispatch({ selection: { anchor: v.state.doc.line(hl - 2).from } });
+								await atLine(v, hl, 'start', 100);
+								await rightClick('web link', () => links('RiverCopperPebble', 'Row 2').filter((a) => a.classList.contains('external-link')));
+								await atLine(v, hl, 'start', 100);
+								await rightClick('note link', () => links('Table 50 by 8', 'Row 3'));
+								await atLine(v, hl + 2 + 600);
+								await rightClick('note link where it\'s pinned', () => links('Table 50 by 8', 'Row 1'));
+								// A header cell right-clicked while another header cell is open, which closing draws anew.
+								const f = await open('Frozen tables');
+								await sleep(400);
+								const headerAt = f.state.doc.lineAt(f.state.doc.toString().indexOf('| %%freeze 2 1%%')).number;
+								f.dispatch({ selection: { anchor: f.state.doc.line(headerAt - 2).from } });
+								f.dispatch({ effects: f.constructor.scrollIntoView(f.state.doc.line(headerAt).from, { y: 'start', yMargin: 100 }) });
+								await sleep(600);
+								await frames(3);
+								const head = (text) => Array.from(f.contentDOM.querySelectorAll('th')).find((th) => th.textContent.trim() === text && !th.closest('.selectable-tables-strip, .selectable-tables-rail') && shows(th));
+								const bedCell = head('Bed');
+								if (bedCell) await pointAt(middle(bedCell, 8));
+								await sleep(300);
+								const openBefore = !!f.contentDOM.querySelector('.cm-table-widget .cm-editor');
+								const sown = head('Sown');
+								if (openBefore && sown) {
+									await pointAt(middle(sown, 8), 'right');
+									await sleep(500);
+									shown['header cell, another open'] = { menus: menus().length, items: items() };
+									await closeMenu();
+								} else shown['header cell, another open'] = `open ${openBefore}, Sown ${!!sown}`;
+								await leave();
+								return shown;
+							});
+						} finally {
+							if (hadNative) config.nativeMenus = nativeBefore;
+							else delete config.nativeMenus;
+							app.updateUseNativeMenu();
+						}
+						const menuMatches = ['web link', 'note link', 'note link where it\'s pinned', 'header cell, another open'].every((what) => linkMenus.own[what]?.menus === 1 && linkMenus.off[what]?.menus === 1 && linkMenus.own[what].items === linkMenus.off[what].items);
+						check('Own 89: a right-click on a web link, a link to a note, a link in a pinned copy deep down, and a header cell while another is open shows one menu with the same items, in the same order, as with the switch off', menuMatches, linkMenus);
+
+						// 4. A row put in under the header and taken out again, as Sync writes the file and as a second pane edits the
+						// note, while a cell of Row 1, pinned, is open: the cell stays open in Row 1 with its caret, typing goes there,
+						// and what pins follows the text, deep down too. With the switch off, Obsidian's table closes the cell.
+						const bigFile = app.vault.getAbstractFileByPath('Frozen table 2000 by 12.md');
+						const bigOnDisk = await app.vault.read(bigFile);
+						const columnsOf = bigOnDisk.split('\n').find((l) => l.startsWith('| %%freeze')).split('|').length - 2;
+						const newRow = `| New row | ${Array(columnsOf - 1).fill('x').join(' | ')} |`;
+						const syncs = {};
+						// The note is set up and put back through its editor: a file written while the editor holds other text can be
+						// saved over by the editor.
+						const setText = async (v, text) => {
+							await restore(v, text);
+							for (let i = 0; i < 20 && (await app.vault.read(bigFile)) !== text; i++) await sleep(200);
+						};
+						const threeRows = bigOnDisk.replace('%%freeze 2 1%%', '%%freeze 3 1%%');
+						try {
+							preview.use(false);
+							await sleep(700);
+							let v = await open('Frozen table 2000 by 12');
+							await sleep(800);
+							await setText(v, threeRows);
+							let hl = headerLine(v);
+							await atLine(v, hl, 'start', 100);
+							await pointAt(middle(realCell(v, 'Row 1', 2), 8));
+							let lines = v.state.doc.toString().split('\n');
+							lines.splice(hl + 1, 0, newRow);
+							await app.vault.modify(bigFile, lines.join('\n'));
+							await sleep(900);
+							syncs.off = { open: !!opened(v, false) };
+							await leave();
+							await setText(v, threeRows);
+							preview.use(true);
+							await sleep(900);
+							v = await open('Frozen table 2000 by 12');
+							await sleep(800);
+							hl = headerLine(v);
+							syncs.start = v.state.doc.toString() === threeRows;
+							const look = async (tag) => {
+								await sleep(200);
+								await frames(4);
+								const model = models(v).find((each) => each.blockCount > 1);
+								const editor = v.contentDOM.querySelector('.cm-table-widget .cm-editor');
+								const row = editor?.closest('tr');
+								const pane = paneOf(v).top;
+								const hidden = [];
+								const copies = [];
+								for (const box of model?.boxes ?? []) {
+									const r = box.isConnected ? box.getBoundingClientRect() : null;
+									if (!r || r.top > pane || r.bottom <= pane) continue;
+									for (const tr of box.querySelectorAll('.selectable-tables-rail .selectable-tables-copy-table tr')) {
+										const first = tr.cells[0]?.textContent.trim();
+										if (first) (tr.classList.contains('selectable-tables-hidden-copy') ? hidden : copies).push(first);
+									}
+								}
+								const cell = editor?.closest('td, th');
+								syncs[tag] = {
+									open: !!editor,
+									row: row?.cells[0]?.textContent.trim(),
+									focus: !!editor && editor.contains(document.activeElement),
+									cell: oc(v)?.cell,
+									rowOfOpen: model?.rowOfOpen(),
+									pins: model?.pins.opened?.cell,
+									carried: model?.pins.carrying?.cells[0]?.textContent.trim() ?? null,
+									hidden: hidden.join(),
+									copies: copies.join(),
+									shows: !!cell && shows(cell),
+									ink: cell && shows(cell) ? await inked(cell) : 0,
+									steady: steady(v),
+								};
+							};
+							await atLine(v, hl, 'start', 100);
+							await pointAt(middle(realCell(v, 'Row 1', 2), 8));
+							await atLine(v, hl + 2 + 600);
+							await look('deep, open');
+							lines = v.state.doc.toString().split('\n');
+							lines.splice(hl + 1, 0, newRow);
+							await app.vault.modify(bigFile, lines.join('\n'));
+							await sleep(900);
+							await look('row put in, as Sync');
+							await realType('q');
+							syncs.typed = v.state.doc.toString().split('\n').find((l) => l.startsWith('| Row 1 '))?.includes('q');
+							v.scrollDOM.scrollTop += v.scrollDOM.clientHeight;
+							await sleep(400);
+							v.scrollDOM.scrollTop -= v.scrollDOM.clientHeight;
+							await look('scrolled a screen and back');
+							await app.vault.modify(bigFile, v.state.doc.toString().split('\n').filter((l) => !l.startsWith('| New row ')).join('\n'));
+							await sleep(900);
+							await look('row taken out, as Sync');
+							// A second pane on the note puts the row in again.
+							const leaf = app.workspace.getLeaf('split');
+							await leaf.openFile(bigFile, { state: { mode: 'source', source: true } });
+							await sleep(600);
+							const other = leaf.view.editor.cm;
+							other.dispatch({ changes: { from: other.state.doc.line(hl + 2).from, insert: `${newRow}\n` } });
+							await sleep(900);
+							await look('row put in, from a second pane');
+							leaf.detach();
+							await sleep(300);
+							await leave();
+						} finally {
+							preview.use(true);
+							const v = await open('Frozen table 2000 by 12');
+							await sleep(600);
+							await setText(v, bigOnDisk);
+						}
+						const followed = (tag, row, keys = true) => {
+							const s = syncs[tag];
+							return !!s && s.open && s.row === 'Row 1' && (s.focus || !keys) && s.cell?.row === row && s.rowOfOpen === row && s.pins?.row === row && s.carried === 'Row 1' && s.hidden === 'Row 1' && s.shows && s.ink > 0 && steadyOk(s.steady);
+						};
+						check('Own 90: with the switch off, a row put in above an open cell of Row 1, as Sync writes it, closes the cell', syncs.off?.open === false, syncs.off);
+						check('Own 90: with the switch on, the cell stays open in Row 1 with the keyboard, typing goes into Row 1, and what pins follows it, deep down, as Sync puts a row in and takes it out and a second pane puts it in', syncs.start && followed('deep, open', 1) && followed('row put in, as Sync', 2) && syncs.typed && followed('scrolled a screen and back', 2) && followed('row taken out, as Sync', 1) && followed('row put in, from a second pane', 2, false), syncs);
+
+						// 5. 20 switches between light and dark, and a theme and back, with a frozen column's cell open and the table
+						// moved sideways: in no frame does the open cell move sideways or what pins go. Sampled after layout, before
+						// each frame is painted.
+						const darkBefore = document.body.classList.contains('theme-dark');
+						const looks = { frames: 0, moved: 0, unpinned: 0 };
+						{
+							const v = await open('Frozen tables');
+							await sleep(400);
+							const doc = v.state.doc.toString();
+							const line = v.state.doc.lineAt(doc.indexOf('| %%freeze 1 2%%', doc.indexOf('## Tools'))).number;
+							v.dispatch({ selection: { anchor: v.state.doc.line(line - 2).from } });
+							await atLine(v, line, 'start', 60);
+							const model = named(v, 'Tools');
+							model.slideBy(250);
+							await sleep(400);
+							await frames(3);
+							const bed = Array.from(v.contentDOM.querySelectorAll('td')).find((td) => td.parentElement.cells[0]?.textContent.trim() === 'Tool 3' && td.cellIndex === 1 && shows(td));
+							if (bed) await pointAt(middle(bed, 8));
+							await sleep(300);
+							const editor = () => v.contentDOM.querySelector('.cm-table-widget .cm-editor');
+							const base = editor()?.getBoundingClientRect().left;
+							const probe = document.body.createDiv();
+							probe.style.cssText = 'position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none';
+							let sampling = true;
+							let toggling = true;
+							const observer = new ResizeObserver(() => {
+								if (!sampling) return;
+								looks.frames++;
+								const left = editor()?.getBoundingClientRect().left;
+								if (toggling && (left === undefined || Math.abs(left - base) > 2)) looks.moved++;
+								if (!model.boxes.filter((box) => box.isConnected).every((box) => box.classList.contains('selectable-tables-pins'))) looks.unpinned++;
+							});
+							observer.observe(probe);
+							let flip = false;
+							const tick = () => {
+								if (!sampling) return;
+								flip = !flip;
+								probe.style.width = flip ? '2px' : '1px';
+								requestAnimationFrame(tick);
+							};
+							requestAnimationFrame(tick);
+							for (let i = 0; i < 20; i++) {
+								app.commands.executeCommandById('theme:toggle-light-dark');
+								await sleep(350);
+							}
+							// A theme moves the table with its own layout, Minimal's line width say: only the pins are watched there, and
+							// the cell is back in its place once the theme is.
+							toggling = false;
+							for (const theme of ['Minimal', themeBefore]) await useTheme(theme);
+							looks.back = Math.abs((editor()?.getBoundingClientRect().left ?? -1e9) - base) <= 2;
+							sampling = false;
+							observer.disconnect();
+							probe.remove();
+							looks.open = !!editor() && base !== undefined;
+							await leave();
+							if (document.body.classList.contains('theme-dark') !== darkBefore) app.commands.executeCommandById('theme:toggle-light-dark');
+							await sleep(400);
+							await useTheme(themeBefore);
+						}
+						check('Own 91: the theme and light or dark are put back as they were', app.customCss.theme === themeBefore && document.body.classList.contains('theme-dark') === darkBefore, { theme: app.customCss.theme, themeBefore, dark: document.body.classList.contains('theme-dark'), darkBefore });
+						check('Own 91: through 20 switches between light and dark, a frozen column\'s open cell never moves sideways, and through those and a theme and back what pins never goes, in any frame', looks.open && looks.back && looks.frames > 200 && looks.moved === 0 && looks.unpinned === 0, looks);
+					}
 					view = await open('Watering schedule');
 					await sleep(300);
 					for (const name of touched) {

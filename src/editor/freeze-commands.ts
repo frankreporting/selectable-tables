@@ -156,9 +156,14 @@ export function setTableItems(items: TableItems | null): void {
 
 /** The items for a right-clicked cell: the plugin's own table's Row, Column and Sort, then the freeze items, in a section of their own. */
 function addItems(menu: Menu, view: EditorView, place: Place) {
+	if (!place.table()) return;
+	if (tableItems && view.state.facet(ownTables)?.spans(view.state)) tableItems(menu, view, place);
+	addFreezeItems(menu, view, place);
+}
+
+function addFreezeItems(menu: Menu, view: EditorView, place: Place) {
 	const table = place.table();
 	if (!table) return;
-	if (tableItems && view.state.facet(ownTables)?.spans(view.state)) tableItems(menu, view, place);
 	for (const { name, icon, command } of FREEZES) {
 		if (!offered(command, view, table)) continue;
 		menu.addItem((item) => item.setSection(MENU_SECTION).setTitle(name).setIcon(icon).onClick(() => {
@@ -187,27 +192,49 @@ export function cellMenu(menu: Menu, editor: Editor, info: MarkdownView | Markdo
  * column, whose menus are for that row or column.
  */
 export const tableMenus = ViewPlugin.define((view) => {
+	/** A right-clicked cell of the plugin's own table, or of a copy of a pinned one; null inside an open cell, left to `editor-menu`. */
+	const ownPlace = (target: Element) => {
+		const own = view.state.facet(ownTables);
+		if (!own?.spans(view.state)) return undefined;
+		return target.closest('.cm-editor') === view.dom ? own.cellAt(view, target) : null;
+	};
+	// The plugin's own table has no menu of Obsidian's: a right-click on a cell makes one, which stops the editor's own
+	// menu as Obsidian's table menu does. Its Row, Column and Sort items go in as the event starts, as a cell's own
+	// listener adds them in Obsidian's table, so they come before a link's items, which Obsidian's editor adds from the
+	// note's content, and the menu orders sections it doesn't know by when their items came.
+	// The cell the event started on: selecting it can close an open header cell, which draws the header row anew, and
+	// takes the event's target out of the page before the freeze items go in.
+	let caught: { event: MouseEvent; place: Place | null | undefined } | null = null;
+	const onOwnMenu = (event: MouseEvent) => {
+		const place = ownPlace(event.target as Element);
+		caught = { event, place };
+		if (!place) return;
+		// The cell is selected first, so it shows which cell the menu is for. An open cell's empty space keeps it open.
+		const open = openCell(view)?.place.cell;
+		if (open?.row !== place.cell.row || open?.column !== place.cell.column) selectAt(view, place);
+		if (tableItems && place.table()) tableItems(Menu.forEvent(event), view, place);
+	};
 	const onMenu = (event: MouseEvent) => {
 		const target = event.target as Element;
-		if (target.closest('.cm-editor') !== view.dom) return;
-		// The plugin's own table has no menu of Obsidian's yet: a right-click on a cell, or on a copy of a pinned one, makes
-		// one, which stops the editor's own menu as Obsidian's table menu does. An open cell's is left to `editor-menu`.
-		const own = view.state.facet(ownTables);
-		if (own?.spans(view.state)) {
-			const place = own.cellAt(view, target);
-			if (!place) return;
-			// The cell is selected first, so it shows which cell the menu is for. An open cell's empty space keeps it open.
-			const open = openCell(view)?.place.cell;
-			if (open?.row !== place.cell.row || open?.column !== place.cell.column) selectAt(view, place);
-			addItems(Menu.forEvent(event), view, place);
+		const place = caught?.event === event ? caught.place : ownPlace(target);
+		caught = null;
+		if (place !== undefined) {
+			// The freeze items come last, on the plugin's table as on Obsidian's.
+			if (place) addFreezeItems(Menu.forEvent(event), view, place);
 			return;
 		}
-		if (!event.defaultPrevented || target.closest(HANDLES)) return;
-		const place = placeOf(view, target);
-		if (place && !place.widget.classList.contains(RANGE_CLASS)) addItems(Menu.forEvent(event), view, place);
+		if (target.closest('.cm-editor') !== view.dom || !event.defaultPrevented || target.closest(HANDLES)) return;
+		const at = placeOf(view, target);
+		if (at && !at.widget.classList.contains(RANGE_CLASS)) addItems(Menu.forEvent(event), view, at);
 	};
+	view.contentDOM.addEventListener('contextmenu', onOwnMenu, true);
 	view.contentDOM.addEventListener('contextmenu', onMenu);
-	return { destroy: () => view.contentDOM.removeEventListener('contextmenu', onMenu) };
+	return {
+		destroy: () => {
+			view.contentDOM.removeEventListener('contextmenu', onOwnMenu, true);
+			view.contentDOM.removeEventListener('contextmenu', onMenu);
+		},
+	};
 });
 
 /** The freeze commands, offered with a cell of a table selected or open in Live Preview. */

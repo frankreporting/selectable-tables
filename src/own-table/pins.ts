@@ -412,7 +412,7 @@ export class Pins {
 		const was = this.opened;
 		this.opened = tr && cell ? { tr, cell } : null;
 		if (this.opened) this.coming = null;
-		if (was?.tr === this.opened?.tr && was?.cell.column === this.opened?.cell.column) return;
+		if (was?.tr === this.opened?.tr && was?.cell.column === this.opened?.cell.column && was?.cell.row === this.opened?.cell.row) return;
 		this.marks();
 		if (this.carried() || (was && was.cell.row < this.freeze.rows)) this.measure();
 	}
@@ -661,14 +661,17 @@ export class Pins {
 		const lifted = this.opened && this.opened.cell.row === row && this.opened.cell.column < this.freeze.columns ? this.opened.tr : null;
 		const real = host.rowElement(row - 1);
 		const single = host.blockCount === 1;
+		const railCell = (parts: Parts) => {
+			const tr = columns && parts.rail?.corner ? parts.rail.corner.table.rows[row] : parts.rail?.table.table.rows[row];
+			return { el: tr?.cells[column] ?? null, rows, columns };
+		};
 		for (const block of host.pinBlocks) {
 			const parts = block?.dom.isConnected ? this.parts.get(block) : null;
 			if (!block || !parts) continue;
 			if (rows && !single) {
 				const box = block.dom.getBoundingClientRect();
 				if (box.top > pinAt || box.bottom <= pinAt) continue;
-				const tr = columns && parts.rail?.corner ? parts.rail.corner.table.rows[row] : parts.rail?.table.table.rows[row];
-				return { el: tr?.cells[column] ?? null, rows, columns };
+				return railCell(parts);
 			}
 			if (columns && !lifted && real && (real.parentElement === block.tbody || real.parentElement === block.thead)) {
 				// With the strip under the pinned rows, a pinned row's real cells are what shows.
@@ -676,7 +679,38 @@ export class Pins {
 				return { el: this.stripCopy(block, real)?.cells[column] ?? null, rows, columns };
 			}
 		}
+		// With the whole table above the pane, the rows are drawn at its end, by the last block's copy, as Obsidian's table
+		// draws them there: a key to one of them shows it there, a little way back up the note.
+		const last = rows && !single ? host.pinBlocks[host.blockCount - 1] : undefined;
+		const parts = last?.dom.isConnected ? this.parts.get(last) : null;
+		if (last && parts && last.dom.getBoundingClientRect().bottom <= pinAt) return railCell(parts);
 		return { el: null, rows, columns };
+	}
+
+	/**
+	 * The cell a press on a strip's copy of a row passing under the pinned rows is for, at a point inside a pinned row's
+	 * box: there the copy shows only through a gap a pinned cell's rounded corner leaves, as under Baseline. In Obsidian's
+	 * table the pinned rows lie above every row passing under them, so a press there reaches the pinned row's own cell
+	 * beneath, one sliding under its frozen cells: the first cell under the point that isn't such a copy. Null for any
+	 * other press.
+	 */
+	pressBeneath(el: HTMLTableCellElement, x: number, y: number): HTMLTableCellElement | null {
+		const tr = el.parentElement;
+		const strip = el.closest(`.${STRIP_CLASS}`);
+		if (!this.fit.rows || !strip || !tr?.parentElement?.instanceOf(HTMLTableSectionElement) || tr.parentElement.tagName !== 'TBODY' || tr.hasClass(PINNED_ROW_CLASS)) return null;
+		const passing = `.${STRIP_CLASS} tbody > tr:not(.${PINNED_ROW_CLASS})`;
+		const pinned = Array.from(strip.querySelectorAll(`thead.${PINNED_ROW_CLASS} > tr, tbody > tr.${PINNED_ROW_CLASS}`));
+		const inside = pinned.some((row) => {
+			const box = row.getBoundingClientRect();
+			return x >= box.left && x < box.right && y >= box.top && y < box.bottom;
+		});
+		if (!inside) return null;
+		for (const hit of el.ownerDocument.elementsFromPoint(x, y)) {
+			const cell = hit.closest('td, th');
+			if (!cell || cell === el || cell.closest(passing)) continue;
+			return cell.instanceOf(HTMLTableCellElement) ? cell : null;
+		}
+		return null;
 	}
 
 	/** The strip's inner edge on the screen, its right in a table that runs left to right, or null with no strip shown. */

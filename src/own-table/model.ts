@@ -1160,7 +1160,8 @@ export class Model implements Span, DrawnTable {
 		dom.addEventListener('mousedown', hold);
 		dom.addEventListener('click', (event) => {
 			if (leftAlone(event)) return;
-			const el = (event.target as Element).closest('td, th');
+			const pressed = (event.target as Element).closest('td, th');
+			const el = pressed?.instanceOf(HTMLTableCellElement) ? (this.pins.pressBeneath(pressed, event.clientX, event.clientY) ?? pressed) : pressed;
 			const cell = el?.instanceOf(HTMLTableCellElement) && dom.contains(el) ? this.cellOf(el) : null;
 			if (!cell || !el) {
 				this.select(this);
@@ -1216,6 +1217,9 @@ export class Model implements Span, DrawnTable {
 		this.schedule(this.dirty.size > 0 || this.remeasure);
 		this.remeasure = false;
 		this.placeBar();
+		// A change from elsewhere that adds or takes out rows above the open cell's moves it: what pins follows its row.
+		const open = this.openRow ? this.rowOfOpen() : null;
+		if (this.openRow && open !== null) this.pins.openCell(this.openRow, { row: open, column: this.openColumn });
 		this.pins.refresh();
 	}
 

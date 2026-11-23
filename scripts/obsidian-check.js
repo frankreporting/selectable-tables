@@ -182,6 +182,12 @@
 		return { taken: event.defaultPrevented, text: data.getData('text/plain') };
 	}
 
+	// Every note's text as the run starts, put back at its end, even after a check fails midway. Sections put back what
+	// they change in the editor, but a note's undo history lasts the whole session, so random Undo and Redo can reach an
+	// earlier run's edits, and git keeps neither of the large table notes (STA-97, 11/22).
+	const notesAtStart = new Map();
+	// Test plans are left out: Brian may be writing in one while a run goes.
+	for (const file of app.vault.getMarkdownFiles()) if (!/Test Plan$/.test(file.basename)) notesAtStart.set(file.path, await app.vault.read(file));
 	// A preview build's switch is off for the sections before the own table's, saved off too, since some sections
 	// turn the plugin off and on again. It's put back as it was at the end.
 	const atStart = app.plugins.plugins['selectable-tables'];
@@ -2603,7 +2609,8 @@
 
 		// --- Own table (preview builds only): the plugin draws Live Preview tables itself, behind its switch. Run
 		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too;
-		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells.
+		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells, and with
+		// window.__checkEditsOnly instead, only the section on editing its rows and columns.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3738,7 +3745,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -3872,12 +3879,15 @@
 						await key(name, mods);
 						steps.push(where(view) ?? `selected ${outlined(view)}`);
 					}
-					check('Own 53: ← → ↑ ↓ at a text\'s edges, Tab, Shift+Tab and Enter move between cells as Obsidian\'s cell does, and Cmd+← and Cmd+→ at the edges too', steps.join(' | ') === '3,1 6 | 3,2 0 | 3,1 6 | 4,1 0 | 3,1 0 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | selected 4,1 | 4,1 10 | 4,1 10 | 4,2 0 | 4,1 10', steps.join(' | '));
+					// Enter on the last row, a fresh press, adds a row below and opens its cell (STA-97).
+					check('Own 53: ← → ↑ ↓ at a text\'s edges, Tab, Shift+Tab and Enter move between cells as Obsidian\'s cell does, and Cmd+← and Cmd+→ at the edges too', steps.join(' | ') === '3,1 6 | 3,2 0 | 3,1 6 | 4,1 0 | 3,1 0 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | selected 4,1 | 4,1 10 | 5,1 0 | 5,2 0 | 5,1 0', steps.join(' | '));
 					await key('Escape');
 					await key('Escape');
+					await restore(view, cellsText);
+					await frames(3);
 					// Out of the table at its four edges, to the start of the line beyond.
-					const aboveSeed = view.state.doc.lineAt(seed.from).number - 1;
-					const belowSeed = view.state.doc.lineAt(seed.to).number + 1;
+					const aboveSeed = view.state.doc.lineAt(models(view)[0].from).number - 1;
+					const belowSeed = view.state.doc.lineAt(models(view)[0].to).number + 1;
 					const leaves = [];
 					for (const [text, name, toStart] of [['Tray', 'ArrowUp', true], ['Tray', 'ArrowLeft', true], ['Water twice', 'ArrowDown', false], ['Water twice', 'ArrowRight', false]]) {
 						await openText(view, text);
@@ -3918,17 +3928,25 @@
 					await key('Escape');
 					await restore(view, cellsText);
 
-					// Tab held runs along the rows and stops at the table's last cell; Tab and Enter there do nothing.
+					// Tab held runs along the rows and stops at the table's last cell; a fresh Tab or Enter there adds a row.
 					await tableUnder(view, 'Tall table');
 					const tall = models(view).find((model) => view.state.doc.sliceString(model.from, model.from + 7) === '| Row |');
 					const tallLines = view.state.doc.lines;
 					await openText(view, '1');
 					for (let i = 0; i < tall.count * 3 + 6; i++) await key('Tab', { repeat: i > 0 });
 					const lastCell = `${tall.count},2`;
-					const heldStops = where(view)?.startsWith(lastCell);
+					const heldStops = where(view)?.startsWith(lastCell) && view.state.doc.lines === tallLines;
+					const tallRows = tall.count;
+					// A fresh press there adds a row and opens its first cell, and Enter on that new last row adds another (STA-97).
 					await key('Tab');
+					await sleep(300);
+					await frames(3);
+					const tabbed = { at: where(view), lines: view.state.doc.lines };
 					await key('Enter');
-					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, and Tab and Enter there do nothing, adding no row', heldStops && where(view)?.startsWith(lastCell) && view.state.doc.lines === tallLines && view.state.doc.toString() === cellsText, { at: where(view), lastCell, lines: [tallLines, view.state.doc.lines] });
+					await sleep(300);
+					await frames(3);
+					const entered = { at: where(view), lines: view.state.doc.lines };
+					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, adding no row; a fresh Tab there adds a row and opens its first cell, and a fresh Enter on that last row adds another', heldStops && tabbed.lines === tallLines + 1 && !!tabbed.at?.startsWith(`${tallRows + 1},0`) && entered.lines === tallLines + 2 && !!entered.at?.startsWith(`${tallRows + 2},0`), { heldStops, lastCell, tabbed, entered, tallLines });
 					await key('Escape');
 					await key('Escape');
 
@@ -4274,7 +4292,7 @@
 					await sleep(300);
 				}
 
-				if (!window.__checkCellsOnly || window.__checkFrozenCellsOnly) {
+				if ((!window.__checkCellsOnly || window.__checkFrozenCellsOnly) && !window.__checkEditsOnly) {
 					// --- Cells of the plugin's frozen tables (STA-92): selecting, opening and freezing cells where frozen rows and
 					// columns pin, on a computer. Real keys and presses through the window's debugger. Run alone with
 					// window.__checkOwnOnly, __checkCellsOnly and __checkFrozenCellsOnly all true.
@@ -4900,6 +4918,512 @@
 					preview.use(false);
 					await sleep(300);
 				}
+				if (!window.__checkCellsOnly || window.__checkEditsOnly) {
+					// --- Editing rows and columns of the plugin's table (STA-97): the right-click menu's Row, Column and Sort items,
+					// the table commands, and Tab and Enter adding a row, each against Obsidian's own table with the switch off. Real
+					// keys and presses through the window's debugger. Run alone with window.__checkOwnOnly, __checkCellsOnly and
+					// __checkEditsOnly all true.
+					preview.use(true);
+					await sleep(400);
+					const codes = { Escape: 27, Enter: 13, Tab: 9, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Backspace: 8, Home: 36, End: 35, PageUp: 33, PageDown: 34 };
+					const key = async (name, { alt, ctrl, meta, shift, repeat } = {}) => {
+						const modifiers = (alt ? 1 : 0) | (ctrl ? 2 : 0) | (meta ? 4 : 0) | (shift ? 8 : 0);
+						const code = codes[name] ?? name.toUpperCase().charCodeAt(0);
+						const text = name.length === 1 && !(modifiers & 6) ? name : '';
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: code, modifiers, autoRepeat: !!repeat, unmodifiedText: macChar(name), text };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await settle();
+					};
+					const pointAt = async ({ x, y }, button = 'left') => {
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: 1 });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount: 1 });
+						await sleep(350);
+					};
+					const hover = async ({ x, y }) => {
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+						await sleep(450);
+					};
+					const middle = (el, dx = null) => {
+						const r = el.getBoundingClientRect();
+						return { x: dx === null ? r.left + r.width / 2 : dx < 0 ? r.right + dx : r.left + dx, y: r.top + r.height / 2 };
+					};
+					const oc = (view) => preview.openCell(view);
+					// A row's cells, without their padding: `\|` is a pipe in a cell's text.
+					const rowCells = (line) => {
+						const cells = [];
+						let cell = '';
+						const text = line.trim().replace(/^\|/, '');
+						for (let i = 0; i < text.length; i++) {
+							if (text[i] === '\\') cell += text[i] + (text[++i] ?? '');
+							else if (text[i] === '|') {
+								cells.push(cell.trim());
+								cell = '';
+							} else cell += text[i];
+						}
+						if (cell.trim()) cells.push(cell.trim());
+						return cells;
+					};
+					const openAtNow = (view) => (oc(view) ? `${oc(view).cell.row},${oc(view).cell.column}` : null);
+					const tableAt = (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						return models(view).find((model) => model.from > at);
+					};
+					// The drawn cell of a table, the plugin's or Obsidian's, by its row and column, the header being row 0.
+					const cellOf = (view, on, heading, row, column) => {
+						if (on) return tableAt(view, heading)?.cellElement({ row, column }) ?? null;
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						const widget = Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget')).find((el) => view.posAtDOM(el) > at);
+						return widget?.querySelector('table')?.rows[row]?.cells[column] ?? null;
+					};
+					const scrollTo = async (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'start' }) });
+						await sleep(400);
+						await frames(3);
+					};
+					// Opens a cell with a press at its start, the plugin's or Obsidian's.
+					const openCellAt = async (view, on, heading, row, column) => {
+						const td = cellOf(view, on, heading, row, column);
+						if (!td) return false;
+						await pointAt(middle(td, 6));
+						await sleep(200);
+						return on ? openAtNow(view) === `${row},${column}` : !!view.contentDOM.querySelector('.cm-table-widget.has-focus');
+					};
+					// Where a right-click reaches an open cell's own menu: its text. Obsidian's open cell offers no table items in its
+					// padding (STA-61), so the checks press its text.
+					const menuAt = (view, on, heading, row, column) => {
+						const td = cellOf(view, on, heading, row, column);
+						const line = td?.querySelector('.cm-editor .cm-line');
+						return middle(line ?? td, 4);
+					};
+					const leaveAll = async (view) => {
+						await key('Escape');
+						await key('Escape');
+						await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					const config = app.vault.config;
+					const hadNative = Object.hasOwn(config, 'nativeMenus');
+					const nativeBefore = config.nativeMenus;
+					const menusShown = () => Array.from(document.querySelectorAll('.menu'));
+					const titlesOf = (menu) => Array.from(menu?.querySelectorAll(':scope > .menu-scroll > .menu-group > .menu-item, :scope > .menu-scroll > .menu-item') ?? []).map((item) => item.querySelector('.menu-item-title')?.textContent ?? '');
+					const closeMenus = async () => {
+						for (let i = 0; i < 3 && menusShown().length; i++) {
+							menusShown().pop()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+							await sleep(200);
+						}
+					};
+					const itemIn = (menu, title) => Array.from(menu?.querySelectorAll('.menu-item') ?? []).find((el) => el.querySelector('.menu-item-title')?.textContent === title) ?? null;
+					// The menu shown now, its Row and Column submenus' items too, read by hovering them.
+					const readMenu = async () => {
+						const top = menusShown()[0];
+						const read = { top: titlesOf(top) };
+						for (const title of ['Row', 'Column']) {
+							const item = itemIn(top, title);
+							if (!item) continue;
+							await hover(middle(item, 10));
+							read[title] = menusShown().length > 1 ? titlesOf(menusShown().pop()) : [];
+						}
+						return read;
+					};
+					// Picks an item of the menu shown, under Row or Column when it's one of theirs.
+					const pick = async (under, title) => {
+						const top = menusShown()[0];
+						let menu = top;
+						if (under) {
+							const parent = itemIn(top, under);
+							if (!parent) return false;
+							await hover(middle(parent, 10));
+							menu = menusShown().length > 1 ? menusShown().pop() : null;
+						}
+						const item = itemIn(menu, title);
+						if (!item) {
+							await closeMenus();
+							return false;
+						}
+						await pointAt(middle(item, 10));
+						await sleep(400);
+						await frames(3);
+						return true;
+					};
+					const touched = ['Two report tables', 'Table controls', 'Frozen tables', 'Table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					let view;
+					try {
+						config.nativeMenus = false;
+						app.updateUseNativeMenu();
+
+						// The menu: on a cell that isn't open, over an open cell's text, and in an open cell's empty space below its
+						// text, against Obsidian's own table's menus with the switch off.
+						const menusFor = async (on) => {
+							preview.use(on);
+							await sleep(400);
+							view = await open('Two report tables');
+							await sleep(300);
+							const read = {};
+							await pointAt(middle(cellOf(view, on, null, 2, 0)), 'right');
+							read.selected = on ? tableAt(view, null)?.cell ?? null : undefined;
+							read.closed = await readMenu();
+							await closeMenus();
+							await openCellAt(view, on, null, 1, 0);
+							const editor = view.contentDOM.querySelector('.cm-table-widget.has-focus .cm-content') ?? oc(view)?.view.contentDOM;
+							if (editor) await pointAt(middle(editor.querySelector('.cm-line') ?? editor, 4), 'right');
+							read.open = await readMenu();
+							await closeMenus();
+							await leaveAll(view);
+							return read;
+						};
+						const offMenus = await menusFor(false);
+						const onMenus = await menusFor(true);
+						const tableTop = ['Row', 'Column', 'Sort by column (A to Z)', 'Sort by column (Z to A)', 'Freeze rows up to here', 'Freeze columns up to here', 'Freeze rows and columns up to here'];
+						check('Own 74: a right-click on a cell that isn\'t open shows Row, Column, the two sorts, then the freeze items, as Obsidian\'s own table does', onMenus.closed.top.join() === tableTop.join() && offMenus.closed.top.join() === tableTop.join(), { on: onMenus.closed.top, off: offMenus.closed.top });
+						check('Own 74: the right-clicked cell is selected as its menu shows', onMenus.selected?.row === 2 && onMenus.selected?.column === 0, onMenus.selected);
+						check('Own 74: its Row and Column submenus hold Obsidian\'s items, worded and ordered as in Obsidian\'s', JSON.stringify([onMenus.closed.Row, onMenus.closed.Column]) === JSON.stringify([offMenus.closed.Row, offMenus.closed.Column]) && onMenus.closed.Row?.length === 6 && onMenus.closed.Column?.length === 8, { on: [onMenus.closed.Row, onMenus.closed.Column], off: [offMenus.closed.Row, offMenus.closed.Column] });
+						// Obsidian's open cell puts the freeze items, from editor-menu, before its own table items; the plugin's cell puts
+						// the table items first, then the freeze items, as on a cell that isn't open.
+						const textItems = (titles) => titles.filter((title) => !tableTop.includes(title));
+						const tableItemsOf = (titles) => titles.filter((title) => ['Row', 'Column', 'Sort by column (A to Z)', 'Sort by column (Z to A)'].includes(title));
+						check('Own 74: over an open cell\'s text, the same text items come first as in Obsidian\'s open cell, then the table items and the freeze items', textItems(onMenus.open.top).length > 0 && textItems(onMenus.open.top).join() === textItems(offMenus.open.top).join() && onMenus.open.top.slice(onMenus.open.top.indexOf('Row')).join() === tableTop.join() && tableItemsOf(offMenus.open.top).join() === tableItemsOf(tableTop).join() && JSON.stringify(onMenus.open.Row) === JSON.stringify(offMenus.open.Row), { on: onMenus.open.top, off: offMenus.open.top, rows: [onMenus.open.Row, offMenus.open.Row] });
+
+						// The empty space below a short cell's text in a tall row, open.
+						view = await open('Table controls');
+						await sleep(300);
+						await scrollTo(view, 'Seeds');
+						await openCellAt(view, true, 'Seeds', 4, 0);
+						const shortCell = tableAt(view, 'Seeds').cellElement({ row: 4, column: 0 });
+						const below = shortCell.getBoundingClientRect();
+						const textBottom = oc(view)?.view.contentDOM.getBoundingClientRect().bottom ?? below.top;
+						await pointAt({ x: below.left + 12, y: Math.min(below.bottom - 4, textBottom + (below.bottom - textBottom) / 2) }, 'right');
+						const empty = await readMenu();
+						await closeMenus();
+						check('Own 74: a right-click in an open cell\'s empty space below its text shows the table items and the freeze items', empty.top.join() === tableTop.join() && below.bottom - textBottom > 10, { top: empty.top, room: below.bottom - textBottom });
+						await leaveAll(view);
+
+						// Every item, from an open cell in Seeds, against Obsidian's own: the note's text, and Undo and Redo.
+						const items = [
+							['Row', 'Add row above'], ['Row', 'Add row below'], ['Row', 'Move row up'], ['Row', 'Move row down'], ['Row', 'Duplicate row'], ['Row', 'Delete row'],
+							['Column', 'Add column to the left'], ['Column', 'Add column to the right'], ['Column', 'Move column left'], ['Column', 'Move column right'],
+							['Column', 'Align left'], ['Column', 'Align center'], ['Column', 'Align right'], ['Column', 'Duplicate column'], ['Column', 'Delete column'],
+							[null, 'Sort by column (A to Z)'], [null, 'Sort by column (Z to A)'],
+						];
+						const itemsRun = async (on, heading, row, column) => {
+							preview.use(on);
+							await sleep(400);
+							view = await open('Table controls');
+							await sleep(300);
+							const text = view.state.doc.toString();
+							const out = [];
+							for (const [under, title] of items) {
+								await scrollTo(view, heading);
+								const opened = await openCellAt(view, on, heading, row, column);
+								await pointAt(menuAt(view, on, heading, row, column), 'right');
+								const picked = await pick(under, title);
+								await sleep(300);
+								// The cell opens again once its row is drawn: Undo is pressed once it has.
+								for (let i = 0; on && i < 20 && !oc(view); i++) await sleep(100);
+								const after = view.state.doc.toString();
+								const where = on ? { open: openAtNow(view), selected: tableAt(view, heading)?.cell ?? null } : null;
+								await key('z', { meta: true });
+								await sleep(300);
+								const undone = view.state.doc.toString();
+								await key('z', { meta: true, shift: true });
+								await sleep(300);
+								const redone = view.state.doc.toString();
+								const lines = (doc) => doc.slice(doc.indexOf('## Seeds')).split('\n').slice(4, 7).join(' / ');
+								out.push({ title, opened, picked, after, undone: undone === text, redone: redone === after, where, seen: undone === text && redone === after ? null : { after: lines(after), undone: lines(undone), redone: lines(redone), was: lines(text), openAfterUndo: openAtNow(view) } });
+								await leaveAll(view);
+								await restore(view, text);
+							}
+							return { out, text };
+						};
+						const sorted = (text) => text.slice(text.indexOf('## Seeds')).split('\n').slice(6, 12).map((line) => line.split('|')[1].trim());
+						const offItems = await itemsRun(false, 'Seeds', 2, 1);
+						const onItems = await itemsRun(true, 'Seeds', 2, 1);
+						// The two sorts on Seed too: names in mixed case, and bold ones.
+						const allItems = items.splice(0, items.length, ...items.filter(([under]) => under === null));
+						const offSeed = await itemsRun(false, 'Seeds', 0, 0);
+						const onSeed = await itemsRun(true, 'Seeds', 0, 0);
+						items.splice(0, items.length, ...allItems);
+						check('Own 75: Sort A to Z and Z to A on Seed order the rows as Obsidian\'s own table does, apple beside Apricot and bold by its words', onSeed.out.length === 2 && onSeed.out.every((each, i) => each.after === offSeed.out[i]?.after && each.after !== onSeed.text), onSeed.out.map((each, i) => ({ title: each.title, on: sorted(each.after), off: sorted(offSeed.out[i]?.after ?? '') })));
+						const differ = onItems.out.filter((each, i) => each.after !== offItems.out[i]?.after || each.after === onItems.text).map((each) => each.title);
+						const seedsOf = (text) => text.slice(text.indexOf('## Seeds'), text.indexOf('A line between'));
+						const firstDiffer = onItems.out.findIndex((each, i) => each.after !== offItems.out[i]?.after || each.after === onItems.text);
+						check('Own 75: each Row, Column and Sort item, from an open cell, writes the same text as Obsidian\'s own table does', differ.length === 0 && onItems.out.every((each) => each.opened && each.picked), { differ, unpicked: onItems.out.filter((each) => !each.opened || !each.picked).map((each) => each.title), offUnpicked: offItems.out.filter((each) => !each.opened || !each.picked).map((each) => each.title), first: firstDiffer >= 0 ? { title: onItems.out[firstDiffer].title, on: seedsOf(onItems.out[firstDiffer].after), off: seedsOf(offItems.out[firstDiffer].after), was: seedsOf(onItems.text) } : null });
+						check('Own 75: Undo takes each edit back alone, and Redo puts it back', onItems.out.every((each) => each.undone && each.redone), onItems.out.filter((each) => !each.undone || !each.redone).map((each) => ({ title: each.title, ...each.seen })));
+						const ended = Object.fromEntries(onItems.out.map((each) => [each.title, each.where.open]));
+						check('Own 76: after an item from an open cell, the new row\'s or column\'s cell opens, the moved cell opens in its place, and Delete opens the cell above or to the left', ended['Add row above'] === '2,1' && ended['Add row below'] === '3,1' && ended['Move row up'] === '1,1' && ended['Move row down'] === '3,1' && ended['Delete row'] === '1,1' && ended['Add column to the left'] === '2,1' && ended['Add column to the right'] === '2,2' && ended['Move column left'] === '2,0' && ended['Move column right'] === '2,2' && ended['Delete column'] === '2,0' && ended['Sort by column (A to Z)'] === '2,1', ended);
+						const az = onItems.out.find((each) => each.title === 'Sort by column (A to Z)');
+						check('Own 75: Sort orders Count as numbers, the header kept on top', sorted(az.after).join() === 'bean,apple,Apricot,Basil,**Carrot top**,**Pear**', sorted(az.after));
+
+						// The hand-spaced table: tidied on its first edit, as Obsidian's own table leaves it.
+						const handRun = async (on) => {
+							preview.use(on);
+							await sleep(400);
+							view = await open('Table controls');
+							await sleep(300);
+							const text = view.state.doc.toString();
+							await scrollTo(view, 'Spaced by hand');
+							await openCellAt(view, on, 'Spaced by hand', 1, 0);
+							await pointAt(menuAt(view, on, 'Spaced by hand', 1, 0), 'right');
+							await pick('Row', 'Move row down');
+							const after = view.state.doc.toString();
+							await leaveAll(view);
+							await restore(view, text);
+							return after;
+						};
+						const handOff = await handRun(false);
+						const handOn = await handRun(true);
+						check('Own 77: a table spaced by hand comes out tidied on its first edit, as Obsidian\'s own table leaves it', handOn === handOff && handOn.includes('| Hoe  | South |'), { on: handOn.slice(handOn.indexOf('## Spaced')), off: handOff.slice(handOff.indexOf('## Spaced')) });
+
+						// The commands, from a selected cell: Fern moves down, then right, and stays selected, with nothing open; with no
+						// cell selected or open, no table command is offered, and Obsidian's own aren't either.
+						preview.use(true);
+						await sleep(400);
+						view = await open('Two report tables');
+						await sleep(300);
+						const reportText = view.state.doc.toString();
+						const firstTable = models(view)[0];
+						const above = view.state.doc.line(view.state.doc.lineAt(firstTable.from).number - 1);
+						view.dispatch({ selection: { anchor: above.to }, scrollIntoView: true });
+						view.focus();
+						await sleep(250);
+						await key('ArrowRight');
+						await key('Enter');
+						await key('ArrowDown');
+						const offeredNow = (id) => {
+							const command = app.commands.commands[id];
+							const md = app.workspace.activeEditor;
+							return !!command?.editorCheckCallback?.(true, md.editor, md);
+						};
+						const ids = ['row-before', 'row-after', 'row-up', 'row-down', 'row-copy', 'row-delete', 'col-before', 'col-after', 'col-left', 'col-right', 'col-copy', 'col-delete', 'col-align-left', 'col-align-center', 'col-align-right'];
+						const withCell = ids.filter((id) => offeredNow(`selectable-tables:table-${id}`));
+						const obsidianWithCell = ids.filter((id) => offeredNow(`editor:table-${id}`));
+						app.commands.executeCommandById('selectable-tables:table-row-down');
+						await sleep(300);
+						const afterDown = { cell: models(view)[0].cell, open: openAtNow(view), line: view.state.doc.line(view.state.doc.lineAt(models(view)[0].from).number + 3).text };
+						app.commands.executeCommandById('selectable-tables:table-col-right');
+						await sleep(300);
+						const afterRight = { cell: models(view)[0].cell, open: openAtNow(view), line: view.state.doc.line(view.state.doc.lineAt(models(view)[0].from).number + 3).text };
+						check('Own 78: with Fern selected, every table command is offered but Move column left, and none of Obsidian\'s', withCell.length === 14 && !withCell.includes('col-left') && !obsidianWithCell.length, { withCell, obsidianWithCell });
+						check('Own 78: Move row down, then Move column right, from a selected cell move Fern and keep it selected, with nothing open', afterDown.cell?.row === 2 && afterDown.cell?.column === 0 && !afterDown.open && afterDown.line.startsWith('| Fern') && afterRight.cell?.row === 2 && afterRight.cell?.column === 1 && !afterRight.open && /^\| \S+ +\| Fern/.test(afterRight.line), { afterDown, afterRight });
+						app.commands.executeCommandById('selectable-tables:table-row-delete');
+						await sleep(300);
+						check('Own 78: Delete row on a selected cell selects the cell above', models(view)[0].cell?.row === 1 && models(view)[0].cell?.column === 1 && !openAtNow(view), { cell: models(view)[0].cell });
+						await leaveAll(view);
+						const withoutCell = ids.filter((id) => offeredNow(`selectable-tables:table-${id}`));
+						check('Own 78: with no cell selected or open, no table command is offered', withoutCell.length === 0, withoutCell);
+						await restore(view, reportText);
+						// Add row above on the header puts a new header above it, and the table stays one table, with its blank line above.
+						const tablesBefore = models(view).length;
+						const lineAbove = view.state.doc.line(view.state.doc.lineAt(models(view)[0].from).number - 1);
+						view.dispatch({ selection: { anchor: lineAbove.to }, scrollIntoView: true });
+						view.focus();
+						await sleep(250);
+						await key('ArrowRight');
+						await key('Enter');
+						app.commands.executeCommandById('selectable-tables:table-row-before');
+						await sleep(400);
+						await frames(3);
+						const headed = models(view)[0];
+						const headedLines = view.state.doc.lineAt(headed.to).number - view.state.doc.lineAt(headed.from).number + 1;
+						const blankAbove = view.state.doc.line(view.state.doc.lineAt(headed.from).number - 1).text === '';
+						check('Own 78: Add row above on the header puts a new header above it, and the table stays one table', models(view).length === tablesBefore && headedLines === 6 && blankAbove && openAtNow(view) === '0,0', { tables: [tablesBefore, models(view).length], headedLines, blankAbove, open: openAtNow(view) });
+						await leaveAll(view);
+						await restore(view, reportText);
+
+						// Tab and Enter add a row on a fresh press at the table's end, and never on a held key.
+						const rowsNow = () => view.state.doc.toString().split('\n').filter((line) => line.startsWith('|')).length;
+						const linesBefore = rowsNow();
+						await scrollTo(view, null);
+						await openCellAt(view, true, null, 0, 0);
+						for (let i = 0; i < 11; i++) await key('Tab');
+						const tapAtEnd = { open: openAtNow(view), rows: rowsNow() - linesBefore };
+						await key('Tab');
+						await sleep(300);
+						await frames(3);
+						const tapped = { open: openAtNow(view), rows: rowsNow() - linesBefore, hasFocus: oc(view)?.view.hasFocus };
+						await key('z', { meta: true });
+						await sleep(300);
+						await leaveAll(view);
+						await restore(view, reportText);
+						await scrollTo(view, null);
+						await openCellAt(view, true, null, 0, 0);
+						await key('Tab');
+						for (let i = 0; i < 20; i++) await key('Tab', { repeat: true });
+						const held = { open: openAtNow(view), rows: rowsNow() - linesBefore };
+						await leaveAll(view);
+						await openCellAt(view, true, null, 3, 1);
+						await key('Enter');
+						await sleep(300);
+						await frames(3);
+						const entered = { open: openAtNow(view), rows: rowsNow() - linesBefore };
+						for (let i = 0; i < 5; i++) await key('Enter', { repeat: true });
+						const enterHeld = { open: openAtNow(view), rows: rowsNow() - linesBefore };
+						check('Own 79: tapping Tab through the cells stops at the last, and one more tap adds a row and opens its first cell, with the keyboard', tapAtEnd.open === '3,2' && tapAtEnd.rows === 0 && tapped.open === '4,0' && tapped.rows === 1 && tapped.hasFocus, { tapAtEnd, tapped });
+						check('Own 79: holding Tab stops at the last cell and adds nothing', held.open === '3,2' && held.rows === 0, held);
+						check('Own 79: Enter on the last row adds a row below and opens its cell in the same column; held, it adds no more', entered.open === '4,1' && entered.rows === 1 && enterHeld.rows === 1, { entered, enterHeld });
+						await leaveAll(view);
+						await restore(view, reportText);
+
+						// Frozen tables: the mark stays in the header, so the table stays frozen as before.
+						view = await open('Frozen tables');
+						await sleep(400);
+						const frozenText = view.state.doc.toString();
+						const headerOf = () => view.state.doc.lineAt(tableAt(view, 'Plants').from).text;
+						const freezeBefore = headerOf().match(/%%freeze \d+ \d+%%/)?.[0];
+						await scrollTo(view, 'Plants');
+						await openCellAt(view, true, 'Plants', 0, 1);
+						app.commands.executeCommandById('selectable-tables:table-row-down');
+						await sleep(400);
+						const downHeader = headerOf();
+						await leaveAll(view);
+						await scrollTo(view, 'Plants');
+						const markColumn = rowCells(headerOf()).findIndex((cell) => cell.includes('%%freeze'));
+						await openCellAt(view, true, 'Plants', 2, markColumn);
+						app.commands.executeCommandById('selectable-tables:table-col-delete');
+						await sleep(400);
+						const deletedHeader = headerOf();
+						const firstHas = (header) => rowCells(header)[0].startsWith(freezeBefore) && rowCells(header).filter((cell) => cell.includes('%%freeze')).length === 1;
+						check('Own 80: Move row down on a frozen table\'s header keeps the mark in the new header\'s first cell, and the table frozen as before', !!freezeBefore && firstHas(downHeader) && tableAt(view, 'Plants').pins.freeze.rows > 0, { freezeBefore, downHeader: downHeader.slice(0, 60) });
+						check('Own 80: Delete column on the mark\'s column moves the mark to the header\'s first cell', firstHas(deletedHeader), deletedHeader.slice(0, 60));
+						await leaveAll(view);
+						await restore(view, frozenText);
+
+						// The 2,000-row table: Delete row on row 1,500, Move row down on row 100 across a seam, Sort on column 2. Each
+						// writes the right text, under 1 s, and the row at the pane's bottom stays where it was.
+						view = await open('Table 2000 by 12');
+						await sleep(1500);
+						const bigText = view.state.doc.toString();
+						const big = models(view)[0];
+						const headerLine = view.state.doc.lineAt(big.from).number;
+						const bigLines = () => {
+							const lines = [];
+							for (let n = headerLine; n <= view.state.doc.lineAt(models(view)[0].to).number; n++) lines.push(view.state.doc.line(n).text);
+							return lines;
+						};
+						// The table as Obsidian's table writes it: an edit writes it all again, so a table someone typed in by hand, as
+						// this git-ignored note can be after a hand check, comes out tidied, its columns as wide as their longest text.
+						const tidy = (lines) => {
+							const rows = lines.filter((_, i) => i !== 1).map(rowCells);
+							const aligns = rowCells(lines[1]).map((c) => (c.startsWith(':') ? (c.endsWith(':') ? 'center' : 'left') : c.endsWith(':') ? 'right' : null));
+							const widths = aligns.map((_, c) => Math.max(5, ...rows.map((r) => (r[c] ?? '').length + 2)));
+							const pad = (text, width, align) => {
+								const space = width - text.length;
+								const lead = align === 'right' ? space - 1 : align === 'center' ? Math.floor(space / 2) : 1;
+								return ' '.repeat(lead) + text + ' '.repeat(space - lead);
+							};
+							const dashes = (width, align) => (align === 'left' ? ` :${'-'.repeat(width - 3)} ` : align === 'center' ? ` :${'-'.repeat(width - 4)}: ` : align === 'right' ? ` ${'-'.repeat(width - 3)}: ` : ` ${'-'.repeat(width - 2)} `);
+							const out = rows.map((r) => `|${aligns.map((a, c) => pad(r[c] ?? '', widths[c], a)).join('|')}|`);
+							out.splice(1, 0, `|${aligns.map((a, c) => dashes(widths[c], a)).join('|')}|`);
+							return out;
+						};
+						// Timed on the table as Obsidian writes it, as the note is in git, so the first edit isn't the one that tidies it.
+						const tidied = tidy(bigLines());
+						const bigStart = view.state.doc.line(headerLine).from;
+						view.dispatch({ changes: { from: bigStart, to: view.state.doc.lineAt(models(view)[0].to).to, insert: tidied.join('\n') } });
+						await sleep(1500);
+						await frames(3);
+						const tidyText = view.state.doc.toString();
+						const before = tidied;
+						// The row at the pane's bottom, by its first cell, which counts the rows, and where it is; and the note's scroll.
+						// A row on screen above the edit, by its first cell, which counts the rows, and where it is: no edit below it moves it.
+						const bottomRow = () => {
+							const pane = view.scrollDOM.getBoundingClientRect();
+							const left = view.contentDOM.getBoundingClientRect().left;
+							const hit = document.elementFromPoint(left + 40, pane.top + 100)?.closest('tr');
+							return { text: hit?.cells[0]?.textContent.trim() ?? null, top: hit?.getBoundingClientRect().top ?? null, scroll: view.scrollDOM.scrollTop };
+						};
+						const timedEdit = async (row, column, id) => {
+							await leaveAll(view);
+							view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(headerLine + 1 + row).from, { y: 'center' }) });
+							await sleep(500);
+							await frames(3);
+							await openCellAt(view, true, null, row, column);
+							const bottom = bottomRow();
+							const start = performance.now();
+							app.commands.executeCommandById(id);
+							await frames(2);
+							const ms = performance.now() - start;
+							await sleep(500);
+							await frames(3);
+							const now = bottomRow();
+							const lines = bigLines();
+							await leaveAll(view);
+							return { ms: Math.round(ms), lines, bottom, now };
+						};
+						const deleted = await timedEdit(1500, 1, 'selectable-tables:table-row-delete');
+						const deletedRight = deleted.lines.length === before.length - 1 && deleted.lines.join('\n') === [...before.slice(0, 1501), ...before.slice(1502)].join('\n');
+						await restore(view, tidyText);
+						const moved = await timedEdit(100, 1, 'selectable-tables:table-row-down');
+						const movedRight = moved.lines.join('\n') === [...before.slice(0, 101), before[102], before[101], ...before.slice(103)].join('\n');
+						await restore(view, tidyText);
+						// A column edit rewrites the header: the rows keep the heights they were drawn at, and stay where they are.
+						const column = await timedEdit(1500, 1, 'selectable-tables:table-col-after');
+						const columnRight = column.lines.length === before.length && rowCells(column.lines[1501]).length === rowCells(before[1501]).length + 1;
+						await restore(view, tidyText);
+						// The first edit of a table spaced by hand tidies every line, the header's too.
+						const spacedLines = [...tidied];
+						spacedLines[951] = spacedLines[951].replace(/ \|/g, '     |');
+						view.dispatch({ changes: { from: bigStart, to: view.state.doc.lineAt(models(view)[0].to).to, insert: spacedLines.join('\n') } });
+						await sleep(1500);
+						await frames(3);
+						const spaced = await timedEdit(1500, 1, 'selectable-tables:table-row-delete');
+						const spacedRight = spaced.lines.join('\n') === [...before.slice(0, 1501), ...before.slice(1502)].join('\n');
+						await restore(view, tidyText);
+						// Sort through the menu, since it has no command.
+						await leaveAll(view);
+						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(headerLine + 400).from, { y: 'center' }) });
+						await sleep(500);
+						await frames(3);
+						const sortBottom = bottomRow();
+						const anyCell = Array.from(view.contentDOM.querySelectorAll('.selectable-tables-own tbody td')).find((td) => td.isConnected && td.cellIndex === 1 && td.getBoundingClientRect().top > view.scrollDOM.getBoundingClientRect().top + 80);
+						await pointAt(middle(anyCell, 6), 'right');
+						const sortItem = itemIn(menusShown()[0], 'Sort by column (A to Z)');
+						const sortStart = performance.now();
+						if (sortItem) await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', ...middle(sortItem, 10), button: 'left', clickCount: 1 });
+						if (sortItem) await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', ...middle(sortItem, 10), button: 'left', clickCount: 1 });
+						await frames(2);
+						const sortMs = Math.round(performance.now() - sortStart);
+						await sleep(600);
+						await frames(3);
+						const sortNow = bottomRow();
+						const sortedLines = bigLines();
+						const collator = new Intl.Collator(undefined, { usage: 'sort', sensitivity: 'base', numeric: true });
+						const sortColumn = anyCell.cellIndex;
+						const bodySorted = sortedLines.slice(2).every((line, i, all) => i === 0 || collator.compare(rowCells(all[i - 1])[sortColumn], rowCells(line)[sortColumn]) <= 0);
+						const sameRows = [...sortedLines.slice(2)].sort().join('\n') === [...before.slice(2)].sort().join('\n') && sortedLines[0] === before[0];
+						await leaveAll(view);
+						await restore(view, bigText);
+						// The note doesn't scroll, and below an edit that keeps the number of rows, the row at the bottom is the same one.
+						const stays = (r) => !!r.bottom.text && r.bottom.text === r.now.text && Math.abs(r.bottom.top - r.now.top) <= 2;
+						const firstOff = (got, want) => {
+							const i = want.findIndex((line, n) => got[n] !== line);
+							return i < 0 ? (got.length === want.length ? null : { lengths: [got.length, want.length] }) : { at: i, got: got[i]?.slice(0, 80), want: want[i]?.slice(0, 80), lengths: [got.length, want.length] };
+						};
+						check('Own 81: in Table 2000 by 12, Delete row on row 1,500, Move row down on row 100 across a seam, and Sort A to Z each write the right text', deletedRight && movedRight && columnRight && spacedRight && bodySorted && sameRows && !!sortItem, { deletedRight, movedRight, columnRight, spacedRight, bodySorted, sameRows, sortItem: !!sortItem, deleted: firstOff(deleted.lines, [...before.slice(0, 1501), ...before.slice(1502)]), moved: firstOff(moved.lines, [...before.slice(0, 101), before[102], before[101], ...before.slice(103)]), sortHeader: [sortedLines[0]?.slice(0, 60), before[0]?.slice(0, 60)], sortLengths: [sortedLines.length, before.length] });
+						check('Own 81: each takes under 1 s', deleted.ms < 1000 && moved.ms < 1000 && column.ms < 1000 && spaced.ms < 1000 && sortMs < 1000, { deleted: deleted.ms, moved: moved.ms, column: column.ms, spaced: spaced.ms, sort: sortMs });
+						check('Own 81: the rows on screen above the edit stay where they were, after Delete row, Move row down, Add column to the right, and Delete row on a copy spaced by hand, and Sort doesn\'t scroll the note', stays(deleted) && stays(moved) && stays(column) && stays(spaced) && Math.abs(sortBottom.scroll - sortNow.scroll) <= 2, { deleted: [deleted.bottom, deleted.now], moved: [moved.bottom, moved.now], column: [column.bottom, column.now], spaced: [spaced.bottom, spaced.now], sort: [sortBottom, sortNow] });
+						results.push({ name: 'Own 81 timings (ms)', ok: true, detail: { deleteRow1500: deleted.ms, moveRow100: moved.ms, addColumn: column.ms, deleteRowSpaced: spaced.ms, sortColumn2: sortMs } });
+						check('Own 81: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						await closeMenus();
+						if (hadNative) config.nativeMenus = nativeBefore;
+						else delete config.nativeMenus;
+						app.updateUseNativeMenu();
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						preview.use(false);
+						await sleep(300);
+					}
+				}
 			} finally {
 				preview.skew(0);
 				preview.use(false);
@@ -4908,6 +5432,21 @@
 		}
 	} catch (error) {
 		results.push({ name: 'the check script itself', ok: false, detail: String(error && error.stack || error) });
+	}
+	// Notes put back as they were, with no editor holding a change that would save over them.
+	try {
+		const leaf = app.workspace.getLeaf(false);
+		await leaf.openFile(app.vault.getAbstractFileByPath('Watering schedule.md'), { state: { mode: 'source', source: false } });
+		await sleep(300);
+		for (const [path, text] of notesAtStart) {
+			const file = app.vault.getAbstractFileByPath(path);
+			if (file && (await app.vault.read(file)) !== text) {
+				await app.vault.modify(file, text);
+				results.push({ name: `note put back after the run: ${path}`, ok: true });
+			}
+		}
+	} catch (error) {
+		results.push({ name: 'putting the notes back', ok: false, detail: String(error) });
 	}
 	if (previewWasOn) {
 		const plugin = app.plugins.plugins['selectable-tables'];

@@ -97,6 +97,11 @@ function visibleAt(td: HTMLTableCellElement, x: number, y: number): number | nul
 /** A table line without its padding: no spaces beside its pipes, and runs of spaces as one. */
 const unpadded = (line: string) => line.replace(/ *\| */g, '|').replace(/ {2,}/g, ' ').trim();
 
+/** A height kept for a row with these cells, taken so that rows with the same cells each get one, in order. */
+function takeHeight(heights: Map<string, number[]>, key: string): number | undefined {
+	return heights.get(key)?.shift();
+}
+
 /** Whether two lines of a table have the same cells, padding aside, but for one column, -1 for none. */
 function sameCells(a: string, b: string, columns: number, except: number): boolean {
 	const before = cellsOf(a, columns);
@@ -344,7 +349,7 @@ export class Model implements Span, DrawnTable {
 	private openRow: HTMLTableRowElement | null = null;
 	private openColumn = -1;
 	/** A cell to open once its row is drawn. */
-	private toOpen: { cell: Cell; run: () => void } | null = null;
+	private toOpen: { cell: Cell; run: () => void; near?: boolean } | null = null;
 
 	// Frozen rows and columns, on a computer.
 	private readonly pins = new Pins(this.pinHost());
@@ -433,6 +438,21 @@ export class Model implements Span, DrawnTable {
 	/** Opens a cell for editing, with the caret at the end of its text: Enter on the selected cell. */
 	openCell(cell: Cell): void {
 		this.open(this, cell, null);
+	}
+
+	/**
+	 * Runs `run` once a cell's row is drawn again, after an edit that changed the table's rows: the element drawn there now
+	 * can be a row from before, and after an edit that changed the header, no row is drawn until the next measure. The
+	 * cell is near where the pane is, so nothing scrolls first, which would move the note to the row's estimated place;
+	 * a row the next draw doesn't reach is brought into view then.
+	 */
+	afterDraw(cell: Cell, run: () => void): void {
+		this.toOpen = { cell, run, near: true };
+		this.schedule(true);
+	}
+
+	get rtl(): boolean {
+		return this.dir === 'rtl';
 	}
 
 	/** A cell's element, if its row is drawn: row 0 is the header. */
@@ -774,6 +794,7 @@ export class Model implements Span, DrawnTable {
 		let columns = Math.max(delimiter.length, rowCells(headLine).length);
 		for (const line of lines) columns = Math.max(columns, rowCells(line).length);
 		const changedColumns = columns !== this.columns;
+		const sameLook = this.metrics === metrics;
 		this.columns = columns;
 		this.aligns = Array.from({ length: columns }, (_, c) => alignOf(delimiter[c] ?? ''));
 		this.metrics = metrics;
@@ -781,7 +802,10 @@ export class Model implements Span, DrawnTable {
 		this.rowWords = lines.map((line) => this.measureRow(line));
 		this.widths = this.fit();
 		this.headHeight = rowHeight(this.headWords, this.widths, metrics, true);
-		this.heights.splice(0, this.heights.count, this.rowWords.map((cells, r) => skewed(rowHeight(cells, this.widths, metrics, false), r)));
+		const estimates = this.rowWords.map((cells, r) => skewed(rowHeight(cells, this.widths, metrics, false), r));
+		// A look that changed measures everything anew; otherwise rows the change left keep the height they were drawn at.
+		if (!sameLook) this.before = null;
+		this.heights.splice(0, this.heights.count, this.startHeights(lines, estimates));
 		this.stale = false;
 		this.generation++;
 		this.text = doc;
@@ -840,22 +864,81 @@ export class Model implements Span, DrawnTable {
 		const now = linesOf(doc, this);
 		if (change && now.count === before.count && this.repadded(oldDoc, doc, before, now, change, changes)) return;
 		const splices = change ? rowSplices(before, now, change) : before.count === now.count ? [] : null;
-		if (!splices) {
+		const added = (splice: { at: number; added: number }) => Array.from({ length: splice.added }, (_, i) => doc.line(now.header + 2 + splice.at + i).text);
+		if (!splices || splices.some((splice) => added(splice).some((line) => rowCells(line).length > this.columns))) {
+			this.remember(oldDoc, before);
 			this.stale = true;
 			return;
 		}
-		for (const { at, removed, added } of splices) {
-			const lines = Array.from({ length: added }, (_, i) => doc.line(now.header + 2 + at + i).text);
-			if (lines.some((line) => rowCells(line).length > this.columns)) {
-				this.stale = true;
-				return;
-			}
+		for (const { at, removed, added: count } of splices) {
+			const lines = added({ at, added: count });
 			const words = lines.map((line) => this.measureRow(line));
+			// A row the change rewrote but left with the same cells, padding aside, keeps the height it was drawn at, as rows a
+			// sort or a move carries elsewhere do: estimated again, the rows on screen would move.
+			const drawn = this.drawnHeights(oldDoc, before, at, removed);
 			this.rowWords.splice(at, removed, ...words);
-			this.heights.splice(at, removed, words.map((cells) => rowHeight(cells, this.widths, this.metrics!, false)));
-			this.shiftRows(at, removed, added);
+			this.heights.splice(at, removed, words.map((cells, i) => (drawn && takeHeight(drawn, unpadded(lines[i]!))) ?? rowHeight(cells, this.widths, this.metrics!, false)));
+			this.shiftRows(at, removed, count);
 		}
 		this.refit();
+	}
+
+	/** The measured heights of the rows a splice takes out, by their cells, padding aside, or null when none was measured. */
+	private drawnHeights(oldDoc: Text, lines: TableLines, at: number, removed: number): Map<string, number[]> | null {
+		let found: Map<string, number[]> | null = null;
+		for (let row = at; row < at + removed; row++) {
+			if (!this.heights.measured(row)) continue;
+			found ??= new Map();
+			const key = unpadded(oldDoc.line(lines.header + 2 + row).text);
+			const list = found.get(key);
+			if (list) list.push(this.heights.get(row));
+			else found.set(key, [this.heights.get(row)]);
+		}
+		return found;
+	}
+
+	/**
+	 * Each row's height as last measured, and its cells, before a change that works the shape out again: a table rewritten
+	 * whole, as an edit to its header or columns does, or as its first edit tidies a table spaced by hand. Rows the change
+	 * leaves are then given the height they were drawn at, not one estimated from their text, so the rows on screen stay
+	 * where they were. Only rows that have been drawn were measured.
+	 */
+	private before: { keys: string[]; heights: Float64Array } | null = null;
+
+	private remember(oldDoc: Text, lines: TableLines): void {
+		if (!this.heights.count || lines.count !== this.heights.count) return;
+		const keys: string[] = [];
+		const heights = new Float64Array(lines.count).fill(Number.NaN);
+		for (let row = 0; row < lines.count; row++) {
+			if (!this.heights.measured(row)) {
+				keys.push('');
+				continue;
+			}
+			keys.push(unpadded(oldDoc.line(lines.header + 2 + row).text));
+			heights[row] = this.heights.get(row);
+		}
+		this.before = { keys, heights };
+	}
+
+	/**
+	 * The heights a new shape starts from: each row's estimate, or the height it was measured at before the change, for a
+	 * row the change left as it was. With as many rows as before, rows are taken to be where they were, as after an edit to
+	 * the header or the columns; otherwise by their cells, padding aside, as after a row added or taken out in a table that
+	 * the same edit tidied.
+	 */
+	private startHeights(lines: readonly string[], estimates: number[]): number[] {
+		const before = this.before;
+		this.before = null;
+		if (!before) return estimates;
+		if (before.keys.length === lines.length) return estimates.map((height, row) => (Number.isNaN(before.heights[row]!) ? height : before.heights[row]!));
+		const byKey = new Map<string, number[]>();
+		before.keys.forEach((key, row) => {
+			if (!key) return;
+			const list = byKey.get(key);
+			if (list) list.push(before.heights[row]!);
+			else byKey.set(key, [before.heights[row]!]);
+		});
+		return lines.map((line, row) => takeHeight(byKey, unpadded(line)) ?? estimates[row]!);
 	}
 
 	/**
@@ -1648,7 +1731,7 @@ export class Model implements Span, DrawnTable {
 		if (waiting && this.cellElement(waiting.cell)?.isConnected) {
 			this.toOpen = null;
 			queueMicrotask(waiting.run);
-		}
+		} else if (waiting?.near) this.whenDrawn(waiting.cell, waiting.run);
 	}
 
 	/** Measures cells' pictures and players on the next measure, and widens their columns to fit, as Obsidian's table does. */

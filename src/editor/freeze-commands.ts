@@ -2,7 +2,7 @@ import { isolateHistory } from '@codemirror/commands';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import { type Command, type Editor, type IconName, type MarkdownFileInfo, type MarkdownView, Menu, Notice } from 'obsidian';
 import { cellSelection, TABLE_CLASS } from './cells';
-import { selectedTable, writesFreeze } from './decide';
+import { selectedTable, writesTable } from './decide';
 import { escapeCell, noteView, wholeTable } from './extension';
 import { canFreeze } from './freeze';
 import { hasMark, MAX_FROZEN_COLUMNS, readFreeze } from './freeze-mark';
@@ -30,13 +30,13 @@ const HANDLES = '.table-row-drag-handle, .table-col-drag-handle';
  * A cell of one of a note's tables, and where that table is now: Obsidian's by its widget, which Obsidian keeps when it
  * builds the table anew, and the plugin's own by the plugin's list of the note's tables.
  */
-interface Place {
+export interface Place {
 	table(): Span | null;
 	cell: Cell;
 }
 
 /** The cell a command acts on, in a note's table, and the cell's own editor when it's open. */
-interface Target {
+export interface Target {
 	table: Span;
 	cell: Cell;
 	open: EditorView | null;
@@ -75,7 +75,7 @@ function tableOf(view: EditorView, widget: HTMLElement): Span | null {
 }
 
 /** The note's selected cell, or else its open one. */
-function targetIn(view: EditorView): Target | null {
+export function targetIn(view: EditorView): Target | null {
 	const selected = view.plugin(cellSelection)?.selected;
 	const table = selectedTable(view.state, viewLayout(view));
 	if (table && selected) return { table, cell: selected, open: null };
@@ -119,35 +119,51 @@ function run(view: EditorView, command: FreezeCommand) {
 	if (!written.changes.length) return;
 	const { main } = view.state.selection;
 	// Kept apart in the history, so that Undo takes back the freeze alone, even with another edit right after it.
-	view.dispatch({ changes: written.changes, selection: wholeTable({ from: table.from, to: written.to }, main.anchor < main.head), annotations: [writesFreeze.of(true), isolateHistory.of('full')] });
+	view.dispatch({ changes: written.changes, selection: wholeTable({ from: table.from, to: written.to }, main.anchor < main.head), annotations: [writesTable.of('freeze'), isolateHistory.of('full')] });
 	if (command !== 'none' && !pins(view)) new Notice('This device can\'t pin a table\'s rows, so its tables scroll as usual.');
 }
 
 /**
  * A menu item, on the cell that was right-clicked. An open cell closes first, that one or another, and the
  * right-clicked cell is selected, as Escape leaves a cell, so the command runs from there and leaves it
- * selected, with the keyboard in the note. A table Obsidian has since taken away does nothing.
+ * selected, with the keyboard in the note. A table Obsidian has since taken away does nothing. Says whether
+ * the cell is selected.
  */
-function runAt(view: EditorView, place: Place, command: FreezeCommand) {
+export function selectAt(view: EditorView, place: Place): boolean {
 	const open = openCell(view);
-	if (open && !(open.editor && escapeCell(open.editor))) return;
+	if (open && !(open.editor && escapeCell(open.editor))) return false;
 	const table = place.table();
 	const { cell } = place;
-	if (!table) return;
+	if (!table) return false;
 	const { main } = view.state.selection;
 	if (main.from !== table.from || main.to !== table.to) view.dispatch({ selection: wholeTable(table, false), userEvent: 'select' });
 	view.focus();
 	view.plugin(cellSelection)?.select(cell);
-	run(view, command);
+	return true;
 }
 
-/** The freeze items for a right-clicked cell, in a section of their own. */
+/**
+ * Items a preview build puts before the freeze items, on the plugin's own table: Obsidian's Row, Column and Sort, which
+ * its own table menu has over its own table (src/own-table/table-commands.ts).
+ */
+type TableItems = (menu: Menu, view: EditorView, place: Place) => void;
+
+let tableItems: TableItems | null = null;
+
+export function setTableItems(items: TableItems | null): void {
+	tableItems = items;
+}
+
+/** The items for a right-clicked cell: the plugin's own table's Row, Column and Sort, then the freeze items, in a section of their own. */
 function addItems(menu: Menu, view: EditorView, place: Place) {
 	const table = place.table();
 	if (!table) return;
+	if (tableItems && view.state.facet(ownTables)?.spans(view.state)) tableItems(menu, view, place);
 	for (const { name, icon, command } of FREEZES) {
 		if (!offered(command, view, table)) continue;
-		menu.addItem((item) => item.setSection(MENU_SECTION).setTitle(name).setIcon(icon).onClick(() => runAt(view, place, command)));
+		menu.addItem((item) => item.setSection(MENU_SECTION).setTitle(name).setIcon(icon).onClick(() => {
+			if (selectAt(view, place)) run(view, command);
+		}));
 	}
 }
 
@@ -179,7 +195,11 @@ export const tableMenus = ViewPlugin.define((view) => {
 		const own = view.state.facet(ownTables);
 		if (own?.spans(view.state)) {
 			const place = own.cellAt(view, target);
-			if (place) addItems(Menu.forEvent(event), view, place);
+			if (!place) return;
+			// The cell is selected first, so it shows which cell the menu is for. An open cell's empty space keeps it open.
+			const open = openCell(view)?.place.cell;
+			if (open?.row !== place.cell.row || open?.column !== place.cell.column) selectAt(view, place);
+			addItems(Menu.forEvent(event), view, place);
 			return;
 		}
 		if (!event.defaultPrevented || target.closest(HANDLES)) return;

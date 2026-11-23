@@ -29,6 +29,12 @@ export interface DrawnTable {
 	showCell(cell: Cell, toward?: 'up' | 'left'): void;
 	/** Opens a cell for editing, with the caret at the end of its text. */
 	openCell(cell: Cell): void;
+	/** Runs `run` once a cell's row is drawn again, after an edit that changed the table's rows, without scrolling first. */
+	afterDraw(cell: Cell, run: () => void): void;
+	/** Whether the table reads right to left, from its first header cell, as Obsidian's does. */
+	readonly rtl: boolean;
+	/** Whether any of the table's blocks is in the page. */
+	readonly shown: boolean;
 }
 
 /** On the editor of an open cell of the plugin's own table: the plugin's other editor extensions stand aside in it. */

@@ -518,8 +518,6 @@ export class Model implements Span, DrawnTable {
 		this.openColumn = column;
 		const row = tr ? this.rowOfOpen() : null;
 		this.pins.openCell(tr, row === null ? null : { row, column });
-		// A cell in a frozen row and a frozen column opens with the table at its start (`holdsStart` in pins.ts).
-		if (tr && this.pins.holdsStart) this.slideToStart();
 		if (tr || was === null) return;
 		// The cell that closed still shows its text from before it opened, so the row is drawn again, in place if another
 		// of its cells opens before then.
@@ -1952,8 +1950,6 @@ export class Model implements Span, DrawnTable {
 
 	/** Moves the table sideways by a swipe's step, as a box's own scroll would, at the swipe's own speed. */
 	slideBy(dx: number): void {
-		// The table stays at its start while a cell in a frozen row and a frozen column is open.
-		if (this.pins.holdsStart) return;
 		if (this.bar) this.bar.scroll = clampSlide(this.bar.scroll + dx, this.slide, this.dir === 'rtl');
 	}
 

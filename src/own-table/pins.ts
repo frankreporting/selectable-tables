@@ -60,8 +60,11 @@ const LIFTED_CLASS = 'selectable-tables-lifted';
 const LIFTED_ROW_CLASS = 'selectable-tables-lifted-row';
 /** On a copy hidden so the real cells under it show: the open cell's row in the strip, or the first block's rail. */
 const HIDDEN_CLASS = 'selectable-tables-hidden-copy';
-/** On a block's strip while it steps aside for an open cell in a frozen row and a frozen column (`holdsStart`). */
-const STRIP_OFF_CLASS = 'selectable-tables-strip-off';
+/**
+ * On the first block's table wrapper while its strip sits inside it, under the pinned rows, for an open cell in a frozen
+ * row and a frozen column (`holdsCorner`).
+ */
+const HOLDS_STRIP_CLASS = 'selectable-tables-holds-strip';
 
 
 const NONE: Freeze = { rows: 0, columns: 0 };
@@ -128,9 +131,26 @@ interface Part {
 	applied: string;
 }
 
+/** Where a strip sits, in its block, and in the table's wrapper, from the last read; null inside where there's no wrapper. */
+interface StripAt {
+	start: number;
+	top: number;
+	inner: { start: number; top: number } | null;
+}
+
+/** A block's strip of frozen columns. */
+interface Strip extends Part {
+	mirrors: WeakMap<HTMLTableRowElement, Mirror>;
+	real: WeakMap<HTMLTableRowElement, HTMLTableRowElement>;
+	/** The frozen rows' rendering its copy of the header was made from, and how many columns its rows' copies have. */
+	source: number;
+	columns: number;
+	at: StripAt | null;
+}
+
 /** What one block pins. */
 interface Parts {
-	strip: (Part & { mirrors: WeakMap<HTMLTableRowElement, Mirror>; real: WeakMap<HTMLTableRowElement, HTMLTableRowElement>; source: number }) | null;
+	strip: Strip | null;
 	rail: { box: HTMLDivElement; copy: HTMLDivElement; slider: HTMLDivElement; table: Part; corner: Part | null; source: number } | null;
 }
 
@@ -144,6 +164,8 @@ interface PinRead {
 		block: PinBlock;
 		start: number;
 		top: number;
+		/** Where the table sits in its wrapper, for a strip inside it. */
+		inner: StripAt['inner'];
 		bottom: number;
 		height: number;
 		/** The real rows' heights, for the strip's copies. */
@@ -169,7 +191,7 @@ function filler(): HTMLTableCellElement {
 /** A cell as drawn, for a copy: no open editor in it, and none of the marks the table draws on a cell. */
 function cellCopy(cell: HTMLTableCellElement): HTMLTableCellElement {
 	const copy = cell.cloneNode(true) as HTMLTableCellElement;
-	copy.classList.remove(CELL_CLASS, ...MATCH_CLASSES);
+	copy.classList.remove(CELL_CLASS, LIFTED_CLASS, ...MATCH_CLASSES);
 	for (const box of Array.from(copy.querySelectorAll('.table-cell-wrapper'))) {
 		if (box.querySelector('.cm-editor')) box.remove();
 		else box.classList.remove(OPEN_TEXT_CLASS);
@@ -181,7 +203,7 @@ function cellCopy(cell: HTMLTableCellElement): HTMLTableCellElement {
 function rowCopy(tr: HTMLTableRowElement, columns: number, row: number | null): HTMLTableRowElement {
 	const copy = tr.cloneNode(false) as HTMLTableRowElement;
 	copy.removeAttribute('aria-rowindex');
-	copy.classList.remove(PINNED_ROW_CLASS);
+	copy.classList.remove(PINNED_ROW_CLASS, LIFTED_ROW_CLASS);
 	copy.style.removeProperty('top');
 	copy.style.removeProperty('height');
 	if (row !== null) copy.setAttribute(ROW_ATTRIBUTE, String(row));
@@ -350,7 +372,8 @@ export class Pins {
 	 * The open cell, or none. In a frozen column, while the table moves sideways, its row's frozen cells take the
 	 * opposite move, so the cell stays where the strip is, with the editor in the real cell, and its row's copy in the
 	 * strip hides. In a frozen row of a table of more blocks, the first block's rows pin themselves, as a table of one
-	 * block's do, and its copy of the open row hides, since the copy lies over the real rows there.
+	 * block's do, and its copy of the open row hides, since the copy lies over the real rows there. In a frozen row and a
+	 * frozen column, the first block's strip goes under the pinned rows instead (`holdsCorner`).
 	 */
 	openCell(tr: HTMLTableRowElement | null, cell: Cell | null): void {
 		const was = this.opened;
@@ -362,10 +385,12 @@ export class Pins {
 
 	/**
 	 * Whether the open cell is in a frozen row and a frozen column, while both pin. The strip's rows pass behind a pinned
-	 * row, so no copy hidden in the strip can show such a cell: instead the table stays at its start sideways while it's
-	 * open, and the strip of the block holding it steps aside, so the real cells show in place.
+	 * row, so no copy hidden in the strip could show such a cell. Instead the first block's strip goes inside the table's
+	 * wrapper, under the real pinned rows, as Obsidian's own table layers them, and takes the opposite of the table's
+	 * sideways move, as do the pinned rows' frozen cells: the real cells show in place, the open one among them, and the
+	 * table still moves sideways (STA-105).
 	 */
-	get holdsStart(): boolean {
+	private get holdsCorner(): boolean {
 		const open = this.opened;
 		return !!open && this.fit.rows && this.fit.columns && open.cell.row < this.freeze.rows && open.cell.column < this.freeze.columns;
 	}
@@ -412,36 +437,69 @@ export class Pins {
 		return tr.parentElement === block.tbody ? (strip.mirrors.get(tr)?.tr ?? null) : null;
 	}
 
+	/**
+	 * Puts a block's strip in the block, over the table, or inside the table's wrapper, under its pinned rows
+	 * (`holdsCorner`), at the place the last read found for it there. Moved in the same task as the rows are lifted, so
+	 * no frame shows one without the other.
+	 */
+	private placeStrip(block: PinBlock, strip: Strip, under: boolean): void {
+		const at = strip.at;
+		const wrapper = block.table.parentElement;
+		const inside = under && !!at?.inner && !!wrapper && wrapper !== block.dom;
+		const parent = inside ? wrapper : block.dom;
+		if (strip.box.parentElement !== parent) {
+			if (inside) parent.append(strip.box);
+			else parent.insertBefore(strip.box, this.parts.get(block)?.rail?.box ?? null);
+		}
+		if (wrapper && wrapper !== block.dom) wrapper.toggleClass(HOLDS_STRIP_CLASS, inside);
+		const place = inside ? at?.inner : at;
+		if (!place) return;
+		setStyle(strip.box, 'top', px(place.top));
+		setStyle(strip.box, 'inset-inline-start', px(place.start));
+	}
+
 	/** Puts the selected cell's outline on its copies, and lifts the open cell out from under them. A few lookups. */
 	private marks(): void {
 		for (const el of this.chosenCopies) el.removeClass(CELL_CLASS);
 		this.chosenCopies = this.chosen ? this.copiesOf(this.chosen) : [];
 		for (const el of this.chosenCopies) el.addClass(CELL_CLASS);
 		for (const el of this.liftedCells) el.removeClass(LIFTED_CLASS, LIFTED_ROW_CLASS);
-		for (const el of this.hiddenCopies) el.removeClass(HIDDEN_CLASS, STRIP_OFF_CLASS);
+		for (const el of this.hiddenCopies) el.removeClass(HIDDEN_CLASS);
 		this.liftedCells = [];
 		this.hiddenCopies = [];
-		const open = this.opened;
-		if (!open || !open.tr.isConnected) return;
-		if (this.holdsStart) {
-			const first = this.host.pinBlocks[0];
-			const strip = first ? this.parts.get(first)?.strip : null;
-			if (strip) {
-				strip.box.addClass(STRIP_OFF_CLASS);
-				this.hiddenCopies.push(strip.box);
-			}
-		} else if (this.fit.columns && open.cell.column < this.freeze.columns) {
-			open.tr.addClass(LIFTED_ROW_CLASS);
-			this.liftedCells.push(open.tr);
-			for (let column = 0; column < this.freeze.columns; column++) {
-				const cell = open.tr.cells[column];
-				if (!cell) continue;
-				cell.addClass(LIFTED_CLASS);
-				this.liftedCells.push(cell);
-			}
-			for (const block of this.host.pinBlocks) {
-				const copy = block ? this.stripCopy(block, open.tr) : null;
-				if (copy) this.hiddenCopies.push(copy);
+		const open = this.opened?.tr.isConnected ? this.opened : null;
+		const corner = !!open && this.holdsCorner;
+		for (const block of this.host.pinBlocks) {
+			const strip = block ? this.parts.get(block)?.strip : null;
+			if (block && strip) this.placeStrip(block, strip, corner && block.index === 0);
+		}
+		if (!open) return;
+		if (this.fit.columns && open.cell.column < this.freeze.columns) {
+			const lift = (tr: HTMLTableRowElement | null) => {
+				if (!tr) return;
+				tr.addClass(LIFTED_ROW_CLASS);
+				this.liftedCells.push(tr);
+				for (let column = 0; column < this.freeze.columns; column++) {
+					const cell = tr.cells[column];
+					if (!cell) continue;
+					cell.addClass(LIFTED_CLASS);
+					this.liftedCells.push(cell);
+				}
+			};
+			lift(open.tr);
+			// With the strip under them, every pinned row's frozen cells stay where the strip is, over the cells passing
+			// under them sideways; and the open row's copy needn't hide.
+			if (corner) {
+				const first = this.host.pinBlocks[0];
+				for (let row = -1; row < this.freeze.rows - 1; row++) {
+					const tr = this.host.rowElement(row);
+					if (tr && tr !== open.tr && first && (tr.parentElement === first.thead || tr.parentElement === first.tbody)) lift(tr);
+				}
+			} else {
+				for (const block of this.host.pinBlocks) {
+					const copy = block ? this.stripCopy(block, open.tr) : null;
+					if (copy) this.hiddenCopies.push(copy);
+				}
 			}
 		}
 		if (this.liftsRows()) {
@@ -515,6 +573,8 @@ export class Pins {
 				return { el: tr?.cells[column] ?? null, rows, columns };
 			}
 			if (columns && !lifted && real && (real.parentElement === block.tbody || real.parentElement === block.thead)) {
+				// With the strip under the pinned rows, a pinned row's real cells are what shows.
+				if (rows && block.index === 0 && this.holdsCorner) return { el: null, rows, columns };
 				return { el: this.stripCopy(block, real)?.cells[column] ?? null, rows, columns };
 			}
 		}
@@ -645,6 +705,15 @@ export class Pins {
 			const left = table.offsetLeft + (wrapper === table ? 0 : wrapper.offsetLeft);
 			const top = table.offsetTop + (wrapper === table ? 0 : wrapper.offsetTop);
 			const start = rtl ? dom.clientWidth - left - table.offsetWidth : left;
+			// And in its wrapper, for a strip that goes inside it: the wrapper is positioned, in Obsidian's app.css.
+			const holder = table.parentElement;
+			let inner: StripAt['inner'] = null;
+			if (holder && holder !== dom) {
+				const own = table.offsetParent === holder;
+				const x = own ? table.offsetLeft : table.offsetLeft - holder.offsetLeft - holder.clientLeft;
+				const y = own ? table.offsetTop : table.offsetTop - holder.offsetTop - holder.clientTop;
+				inner = { start: rtl ? holder.clientWidth - x - table.offsetWidth : x, top: y };
+			}
 			const strip = this.parts.get(block)?.strip;
 			const real: [HTMLTableRowElement, number][] = [];
 			if (strip && fit.columns) {
@@ -652,7 +721,7 @@ export class Pins {
 				const head = block.thead?.firstElementChild;
 				if (head?.instanceOf(HTMLTableRowElement)) real.push([head, head.getBoundingClientRect().height]);
 			}
-			return { block, start, top, bottom: top + table.offsetHeight, height: dom.offsetHeight, rows: real };
+			return { block, start, top, inner, bottom: top + table.offsetHeight, height: dom.offsetHeight, rows: real };
 		});
 		return { pin, fit, heights, paint, blocks };
 	}
@@ -706,7 +775,7 @@ export class Pins {
 		const lifts = this.liftsRows();
 		// Until the theme's colors are read, what pins is built but not painted, and read on the next measure.
 		if (!read.paint) again = true;
-		for (const { block, start, top, bottom, height, rows } of read.blocks) {
+		for (const { block, start, top, inner, bottom, height, rows } of read.blocks) {
 			const dom = block.dom;
 			const any = (this.fit.rows || this.fit.columns) && !!read.paint;
 			dom.toggleClass(PINS_CLASS, any);
@@ -719,19 +788,24 @@ export class Pins {
 			if (block.index === 0) this.realRows(block, own ? tops : null);
 			// The strip of frozen columns.
 			if (this.fit.columns) {
-				parts.strip ??= { ...part(dom, STRIP_CLASS, this.holding), mirrors: new WeakMap(), real: new WeakMap(), source: -1 };
+				parts.strip ??= { ...part(dom, STRIP_CLASS, this.holding), mirrors: new WeakMap(), real: new WeakMap(), source: -1, columns: -1, at: null };
 				const strip = parts.strip;
 				this.shape(strip, this.freeze.columns);
-				setStyle(strip.box, 'top', px(top));
-				setStyle(strip.box, 'inset-inline-start', px(start));
+				// Placed by `marks`, below: in the block, or in the table's wrapper.
+				strip.at = { start, top, inner };
 				if (strip.source !== this.source.generation || fitChanged) {
 					strip.source = this.source.generation;
 					strip.thead.empty();
 					const head = this.source.rows[0];
 					if (block.index === 0 && head) strip.thead.append(rowCopy(head, this.freeze.columns, 0));
-					strip.tbody.empty();
-					strip.mirrors = new WeakMap();
-					strip.real = new WeakMap();
+					// The body's copies come from the block's own rows, not the frozen rows' rendering, so a key typed in the
+					// header keeps them: only a change of how many columns they hold makes them anew.
+					if (strip.columns !== this.freeze.columns || fitChanged) {
+						strip.columns = this.freeze.columns;
+						strip.tbody.empty();
+						strip.mirrors = new WeakMap();
+						strip.real = new WeakMap();
+					}
 					rebuilt = true;
 				}
 				if (this.mirror(block, strip)) again = true;
@@ -742,6 +816,7 @@ export class Pins {
 				// In a table of one block the strip's frozen rows stick with the real ones.
 				this.stickStrip(strip, own ? tops : null, block);
 			} else if (parts.strip) {
+				parts.strip.box.parentElement?.removeClass(HOLDS_STRIP_CLASS);
 				parts.strip.box.remove();
 				parts.strip = null;
 			}
@@ -847,7 +922,7 @@ export class Pins {
 	/** How many body rows were stuck, to unstick when that changes. */
 	private stuck = 0;
 
-	private stickStrip(strip: NonNullable<Parts['strip']>, tops: number[] | null, block: PinBlock): void {
+	private stickStrip(strip: Strip, tops: number[] | null, block: PinBlock): void {
 		const head = strip.thead;
 		setStyle(head, 'top', tops ? `calc(var(${PIN_VARIABLE}) + ${px(tops[0] ?? 0)})` : null);
 		head.toggleClass(PINNED_ROW_CLASS, !!tops);
@@ -865,7 +940,7 @@ export class Pins {
 	 * row, so the strip's rows line up with the table's and stripe alike. Only rows new to the block, or drawn again,
 	 * are copied; the rest are kept, and only what's out of place moves.
 	 */
-	private mirror(block: PinBlock, strip: NonNullable<Parts['strip']>): boolean {
+	private mirror(block: PinBlock, strip: Strip): boolean {
 		const columns = this.freeze.columns;
 		let made = false;
 		const want: HTMLTableRowElement[] = [];
@@ -928,6 +1003,7 @@ export class Pins {
 			for (const [name] of this.paint?.variables ?? []) block.dom.style.removeProperty(name);
 			this.realRows(block, null);
 			const parts = this.parts.get(block);
+			parts?.strip?.box.parentElement?.removeClass(HOLDS_STRIP_CLASS);
 			parts?.strip?.box.remove();
 			parts?.rail?.box.remove();
 			this.parts.delete(block);

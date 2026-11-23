@@ -6095,7 +6095,7 @@
 						const model = tableAt(view, heading);
 						return model ? view.state.doc.sliceString(model.from, model.to) : null;
 					};
-					const touched = ['Two report tables', 'Frozen tables', 'Table 2000 by 12'];
+					const touched = ['Two report tables', 'Frozen tables', 'Table 2000 by 12', 'Frozen table 2000 by 12'];
 					const onDiskBefore = {};
 					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
 					const config = app.vault.config;
@@ -6505,6 +6505,8 @@
 								// Clicked without dragging: its menu.
 								const bedNow = gripOf(view, on, 'Plants', 'column', 1);
 								if (on && bedNow) {
+									// Still pinned, the grip in the band above the header.
+									out.pinnedAtClick = Math.abs(cellOf(view, on, 'Plants', 0, 1).getBoundingClientRect().top - (view.scrollDOM.getBoundingClientRect().top + out.band)) <= 2;
 									const at = centre(bedNow);
 									await press(at);
 									await release(at);
@@ -6602,6 +6604,7 @@
 							if (grip) out.afterDeep = await drag(grip, copyHead(3).getBoundingClientRect());
 							await toDeep();
 							const again = copyHead(2)?.querySelector(':scope > .table-col-drag-handle');
+							out.deepPinnedAtClick = !!again && Math.abs(copyHead(2).getBoundingClientRect().top - pin()) <= 2;
 							if (again) out.deepMenu = await click(again);
 							const toTop = async () => {
 								view.dispatch({ effects: view.constructor.scrollIntoView(big().from, { y: 'center' }) });
@@ -6625,7 +6628,7 @@
 						results.push({ name: 'Own 99 pinned header\'s column grip reachable (switch on, off)', ok: true, detail: [frozenOn.columnReachable, frozenOff.columnReachable] });
 						check('Own 99: with the switch on, Plants\' rows pin a grip\'s height below the pane\'s top, and with the switch off at its top', frozenOn.pinned && frozenOn.band > 0 && frozenOff.pinned, { on: { pinned: frozenOn.pinned, band: frozenOn.band }, off: { pinned: frozenOff.pinned } });
 						check('Own 99: with the switch on, the pinned header\'s grip for Bed is in the pane, and dragged onto Sown it writes what the same drag writes with the header at its place; with the switch off it\'s above the pane, as before', frozenOn.columnReachable && frozenOn.afterColumn === frozenOn.afterPlaceColumn && !frozenOff.columnReachable, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn)?.slice(0, 300), place: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.columnReachable } });
-						check('Own 99: a click on the pinned header\'s grip shows the same menu as at the header\'s place', !!frozenOn.pinnedMenu?.length && frozenOn.pinnedMenu.join() === frozenOn.placeMenu?.join(), { pinned: frozenOn.pinnedMenu, place: frozenOn.placeMenu });
+						check('Own 99: a click on the pinned header\'s grip shows the same menu as at the header\'s place', frozenOn.pinnedAtClick && !!frozenOn.pinnedMenu?.length && frozenOn.pinnedMenu.join() === frozenOn.placeMenu?.join(), { pinnedAtClick: frozenOn.pinnedAtClick, pinned: frozenOn.pinnedMenu, place: frozenOn.placeMenu });
 						check('Own 99: with the header at its place, Bed\'s grip dragged onto Sown puts Bed after Sown, as with the switch off', frozenOn.placeReachable && frozenOn.afterPlaceColumn === frozenOff.afterPlaceColumn && /\| Sown +\| Bed/.test(plants(frozenOn.afterPlaceColumn) ?? ''), { on: { reachable: frozenOn.placeReachable, text: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.placeReachable, text: plants(frozenOff.afterPlaceColumn)?.slice(0, 300) } });
 						const deep = await deepGrip();
 						const deepText = (text) => {
@@ -6634,7 +6637,7 @@
 							return lines.slice(at, at + 4).map((line) => line.slice(0, 160));
 						};
 						check('Own 99: past row 300 of Frozen table 2000 by 12, the pinned header\'s grip for Column 2 is in the pane, and dragged onto Column 3 it writes what the same drag writes at the table\'s top', deep.pinned && deep.reachable && !!deep.afterDeep && deep.afterDeep !== deep.text && deep.afterDeep === deep.afterPlace, { pinned: deep.pinned, reachable: deep.reachable, deep: deepText(deep.afterDeep), place: deepText(deep.afterPlace) });
-						check('Own 99: there, a click on it shows the same menu as at the table\'s top', !!deep.deepMenu?.length && deep.deepMenu.join() === deep.placeMenu?.join(), { deep: deep.deepMenu, place: deep.placeMenu });
+						check('Own 99: there, a click on it shows the same menu as at the table\'s top', deep.deepPinnedAtClick && !!deep.deepMenu?.length && deep.deepMenu.join() === deep.placeMenu?.join(), { pinnedAtClick: deep.deepPinnedAtClick, deep: deep.deepMenu, place: deep.placeMenu });
 						check('Own 99: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						await closeMenus();

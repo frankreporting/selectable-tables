@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ChangeSet, Text } from '@codemirror/state';
+import { ChangeSet, EditorState, Text } from '@codemirror/state';
+import { blankLinesAbove, writesTable } from '../src/editor/decide';
 import { editTable, lineChanges, readTable, shownText, type TableEdit } from '../src/own-table/table-edits';
 
 const cell = (row: number, column: number) => ({ row, column });
@@ -217,4 +218,15 @@ test('a cell\'s shown text, as Obsidian draws it', () => {
 	assert.equal(shownText('snake_case_name'), 'snake_case_name');
 	assert.equal(shownText('<span>x</span> &amp; y'), 'x & y');
 	assert.equal(shownText('&#1114112; &#65;'), '&#1114112; A');
+});
+
+test('Add row above on the header stays one table: the blank line above it is left as it is', () => {
+	const doc = Text.of(['Above', '', ...plants, '', 'Below']);
+	const table = { from: doc.line(3).from, to: doc.line(7).to };
+	const edited = editTable(plants, 'row-before', cell(0, 0))!;
+	const { changes } = lineChanges(doc, table, edited.lines!, edited.from);
+	const state = EditorState.create({ doc: doc.toString() });
+	// Its new header goes in at the table's start, where text typed on the line above would have to move off.
+	assert.notDeepEqual(blankLinesAbove(state.update({ changes }), [table]), []);
+	assert.deepEqual(blankLinesAbove(state.update({ changes, annotations: writesTable.of('rows') }), [table]), []);
 });

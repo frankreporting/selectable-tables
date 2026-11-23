@@ -588,6 +588,8 @@ export function caretInTable(state: EditorState, layout: Layout): { table: Span;
  * are the tables before the change.
  */
 export function blankLinesAbove(tr: Transaction, tables: readonly Span[]): number[] {
+	// A command's write to a table, such as a new header put in above the old one, leaves nothing against it.
+	if (tr.annotation(writesTable) !== undefined) return [];
 	const { changes, newDoc } = tr;
 	const old = tr.startState.doc;
 	const breaks: number[] = [];

@@ -182,6 +182,12 @@
 		return { taken: event.defaultPrevented, text: data.getData('text/plain') };
 	}
 
+	// Every note's text as the run starts, put back at its end, even after a check fails midway. Sections put back what
+	// they change in the editor, but a note's undo history lasts the whole session, so random Undo and Redo can reach an
+	// earlier run's edits, and git keeps neither of the large table notes (STA-97, 11/22).
+	const notesAtStart = new Map();
+	// Test plans are left out: Brian may be writing in one while a run goes.
+	for (const file of app.vault.getMarkdownFiles()) if (!/Test Plan$/.test(file.basename)) notesAtStart.set(file.path, await app.vault.read(file));
 	// A preview build's switch is off for the sections before the own table's, saved off too, since some sections
 	// turn the plugin off and on again. It's put back as it was at the end.
 	const atStart = app.plugins.plugins['selectable-tables'];
@@ -5211,6 +5217,23 @@
 						const withoutCell = ids.filter((id) => offeredNow(`selectable-tables:table-${id}`));
 						check('Own 78: with no cell selected or open, no table command is offered', withoutCell.length === 0, withoutCell);
 						await restore(view, reportText);
+						// Add row above on the header puts a new header above it, and the table stays one table, with its blank line above.
+						const tablesBefore = models(view).length;
+						const lineAbove = view.state.doc.line(view.state.doc.lineAt(models(view)[0].from).number - 1);
+						view.dispatch({ selection: { anchor: lineAbove.to }, scrollIntoView: true });
+						view.focus();
+						await sleep(250);
+						await key('ArrowRight');
+						await key('Enter');
+						app.commands.executeCommandById('selectable-tables:table-row-before');
+						await sleep(400);
+						await frames(3);
+						const headed = models(view)[0];
+						const headedLines = view.state.doc.lineAt(headed.to).number - view.state.doc.lineAt(headed.from).number + 1;
+						const blankAbove = view.state.doc.line(view.state.doc.lineAt(headed.from).number - 1).text === '';
+						check('Own 78: Add row above on the header puts a new header above it, and the table stays one table', models(view).length === tablesBefore && headedLines === 6 && blankAbove && openAtNow(view) === '0,0', { tables: [tablesBefore, models(view).length], headedLines, blankAbove, open: openAtNow(view) });
+						await leaveAll(view);
+						await restore(view, reportText);
 
 						// Tab and Enter add a row on a fresh press at the table's end, and never on a held key.
 						const rowsNow = () => view.state.doc.toString().split('\n').filter((line) => line.startsWith('|')).length;
@@ -5409,6 +5432,21 @@
 		}
 	} catch (error) {
 		results.push({ name: 'the check script itself', ok: false, detail: String(error && error.stack || error) });
+	}
+	// Notes put back as they were, with no editor holding a change that would save over them.
+	try {
+		const leaf = app.workspace.getLeaf(false);
+		await leaf.openFile(app.vault.getAbstractFileByPath('Watering schedule.md'), { state: { mode: 'source', source: false } });
+		await sleep(300);
+		for (const [path, text] of notesAtStart) {
+			const file = app.vault.getAbstractFileByPath(path);
+			if (file && (await app.vault.read(file)) !== text) {
+				await app.vault.modify(file, text);
+				results.push({ name: `note put back after the run: ${path}`, ok: true });
+			}
+		}
+	} catch (error) {
+		results.push({ name: 'putting the notes back', ok: false, detail: String(error) });
 	}
 	if (previewWasOn) {
 		const plugin = app.plugins.plugins['selectable-tables'];

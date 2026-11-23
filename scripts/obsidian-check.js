@@ -2611,8 +2611,9 @@
 		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too;
 		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells (with
 		// window.__checkCornersOnly too, only its checks against Obsidian's frozen tables, Own 87 to Own 91), with
-		// window.__checkEditsOnly instead, only the section on editing its rows and columns, and with
-		// window.__checkDragsOnly instead, only the section on its drag handles and + buttons.
+		// window.__checkEditsOnly instead, only the section on editing its rows and columns, with
+		// window.__checkDragsOnly instead, only the section on its drag handles and + buttons, and with
+		// window.__checkShadesOnly instead, only the section on its frozen tables' shadows.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3749,7 +3750,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -6529,6 +6530,350 @@
 						if (hadNative) config.nativeMenus = nativeBefore;
 						else delete config.nativeMenus;
 						app.updateUseNativeMenu();
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkShadesOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly) {
+					// --- Shadows under the pinned rows and beside the frozen columns of the plugin's frozen tables (STA-41), on a
+					// computer: each fades by an opacity animation on a timeline the scroll drives. Their opacities come from
+					// computed styles, which follow the timelines, the joins from where each block's shadow lies inside its block,
+					// the look at rest and across joins from the window's own pictures. Run alone with window.__checkOwnOnly,
+					// __checkCellsOnly and __checkShadesOnly all true.
+					preview.use(true);
+					await sleep(400);
+					const touched = ['Frozen tables', 'Frozen table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const port = (view) => view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientTop;
+					const opacity = (el, pseudo) => (el ? parseFloat(getComputedStyle(el, pseudo).opacity) : NaN);
+					const near = (a, b, by = 0.08) => Math.abs(a - b) <= by;
+					const round = (n) => Math.round(n * 100) / 100;
+					const line = parseFloat(getComputedStyle(document.body).getPropertyValue('--table-border-width')) || 1;
+					const named = (view, heading) => {
+						const at = view.state.doc.toString().indexOf(`## ${heading}`);
+						return models(view).find((model) => model.from > at);
+					};
+					const oc = (view) => preview.openCell(view);
+					const pointAt = async ({ x, y }) => {
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+						await sleep(400);
+						await frames(3);
+					};
+					const escape = async () => {
+						for (let i = 0; i < 2; i++) {
+							const event = { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, unmodifiedText: macChar('Escape') };
+							await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+							await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+							await sleep(200);
+						}
+					};
+					// Each block's row shadow in the page: how much of it shows, its fades multiplied, where it lies down from the
+					// pane's top, and the part of it its block doesn't clip.
+					const rowShades = (view, model) => {
+						const out = [];
+						for (const block of model.blocks) {
+							const parts = block?.dom.isConnected ? model.pins.parts.get(block) : null;
+							const shade = parts?.rail ?? parts?.shadeRail;
+							if (!shade) continue;
+							const s = shade.shade.getBoundingClientRect();
+							const b = block.dom.getBoundingClientRect();
+							out.push({ block: block.index, shows: round(opacity(shade.fade) * opacity(shade.fade, '::after')), top: round(s.top - port(view)), from: round(Math.max(s.top, b.top) - port(view)), to: round(Math.min(s.bottom, b.bottom) - port(view)) });
+						}
+						return out;
+					};
+					// The row shadow that shows: the one its block doesn't clip.
+					const rowShade = (view, model) => rowShades(view, model).find((shade) => shade.to > shade.from + 0.5) ?? { shows: 0, top: NaN };
+					const strips = (model) => model.blocks.filter((block) => block?.dom.isConnected).map((block) => model.pins.parts.get(block)?.strip?.box).filter(Boolean);
+					const columnShade = (model) => {
+						const strip = strips(model)[0];
+						if (!strip) return { shows: 0, gap: NaN };
+						const r = strip.getBoundingClientRect();
+						return { shows: round(opacity(strip, '::after')), gap: round(r.left + parseFloat(getComputedStyle(strip, '::after').left) - (r.right - line)) };
+					};
+					// Puts the table's top `down` px above the pane's top, aimed again until it's there: rows drawn take their real
+					// heights.
+					const aimTop = async (view, model, down) => {
+						for (let i = 0; i < 8; i++) {
+							const off = model.blocks[0].table.getBoundingClientRect().top - port(view) + down;
+							if (Math.abs(off) < 0.3) return;
+							view.scrollDOM.scrollTop += off;
+							await frames(3);
+						}
+					};
+					// Puts the table's end `left` px below where the pinned rows start to leave with it.
+					const aimEnd = async (view, model, left) => {
+						for (let i = 0; i < 8; i++) {
+							const off = model.blocks[0].table.getBoundingClientRect().bottom - port(view) - model.pins.room.height - left;
+							if (Math.abs(off) < 0.3) return;
+							view.scrollDOM.scrollTop += off;
+							await frames(3);
+						}
+					};
+					const slideTo = async (model, x) => {
+						const bar = model.sideways().bar;
+						if (bar) bar.scrollLeft = x;
+						await frames(4);
+					};
+					// The window's picture of the pane's top 400 px.
+					const picture = async (view) => {
+						const p = view.scrollDOM.getBoundingClientRect();
+						const shot = await window.electron.remote.getCurrentWebContents().capturePage({ x: Math.round(p.left), y: Math.round(p.top), width: Math.round(p.width) - 12, height: 400 });
+						return shot.toBitmap();
+					};
+					const hidden = document.createElement('style');
+					hidden.textContent = '.selectable-tables-shade-clip, .selectable-tables-strip::after, .selectable-tables-corner::after { display: none !important; }';
+					let view = await open('Frozen tables');
+					await sleep(400);
+					try {
+						// At rest, the shadows draw nothing.
+						const rest = {};
+						for (const [note, heading] of [['Frozen tables', 'Plants'], ['Frozen tables', 'Tools'], ['Frozen table 2000 by 12', '']]) {
+							if (app.workspace.getActiveFile()?.basename !== note) view = await open(note);
+							await sleep(400);
+							const model = heading ? named(view, heading) : models(view)[0];
+							view.dispatch({ effects: view.constructor.scrollIntoView(model.from, { y: 'center' }) });
+							await sleep(300);
+							await aimTop(view, model, -30);
+							await slideTo(model, 0);
+							await sleep(200);
+							const shown = await picture(view);
+							document.head.append(hidden);
+							await frames(4);
+							const taken = await picture(view);
+							hidden.remove();
+							await frames(2);
+							rest[heading || note] = { same: shown.equals(taken), row: rowShade(view, model).shows, column: columnShade(model).shows, pinned: model.pins.pinned };
+						}
+						check('Own 100: at rest, Plants, Tools and the 2,000-row table look the same with their shadows taken out', Object.values(rest).every((r) => r.pinned.rows && r.same && r.row === 0 && !(r.column > 0)), rest);
+
+						view = await open('Frozen tables');
+						await sleep(400);
+						const plants = named(view, 'Plants');
+						view.dispatch({ effects: view.constructor.scrollIntoView(plants.from, { y: 'center' }) });
+						await sleep(300);
+						await slideTo(plants, 0);
+						const down = [];
+						for (const at of [0, 8, 16, 100]) {
+							await aimTop(view, plants, at);
+							down.push([at, rowShade(view, plants)]);
+						}
+						const under = plants.pins.room.height - line;
+						check('Own 101: in Plants, the shadow under the pinned rows fades in over the table\'s first 16 px past the pane\'s top, and lies right under them', down.every(([, s], i) => near(s.shows, [0, 0.5, 1, 1][i])) && Math.abs(down[3][1].top - under) <= 1.5, { down, under });
+						const end = [];
+						for (const left of [16, 8, 0]) {
+							await aimEnd(view, plants, left);
+							end.push([left, rowShade(view, plants)]);
+						}
+						check('Own 102: it fades out over the 16 px before the pinned rows leave with the table\'s end', end.every(([, s], i) => near(s.shows, [1, 0.5, 0][i])), end);
+						await aimTop(view, plants, 100);
+						const side = [];
+						for (const x of [0, 12, 24, 200]) {
+							await slideTo(plants, x);
+							side.push([x, columnShade(plants)]);
+						}
+						check('Own 103: the shadow beside the frozen column fades in over the first 24 px the table moves sideways, beside the column\'s edge', side.every(([, s], i) => near(s.shows, [0, 0.5, 1, 1][i])) && Math.abs(side[3][1].gap) <= 0.5, side);
+
+						// A press under each shadow opens the cell under it, the table moved sideways and rows passing under.
+						const realCellAt = (model, x, y) => {
+							for (const block of model.blocks) {
+								if (!block?.dom.isConnected) continue;
+								for (const cell of Array.from(block.table.querySelectorAll('td, th'))) {
+									const r = cell.getBoundingClientRect();
+									if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) return cell;
+								}
+							}
+							return null;
+						};
+						const presses = {};
+						const pinBottom = port(view) + plants.pins.room.height;
+						const water = plants.blocks[0].table.rows[0].cells[3].getBoundingClientRect();
+						for (const [name, point] of [['row shadow', { x: Math.round(water.left + water.width / 2), y: Math.round(pinBottom + 4) }], ['column shadow', { x: Math.round(strips(plants)[0].getBoundingClientRect().right + 4), y: Math.round(pinBottom + 60) }]]) {
+							const want = realCellAt(plants, point.x, point.y);
+							await pointAt(point);
+							const open = oc(view);
+							presses[name] = { want: want && `${want.parentElement.getAttribute('aria-rowindex')},${want.cellIndex}`, opened: open?.view.dom.closest('td, th') === want, cell: open?.cell };
+							await escape();
+							await slideTo(plants, 200);
+							await aimTop(view, plants, 100);
+						}
+						check('Own 104: a press under the row shadow and under the column shadow opens the cell under it', Object.values(presses).every((p) => p.want && p.opened), presses);
+
+						// Nothing of the plugin's runs as the note scrolls or the table moves sideways: what pins isn't placed again.
+						let placed = 0;
+						const moved = { down: 0, up: 0, sideways: 0 };
+						const measure = plants.pins.measure;
+						plants.pins.measure = function () {
+							placed++;
+							return measure.call(this);
+						};
+						try {
+							const box = plants.blocks[0].dom.getBoundingClientRect();
+							const centre = { x: Math.round(box.left + 300), y: Math.round(port(view) + 250) };
+							const gesture = async (xDistance, yDistance) => {
+								await cdp.sendCommand('Input.synthesizeScrollGesture', { ...centre, xDistance, yDistance, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
+								await sleep(300);
+							};
+							let at = view.scrollDOM.scrollTop;
+							await gesture(0, -300);
+							moved.down = Math.round(view.scrollDOM.scrollTop - at);
+							at = view.scrollDOM.scrollTop;
+							await gesture(0, 300);
+							moved.up = Math.round(at - view.scrollDOM.scrollTop);
+							const slid = plants.sideways().scroll;
+							await gesture(-250, 0);
+							moved.sideways = Math.round(plants.sideways().scroll - slid);
+						} finally {
+							delete plants.pins.measure;
+						}
+						check('Own 105: as the note scrolls and the table moves sideways, what pins and its shadows aren\'t placed again', placed === 0 && moved.down > 100 && moved.up > 100 && moved.sideways !== 0, { placed, moved });
+
+						// Sheds frozen 2 by 2 and moved sideways: a cell open in a pinned row and a frozen column keeps both shadows
+						// at their edges, with the strip under the pinned rows.
+						view.dispatch({ selection: { anchor: 0 } });
+						const shedsAt = view.state.doc.lineAt(named(view, 'Sheds').from);
+						view.dispatch({ changes: { from: shedsAt.from + shedsAt.text.indexOf('Name'), insert: '%%freeze 2 2%% ' } });
+						await sleep(500);
+						const sheds = named(view, 'Sheds');
+						view.dispatch({ effects: view.constructor.scrollIntoView(sheds.from, { y: 'center' }) });
+						await sleep(300);
+						await aimTop(view, sheds, 100);
+						await slideTo(sheds, 200);
+						const shedOne = strips(sheds)[0]?.querySelector('tbody tr.selectable-tables-pinned-row')?.cells[0];
+						if (shedOne) {
+							const r = shedOne.getBoundingClientRect();
+							await pointAt({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) });
+						}
+						const shedOpen = { cell: oc(view)?.cell, row: rowShade(view, sheds), column: columnShade(sheds), under: round(sheds.pins.room.height - line), inside: !!strips(sheds)[0]?.parentElement?.classList.contains('table-wrapper') };
+						await escape();
+
+						// Deep in the 2,000-row table, a press on the pinned header opens it there, and the shadow stays under the rows.
+						view = await open('Frozen table 2000 by 12');
+						await sleep(800);
+						const big = models(view)[0];
+						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(view.state.doc.lineAt(big.from).number + 2 + 520).from, { y: 'start' }) });
+						await sleep(500);
+						await frames(4);
+						const crossing = big.boxes.find((b) => {
+							const r = b.isConnected && b.getBoundingClientRect();
+							return r && r.top <= port(view) && r.bottom > port(view);
+						});
+						const headCopy = crossing?.querySelector('.selectable-tables-copy-table table')?.rows[0]?.cells[2];
+						if (headCopy) {
+							const r = headCopy.getBoundingClientRect();
+							await pointAt({ x: Math.round(r.right - 6), y: Math.round(r.top + r.height / 2) });
+						}
+						const deep = { cell: oc(view)?.cell, row: rowShade(view, big), under: round(big.pins.room.height - line) };
+						await escape();
+						check('Own 106: an open cell in a pinned row, in Sheds moved sideways and deep in the 2,000-row table, leaves the shadows whole at the pinned edges', shedOpen.cell?.row === 1 && shedOpen.cell.column === 0 && shedOpen.inside && near(shedOpen.row.shows, 1) && Math.abs(shedOpen.row.top - shedOpen.under) <= 1.5 && near(shedOpen.column.shows, 1) && Math.abs(shedOpen.column.gap) <= 0.5 && deep.cell?.row === 0 && near(deep.row.shows, 1) && Math.abs(deep.row.top - deep.under) <= 1.5, { shedOpen, deep });
+
+						// The joins: with each of three seams put at points across the shadow, what shows of it is one band right under
+						// the pinned rows, from whichever blocks hold it.
+						const joins = [];
+						for (const k of [0, 1, 4]) {
+							for (const y of [-4, 0, 3, 6, 8, 12]) {
+								const first = (k + 1) * 100;
+								for (let i = 0; i < 10; i++) {
+									const el = big.pins.host.rowElement(first)?.closest('.selectable-tables-own');
+									if (!el?.isConnected) {
+										view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(view.state.doc.lineAt(big.from).number + 2 + first).from, { y: 'start' }) });
+										await sleep(250);
+										await frames(3);
+										continue;
+									}
+									const off = el.getBoundingClientRect().top - port(view) - (big.pins.room.height + y);
+									if (Math.abs(off) < 0.3) break;
+									view.scrollDOM.scrollTop += off;
+									await frames(3);
+								}
+								const parts = rowShades(view, big).filter((s) => s.to > s.from + 0.01 && s.shows > 0.01).sort((a, b) => a.from - b.from);
+								const joined = parts.every((s, i) => i === 0 || Math.abs(s.from - parts[i - 1].to) <= 0.6);
+								const span = parts.length ? round(parts[parts.length - 1].to - parts[0].from) : 0;
+								joins.push({ k, y, ok: joined && parts.every((s) => near(s.shows, 1, 0.02)) && Math.abs(span - (8 + line)) <= 0.6 && Math.abs(parts[0].from - (big.pins.room.height - line)) <= 1.5, parts });
+							}
+						}
+						check('Own 107: across the 2,000-row table\'s joins, the shadow under the pinned rows is one band, whole, with none at a block\'s top', joins.every((j) => j.ok), joins.filter((j) => !j.ok));
+
+						// The same joins as the screen shows them, scrolled with real input: in every frame, the strip of pixels just
+						// inside a cell's end, where no text is drawn, is darker right under the pinned rows than below, and nowhere
+						// below that is there a dark band taller than a line.
+						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(view.state.doc.lineAt(big.from).number + 2 + 195).from, { y: 'start' }) });
+						await sleep(500);
+						await frames(4);
+						const frameShots = [];
+						const onFrame = (_event, method, params) => {
+							if (method !== 'Page.screencastFrame') return;
+							frameShots.push(params.data);
+							cdp.sendCommand('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
+						};
+						cdp.on('message', onFrame);
+						const scrollAt = { x: Math.round(view.scrollDOM.getBoundingClientRect().left + 300), y: Math.round(port(view) + 300) };
+						try {
+							await cdp.sendCommand('Page.startScreencast', { format: 'png', everyNthFrame: 1, maxWidth: window.innerWidth, maxHeight: window.innerHeight });
+							await cdp.sendCommand('Input.synthesizeScrollGesture', { ...scrollAt, xDistance: 0, yDistance: -5400, speed: 1500, gestureSourceType: 'mouse', preventFling: true });
+							await sleep(400);
+						} finally {
+							await cdp.sendCommand('Page.stopScreencast').catch(() => {});
+							cdp.removeListener('message', onFrame);
+						}
+						// The end of the first column past the frozen one that ends inside the table's box: a cell's padding is there.
+						const shownBlock = big.blocks.find((b) => b?.dom.isConnected);
+						const boxRight = shownBlock ? shownBlock.dom.getBoundingClientRect().right - 10 : 0;
+						const drawnRow = Array.from(shownBlock?.table.rows ?? []).find((tr) => tr.cells.length > 1 && tr.getBoundingClientRect().height > 0);
+						const column = Array.from(drawnRow?.cells ?? []).slice(1).map((cell) => cell.getBoundingClientRect()).find((r) => r.right < boxRight);
+						const sampleX = column ? column.right - 4 : 0;
+						const top = port(view) + big.pins.room.height;
+						const bottom = view.scrollDOM.getBoundingClientRect().bottom - 40;
+						const screens = { frames: frameShots.length, faint: 0, bands: 0 };
+						for (const data of frameShots) {
+							const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: 'image/png' }));
+							const scale = bitmap.width / window.innerWidth;
+							const canvas = new OffscreenCanvas(1, bitmap.height);
+							const ctx = canvas.getContext('2d');
+							ctx.drawImage(bitmap, Math.round(sampleX * scale), 0, 1, bitmap.height, 0, 0, 1, bitmap.height);
+							const pixels = ctx.getImageData(0, 0, 1, bitmap.height).data;
+							const luma = (y) => {
+								const i = Math.round(y * scale) * 4;
+								return (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+							};
+							const below = [];
+							for (let y = top + 24; y < top + 40; y += 1) below.push(luma(y));
+							below.sort((a, b) => a - b);
+							const background = below[below.length >> 1];
+							if (!(luma(top + 2) < background - 4)) screens.faint++;
+							let run = 0;
+							for (let y = top + 12; y < bottom; y += 1 / scale) {
+								run = luma(y) < background - 4 ? run + 1 : 0;
+								if (run > 3 * scale) {
+									screens.bands++;
+									break;
+								}
+							}
+						}
+						check('Own 107: scrolled with real input across two joins, every frame the screen gets shows the shadow under the pinned rows and no band anywhere below', sampleX > 0 && screens.frames > 20 && screens.faint === 0 && screens.bands === 0, { ...screens, sampleX });
+						results.push({ name: `Own 107 frames read: ${screens.frames}, at x ${Math.round(sampleX)}`, ok: true });
+
+						// With the switch off, Obsidian's own frozen table has none of it.
+						preview.use(false);
+						await sleep(500);
+						view = await open('Frozen tables');
+						await sleep(500);
+						check('Own 108: with the switch off, no shadow is drawn anywhere', !document.querySelector('.selectable-tables-shade-clip, .selectable-tables-shade-rail, .selectable-tables-strip'), document.querySelectorAll('.selectable-tables-shade-clip').length);
+						preview.use(true);
+						await sleep(500);
+						view = await open('Frozen tables');
+						await sleep(400);
+						check('Own 109: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						hidden.remove();
 						view = await open('Watering schedule');
 						await sleep(300);
 						for (const name of touched) {

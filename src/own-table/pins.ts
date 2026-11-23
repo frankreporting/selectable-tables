@@ -28,6 +28,11 @@ import { cellsOf } from './shape';
  * An open cell of the frozen rows has its editor in the real row, in the first block. In a table of more blocks that
  * row is carried down with the note while its cell is open, by an animation on the note's scroll, so it lies where the
  * copies pin, over every block, and its copies hide (STA-93).
+ *
+ * A soft shadow, with a line, lies under the pinned rows and beside the frozen columns while cells pass under them
+ * (STA-41). Each fades by an opacity animation on a timeline the scroll drives, so nothing runs as the note or the
+ * table moves: the rows' on a view timeline of each block's table, the columns' on the table's scrollbar. The rows'
+ * rides each block's rail under its copy, and a table of one block gets a rail for it alone.
  */
 
 /** On a block while its table pins anything: styles.css paints what pins, with the theme's colors. */
@@ -79,6 +84,23 @@ const CARRY_TO = '--selectable-tables-carry-to';
 const CARRY_TRAVEL = '--selectable-tables-carry-travel';
 /** On the first block while it carries a row: it draws above the later blocks, and lets the row out of its box. */
 const CARRIES_CLASS = 'selectable-tables-carries';
+/**
+ * The shadow under the pinned rows (STA-41), in a rail's copy: a box that clips it, from the table's start where frozen
+ * columns pin, since the box's padding beside them is outside the table, else from the block's edge, where the table
+ * moved sideways passes; the shadow, which moves sideways with the table; and in it a box that fades in as the table's
+ * top passes where rows pin, on the first block, and out before the rows leave with the table's end, on the last.
+ * Between them it shows whole. A table of one block has a rail for the shadow alone.
+ */
+const SHADE_CLIP_CLASS = 'selectable-tables-shade-clip';
+const SHADE_CLASS = 'selectable-tables-shade';
+const FADE_CLASS = 'selectable-tables-shade-fade';
+const FADES_IN_CLASS = 'selectable-tables-fades-in';
+const FADES_OUT_CLASS = 'selectable-tables-fades-out';
+const SHADE_RAIL_CLASS = 'selectable-tables-shade-rail';
+/** On a block while its rows pin: how tall they are together, for the shadow's place and its fade. */
+const PINNED_VARIABLE = '--selectable-tables-pinned';
+/** How deep the shadow under the pinned rows is, as styles.css draws it (`--selectable-tables-shade-depth`). */
+const SHADE_DEPTH = 8;
 
 
 const NONE: Freeze = { rows: 0, columns: 0 };
@@ -164,11 +186,20 @@ interface Strip extends Part {
 	at: StripAt | null;
 }
 
+/** The shadow under the pinned rows, the box that clips it, and its box that fades (`SHADE_CLASS`). */
+interface Shade {
+	clip: HTMLDivElement;
+	shade: HTMLDivElement;
+	fade: HTMLDivElement;
+}
+
 /** What one block pins. */
 interface Parts {
 	strip: Strip | null;
 	/** `bottom` is where its rail ends, as `railOf` has it, kept for when the first block stops carrying a row. */
-	rail: { box: HTMLDivElement; copy: HTMLDivElement; slider: HTMLDivElement; table: Part; corner: Part | null; source: number; bottom: string } | null;
+	rail: ({ box: HTMLDivElement; copy: HTMLDivElement; slider: HTMLDivElement; table: Part; corner: Part | null; source: number; bottom: string } & Shade) | null;
+	/** A table of one block's rail for the shadow alone: its real rows pin, so it has no copy. */
+	shadeRail: ({ box: HTMLDivElement } & Shade) | null;
 }
 
 /** What placing the pins reads from the page. */
@@ -201,6 +232,27 @@ function part(parent: HTMLElement, cls: string, holding: boolean): Part {
 	const thead = table.createEl('thead');
 	const tbody = table.createEl('tbody');
 	return { box, table, colgroup, thead, tbody, applied: '' };
+}
+
+/** The shadow under the pinned rows, in a rail's copy. */
+function shadeIn(copy: HTMLDivElement): Shade {
+	const clip = copy.createDiv(SHADE_CLIP_CLASS);
+	const shade = clip.createDiv(SHADE_CLASS);
+	const fade = shade.createDiv(FADE_CLASS);
+	return { clip, shade, fade };
+}
+
+/**
+ * Places a block's shadow under the table's rows, as wide as the table, clipped from the table's start while frozen
+ * columns pin, and says which ways it fades.
+ */
+function placeShade(at: Shade, start: number, width: string, columns: boolean, first: boolean, last: boolean): void {
+	const from = columns ? start : 0;
+	setStyle(at.clip, 'inset-inline-start', px(from));
+	setStyle(at.shade, 'inset-inline-start', px(start - from));
+	setStyle(at.shade, 'width', width);
+	at.fade.toggleClass(FADES_IN_CLASS, first);
+	at.fade.toggleClass(FADES_OUT_CLASS, last);
 }
 
 function filler(): HTMLTableCellElement {
@@ -942,6 +994,7 @@ export class Pins {
 			dom.toggleClass(PINS_CLASS, any);
 			dom.toggleClass(PIN_ROWS_CLASS, this.fit.rows);
 			dom.toggleClass(SINGLE_CLASS, single);
+			setStyle(dom, PINNED_VARIABLE, this.fit.rows ? px(pinned) : null);
 			for (const [name, value] of read.paint?.variables ?? []) setStyle(dom, name, any ? value : null);
 			const parts = this.partsOf(block);
 			// The first block's own rows pin in a table of one block. In a table of more blocks the copies pin, and an open
@@ -985,12 +1038,15 @@ export class Pins {
 			// A copy of the frozen rows, in a table of more blocks.
 			if (!single && this.fit.rows) {
 				const rail = (parts.rail ??= this.makeRail(dom));
-				const { top: railTop, bottom: railBottom } = railOf({ first: block.index === 0, last: block.index === host.blockCount - 1, tableTop: top, tableBottom: bottom, height }, pinned);
+				const first = block.index === 0;
+				const last = block.index === host.blockCount - 1;
+				const { top: railTop, bottom: railBottom } = railOf({ first, last, tableTop: top, tableBottom: bottom, height }, pinned, SHADE_DEPTH);
 				setStyle(rail.box, 'top', px(railTop));
 				// `carry` ends the first block's rail at its end while it carries a row.
 				rail.bottom = px(railBottom);
 				setStyle(rail.box, 'bottom', rail.bottom);
 				setStyle(rail.slider, 'inset-inline-start', px(start));
+				placeShade(rail, start, host.tableWidth, this.fit.columns, first, last);
 				this.shape(rail.table, host.columns);
 				setStyle(rail.table.table, 'width', host.tableWidth);
 				if (rail.source !== this.source.generation) {
@@ -1036,6 +1092,18 @@ export class Pins {
 				parts.rail.box.remove();
 				parts.rail = null;
 			}
+			// A table of one block's shadow under its pinned rows, on a rail of its own, which starts at the table's top and
+			// ends the rows' height above its end, as the copy's would.
+			if (single && this.fit.rows) {
+				const rail = (parts.shadeRail ??= this.makeShadeRail(dom));
+				const { top: railTop, bottom: railBottom } = railOf({ first: true, last: true, tableTop: top, tableBottom: bottom, height }, pinned);
+				setStyle(rail.box, 'top', px(railTop));
+				setStyle(rail.box, 'bottom', px(railBottom));
+				placeShade(rail, start, host.tableWidth, this.fit.columns, true, true);
+			} else if (parts.shadeRail) {
+				parts.shadeRail.box.remove();
+				parts.shadeRail = null;
+			}
 		}
 		if (rebuilt) this.paintFrozenMatches();
 		this.marks();
@@ -1047,7 +1115,7 @@ export class Pins {
 
 	private partsOf(block: PinBlock): Parts {
 		let parts = this.parts.get(block);
-		if (!parts) this.parts.set(block, (parts = { strip: null, rail: null }));
+		if (!parts) this.parts.set(block, (parts = { strip: null, rail: null, shadeRail: null }));
 		return parts;
 	}
 
@@ -1057,7 +1125,14 @@ export class Pins {
 		const copy = box.createDiv(COPY_CLASS);
 		const slider = copy.createDiv(SLIDER_CLASS);
 		const table = part(slider, 'selectable-tables-copy-table', this.holding);
-		return { box, copy, slider, table, corner: null, source: -1, bottom: '' };
+		return { box, copy, slider, table, corner: null, source: -1, bottom: '', ...shadeIn(copy) };
+	}
+
+	/** A rail holding only the shadow, for a table of one block, after its table so it lies over the pinned rows' edge. */
+	private makeShadeRail(dom: HTMLElement): NonNullable<Parts['shadeRail']> {
+		const box = dom.createDiv({ cls: [RAIL_CLASS, SHADE_RAIL_CLASS] });
+		box.setAttribute('aria-hidden', 'true');
+		return { box, ...shadeIn(box.createDiv(COPY_CLASS)) };
 	}
 
 	/** Columns and width for a small table of the first `columns` columns. */
@@ -1170,11 +1245,13 @@ export class Pins {
 			if (!block) continue;
 			block.dom.removeClass(PINS_CLASS, PIN_ROWS_CLASS, SINGLE_CLASS);
 			for (const [name] of this.paint?.variables ?? []) block.dom.style.removeProperty(name);
+			block.dom.style.removeProperty(PINNED_VARIABLE);
 			this.realRows(block, null);
 			const parts = this.parts.get(block);
 			parts?.strip?.box.parentElement?.removeClass(HOLDS_STRIP_CLASS);
 			parts?.strip?.box.remove();
 			parts?.rail?.box.remove();
+			parts?.shadeRail?.box.remove();
 			this.parts.delete(block);
 		}
 		this.fit = { rows: false, columns: false };

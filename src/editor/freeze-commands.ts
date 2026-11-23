@@ -202,8 +202,12 @@ export const tableMenus = ViewPlugin.define((view) => {
 	// menu as Obsidian's table menu does. Its Row, Column and Sort items go in as the event starts, as a cell's own
 	// listener adds them in Obsidian's table, so they come before a link's items, which Obsidian's editor adds from the
 	// note's content, and the menu orders sections it doesn't know by when their items came.
+	// The cell the event started on: selecting it can close an open header cell, which draws the header row anew, and
+	// takes the event's target out of the page before the freeze items go in.
+	let caught: { event: MouseEvent; place: Place | null | undefined } | null = null;
 	const onOwnMenu = (event: MouseEvent) => {
 		const place = ownPlace(event.target as Element);
+		caught = { event, place };
 		if (!place) return;
 		// The cell is selected first, so it shows which cell the menu is for. An open cell's empty space keeps it open.
 		const open = openCell(view)?.place.cell;
@@ -212,7 +216,8 @@ export const tableMenus = ViewPlugin.define((view) => {
 	};
 	const onMenu = (event: MouseEvent) => {
 		const target = event.target as Element;
-		const place = ownPlace(target);
+		const place = caught?.event === event ? caught.place : ownPlace(target);
+		caught = null;
 		if (place !== undefined) {
 			// The freeze items come last, on the plugin's table as on Obsidian's.
 			if (place) addFreezeItems(Menu.forEvent(event), view, place);

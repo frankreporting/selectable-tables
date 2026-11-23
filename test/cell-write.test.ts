@@ -112,6 +112,9 @@ test('an open cell\'s row is found again where its line went, after rows are put
 	assert.equal(movedRow(before, whole(before), added, whole(added), 3), 4);
 	// Taken out again.
 	assert.equal(movedRow(added, whole(added), before, whole(before), 2), 1);
+	// A new row wider than a column pads the table again.
+	const padded = doc('| a     | b |', '| ----- | - |', '| wider | n |', '| 1     | x |', '| 2     | y |', '| 3     | z |');
+	assert.equal(movedRow(before, whole(before), padded, whole(padded), 1), 2);
 	// A line that changed, or the header, stays at its row.
 	const edited = doc('| a | b |', '| - | - |', '| new | n |', '| 1 | xx |', '| 2 | y |', '| 3 | z |');
 	assert.equal(movedRow(before, whole(before), edited, whole(edited), 1), 1);

@@ -5292,6 +5292,27 @@
 								await rightClick('note link', () => links('Table 50 by 8', 'Row 3'));
 								await atLine(v, hl + 2 + 600);
 								await rightClick('note link where it\'s pinned', () => links('Table 50 by 8', 'Row 1'));
+								// A header cell right-clicked while another header cell is open, which closing draws anew.
+								const f = await open('Frozen tables');
+								await sleep(400);
+								const headerAt = f.state.doc.lineAt(f.state.doc.toString().indexOf('| %%freeze 2 1%%')).number;
+								f.dispatch({ selection: { anchor: f.state.doc.line(headerAt - 2).from } });
+								f.dispatch({ effects: f.constructor.scrollIntoView(f.state.doc.line(headerAt).from, { y: 'start', yMargin: 100 }) });
+								await sleep(600);
+								await frames(3);
+								const head = (text) => Array.from(f.contentDOM.querySelectorAll('th')).find((th) => th.textContent.trim() === text && !th.closest('.selectable-tables-strip, .selectable-tables-rail') && shows(th));
+								const bedCell = head('Bed');
+								if (bedCell) await pointAt(middle(bedCell, 8));
+								await sleep(300);
+								const openBefore = !!f.contentDOM.querySelector('.cm-table-widget .cm-editor');
+								const sown = head('Sown');
+								if (openBefore && sown) {
+									await pointAt(middle(sown, 8), 'right');
+									await sleep(500);
+									shown['header cell, another open'] = { menus: menus().length, items: items() };
+									await closeMenu();
+								} else shown['header cell, another open'] = `open ${openBefore}, Sown ${!!sown}`;
+								await leave();
 								return shown;
 							});
 						} finally {
@@ -5299,8 +5320,8 @@
 							else delete config.nativeMenus;
 							app.updateUseNativeMenu();
 						}
-						const menuMatches = ['web link', 'note link', 'note link where it\'s pinned'].every((what) => linkMenus.own[what]?.menus === 1 && linkMenus.off[what]?.menus === 1 && linkMenus.own[what].items === linkMenus.off[what].items);
-						check('Own 89: a right-click on a web link, a link to a note, and a link in a pinned copy deep down shows one menu with the same items, in the same order, as with the switch off', menuMatches, linkMenus);
+						const menuMatches = ['web link', 'note link', 'note link where it\'s pinned', 'header cell, another open'].every((what) => linkMenus.own[what]?.menus === 1 && linkMenus.off[what]?.menus === 1 && linkMenus.own[what].items === linkMenus.off[what].items);
+						check('Own 89: a right-click on a web link, a link to a note, a link in a pinned copy deep down, and a header cell while another is open shows one menu with the same items, in the same order, as with the switch off', menuMatches, linkMenus);
 
 						// 4. A row put in under the header and taken out again, as Sync writes the file and as a second pane edits the
 						// note, while a cell of Row 1, pinned, is open: the cell stays open in Row 1 with its caret, typing goes there,

@@ -230,3 +230,46 @@ test('Add row above on the header stays one table: the blank line above it is le
 	assert.notDeepEqual(blankLinesAbove(state.update({ changes }), [table]), []);
 	assert.deepEqual(blankLinesAbove(state.update({ changes, annotations: writesTable.of('rows') }), [table]), []);
 });
+
+test('a dragged row lands on the row it was let go on, its first cell after, as Obsidian\'s moveRow has it', () => {
+	const down = edit(plants, 'row-move', cell(1, 2), { to: 3 });
+	assert.deepEqual(down.lines?.slice(2), ['| Basil  | Balcony | 9     |', '| Cactus | Office  | 100   |', '| Fern   | Kitchen | 10    |']);
+	assert.deepEqual(down.cell, cell(3, 0));
+	const up = edit(plants, 'row-move', cell(3, 1), { to: 1 });
+	assert.deepEqual(up.lines?.slice(2), ['| Cactus | Office  | 100   |', '| Fern   | Kitchen | 10    |', '| Basil  | Balcony | 9     |']);
+	assert.deepEqual(up.cell, cell(1, 0));
+	assert.equal(editTable(plants, 'row-move', cell(2, 0), { to: 2 }), null);
+	// Past the table's end, it goes last.
+	assert.deepEqual(edit(plants, 'row-move', cell(1, 0), { to: 9 }).cell, cell(3, 0));
+});
+
+test('a row dragged into the header becomes the header, and the freeze mark stays in the header', () => {
+	assert.deepEqual(edit(plants, 'row-move', cell(2, 0), { to: 0 }).lines?.slice(0, 3), ['| Basil  | Balcony | 9     |', '| ------ | ------- | ----- |', '| Plant  | Room    | Count |']);
+	const header = edit(frozen, 'row-move', cell(0, 0), { to: 2 }).lines!;
+	assert.equal(header[0], '| %%freeze 1 1%% Mint | North |');
+	assert.equal(header[3], '| Name                | Bed   |');
+});
+
+test('a dragged row counts rows as the plugin draws them, a row of only dashes included', () => {
+	const dashed = ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |', '| ----- | ---- |', '| Mint  | Den  |', '| Sage  | Loft |'];
+	assert.deepEqual(edit(dashed, 'row-move', cell(4, 0), { to: 1 }).lines, ['| Plant | Room |', '| ----- | ---- |', '| Sage  | Loft |', '| Fern  | Hall |', '| Mint  | Den  |']);
+});
+
+test('a dragged column lands on the column it was let go on, its header cell after, with its alignment', () => {
+	const aligned = ['| A   |   B | C   |', '| :-- | --: | --- |', '| x   |   y | z   |'];
+	const right = edit(aligned, 'col-move', cell(2, 0), { to: 2 });
+	assert.deepEqual(right.lines, ['|   B | C   | A   |', '| --: | --- | :-- |', '|   y | z   | x   |']);
+	assert.deepEqual(right.cell, cell(0, 2));
+	assert.equal(editTable(aligned, 'col-move', cell(0, 1), { to: 1 }), null);
+	assert.equal(edit(frozen, 'col-move', cell(1, 0), { to: 1 }).lines![0], '| Bed   | %%freeze 1 1%% Name |');
+});
+
+test('the + buttons add a row at the end, at its first cell, and a column at the end with no alignment, at its header', () => {
+	const row = edit(plants, 'row-end', cell(1, 2));
+	assert.deepEqual(row.lines?.slice(-2), ['| Cactus | Office  | 100   |', '|        |         |       |']);
+	assert.deepEqual(row.cell, cell(4, 0));
+	const aligned = ['| A  |', '| -: |', '| x  |'];
+	const column = edit(aligned, 'col-end', cell(1, 0));
+	assert.deepEqual(column.lines, ['|   A |     |', '| --: | --- |', '|   x |     |']);
+	assert.deepEqual(column.cell, cell(0, 1));
+});

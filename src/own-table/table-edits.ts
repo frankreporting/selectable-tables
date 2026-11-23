@@ -10,7 +10,10 @@ import { type Alignment, alignmentOf, CELL_PADDING, type Cell, delimiter, MIN_CO
  * were read with: Obsidian works them out as it reads a table, and an edit that takes a row out doesn't narrow them.
  */
 
-/** The edits, by the names of Obsidian's commands, with its two sorts. */
+/**
+ * The edits, by the names of Obsidian's commands, with its two sorts, a drag's moves, which take the row or column to go
+ * to (`EditOptions.to`), and the + buttons' adds at the table's end.
+ */
 export type TableEdit =
 	| 'row-before'
 	| 'row-after'
@@ -28,10 +31,14 @@ export type TableEdit =
 	| 'col-align-center'
 	| 'col-align-right'
 	| 'sort-az'
-	| 'sort-za';
+	| 'sort-za'
+	| 'row-move'
+	| 'col-move'
+	| 'row-end'
+	| 'col-end';
 
 /** The edits that add a row or a column: the new one's cell opens afterwards, ready to type in, as in Obsidian. */
-export const ADDS: ReadonlySet<TableEdit> = new Set(['row-before', 'row-after', 'col-before', 'col-after']);
+export const ADDS: ReadonlySet<TableEdit> = new Set(['row-before', 'row-after', 'col-before', 'col-after', 'row-end', 'col-end']);
 
 /** A table's cells as Obsidian's table editor holds them, each column's alignment, and the width it's written at. */
 export interface Grid {
@@ -99,10 +106,14 @@ export interface Edited {
 	from?: number[];
 }
 
-/** What an edit needs besides the table: which way the table reads, for Align left and right, and a cell's shown text, for Sort. */
+/**
+ * What an edit needs besides the table: which way the table reads, for Align left and right, a cell's shown text, for
+ * Sort, and where a drag puts its row or column: a row as the plugin's table draws them, the header being 0.
+ */
 export interface EditOptions {
 	rtl?: boolean;
 	shown?: (markdown: string) => string;
+	to?: number;
 }
 
 /** Sorts as Obsidian's table does: case and accents aside, and numbers in number order. */
@@ -162,6 +173,21 @@ export function editTable(lines: readonly string[], edit: TableEdit, { row, colu
 			to = { row: at, column };
 			break;
 		}
+		case 'row-move': {
+			// A row dragged into place, as Obsidian's `moveRow` puts it: at the row it was let go on, its first cell after.
+			const at = clamp(grid.drawn[clamp(options.to ?? row, 0, grid.drawn.length - 1)] ?? 0, 0, rows.length - 1);
+			if (at === row) return null;
+			move(rows, row, at);
+			move(origins, row, at);
+			to = { row: at, column: 0 };
+			break;
+		}
+		case 'row-end':
+			// The + below the table: a row at its end, and its first cell.
+			rows.push(alignments.map(() => ''));
+			origins.push(-1);
+			to = { row: rows.length - 1, column: 0 };
+			break;
 		case 'row-delete':
 			if (onDashes) break;
 			rows.splice(row, 1);
@@ -191,6 +217,23 @@ export function editTable(lines: readonly string[], edit: TableEdit, { row, colu
 			to = { row, column: at };
 			break;
 		}
+		case 'col-move': {
+			// A column dragged into place, as Obsidian's `moveColumn` puts it: at the column it was let go on, its header after.
+			const at = clamp(options.to ?? column, 0, columns - 1);
+			if (at === column) return null;
+			move(alignments, column, at);
+			move(widths, column, at);
+			for (const cells of rows) move(cells, column, at);
+			to = { row: 0, column: at };
+			break;
+		}
+		case 'col-end':
+			// The + at the table's side: a column at its end with no alignment, and its header cell.
+			alignments.push(null);
+			widths.push(MIN_COLUMN_WIDTH);
+			for (const cells of rows) cells.push('');
+			to = { row: 0, column: columns };
+			break;
 		case 'col-delete':
 			if (columns === 1) return { lines: null, cell: { row: 0, column: 0 } };
 			alignments.splice(column, 1);

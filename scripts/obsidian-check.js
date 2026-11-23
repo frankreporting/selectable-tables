@@ -2610,8 +2610,9 @@
 		// --- Own table (preview builds only): the plugin draws Live Preview tables itself, behind its switch. Run
 		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too;
 		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells (with
-		// window.__checkCornersOnly too, only its checks against Obsidian's frozen tables, Own 87 to Own 91), and with
-		// window.__checkEditsOnly instead, only the section on editing its rows and columns.
+		// window.__checkCornersOnly too, only its checks against Obsidian's frozen tables, Own 87 to Own 91), with
+		// window.__checkEditsOnly instead, only the section on editing its rows and columns, and with
+		// window.__checkDragsOnly instead, only the section on its drag handles and + buttons.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3746,7 +3747,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -6005,6 +6006,475 @@
 						check('Own 81: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						await closeMenus();
+						if (hadNative) config.nativeMenus = nativeBefore;
+						else delete config.nativeMenus;
+						app.updateUseNativeMenu();
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkDragsOnly) && !window.__checkEditsOnly) {
+					// --- Drag handles and + buttons on the plugin's table (STA-98): Obsidian's grips on each row and column and its
+					// + buttons, rebuilt, each against Obsidian's own table with the switch off. Real presses and pointer moves
+					// through the window's debugger. Run alone with window.__checkOwnOnly, __checkCellsOnly and __checkDragsOnly all
+					// true.
+					const at = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+					const mouse = (type, p, buttons = 1, button = 'left') => cdp.sendCommand('Input.dispatchMouseEvent', { type, ...at(p), button, buttons, clickCount: 1 });
+					const hoverAt = async (p) => {
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...at(p), button: 'none', buttons: 0 });
+						await sleep(250);
+					};
+					const press = async (p, button = 'left') => {
+						await hoverAt(p);
+						await mouse('mousePressed', p, button === 'left' ? 1 : 2, button);
+						await frames(2);
+					};
+					const release = async (p, button = 'left') => {
+						await mouse('mouseReleased', p, 0, button);
+						await sleep(450);
+						await frames(3);
+					};
+					// A pressed pointer moved to `to` in steps, a frame each, as a hand moves it.
+					const glide = async (from, to, steps = 10) => {
+						for (let i = 1; i <= steps; i++) {
+							await mouse('mouseMoved', { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps });
+							await frames(1);
+						}
+					};
+					const centre = (el) => {
+						const r = el.getBoundingClientRect();
+						return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+					};
+					const codes = { Escape: 27 };
+					const key = async (name, { meta, shift } = {}) => {
+						const modifiers = (meta ? 4 : 0) | (shift ? 8 : 0);
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: codes[name] ?? name.toUpperCase().charCodeAt(0), modifiers, unmodifiedText: macChar(name), text: '' };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await sleep(300);
+					};
+					const leaveAll = async (view) => {
+						for (let i = 0; i < 3; i++) await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					const tableAt = (view, heading) => {
+						const start = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						return models(view).find((model) => model.from > start);
+					};
+					// A drawn cell, the plugin's or Obsidian's, the header being row 0.
+					const cellOf = (view, on, heading, row, column) => {
+						if (on) return tableAt(view, heading)?.cellElement({ row, column }) ?? null;
+						const start = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						const widget = Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget')).find((el) => view.posAtDOM(el) > start);
+						return widget?.querySelector('table')?.rows[row]?.cells[column] ?? null;
+					};
+					const gripOf = (view, on, heading, kind, index) => (kind === 'row' ? cellOf(view, on, heading, index, 0) : cellOf(view, on, heading, 0, index))?.querySelector(`:scope > .table-${kind === 'row' ? 'row' : 'col'}-drag-handle`) ?? null;
+					const widgetOf = (view, on, heading) => (on ? tableAt(view, heading)?.boxes.find((box) => box.isConnected) : cellOf(view, false, heading, 0, 0)?.closest('.cm-table-widget')) ?? null;
+					const menusShown = () => Array.from(document.querySelectorAll('.menu'));
+					const titlesOf = (menu) => Array.from(menu?.querySelectorAll('.menu-item') ?? []).map((item) => item.querySelector('.menu-item-title')?.textContent ?? '');
+					const closeMenus = async () => {
+						for (let i = 0; i < 3 && menusShown().length; i++) {
+							menusShown().pop()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+							await sleep(200);
+						}
+					};
+					const tableText = (view, heading) => {
+						const model = tableAt(view, heading);
+						return model ? view.state.doc.sliceString(model.from, model.to) : null;
+					};
+					const touched = ['Two report tables', 'Frozen tables', 'Table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const config = app.vault.config;
+					const hadNative = Object.hasOwn(config, 'nativeMenus');
+					const nativeBefore = config.nativeMenus;
+					let view;
+					try {
+						config.nativeMenus = false;
+						app.updateUseNativeMenu();
+
+						// Own 92: the grips and + buttons, where Obsidian's own table has them, showing on hover.
+						const placesFor = async (on) => {
+							preview.use(on);
+							await sleep(400);
+							view = await open('Two report tables');
+							await sleep(300);
+							await leaveAll(view);
+							const widget = widgetOf(view, on, null);
+							const table = widget.querySelector('table').getBoundingClientRect();
+							const rel = (el) => {
+								if (!el) return null;
+								const r = el.getBoundingClientRect();
+								return [r.left - table.left, r.top - table.top, r.width, r.height].map((v) => Math.round(v * 10) / 10);
+							};
+							const out = {};
+							for (const [name, el] of [['basil', gripOf(view, on, null, 'row', 2)], ['room', gripOf(view, on, null, 'column', 1)], ['below', widget.querySelector('.table-row-btn')], ['side', widget.querySelector('.table-col-btn')]]) {
+								out[name] = { box: rel(el), resting: el && getComputedStyle(el).opacity };
+								if (el) await hoverAt(centre(el));
+								await sleep(200);
+								out[name].hovered = el && getComputedStyle(el).opacity;
+								out[name].hit = !!el && document.elementFromPoint(centre(el).x, centre(el).y)?.closest('.table-row-drag-handle, .table-col-drag-handle, .table-row-btn, .table-col-btn') === el;
+								out[name].tip = el?.getAttribute('aria-label') ?? null;
+							}
+							await hoverAt({ x: 5, y: 5 });
+							return out;
+						};
+						const placesOff = await placesFor(false);
+						const placesOn = await placesFor(true);
+						const within = (a, b) => !!a && !!b && a.every((v, i) => Math.abs(v - b[i]) <= 1);
+						const named = ['basil', 'room', 'below', 'side'];
+						check('Own 92: a row\'s grip, a column\'s grip, the + below and the + at the side sit where Obsidian\'s own table has them, within 1 px', named.every((n) => within(placesOn[n].box, placesOff[n].box)), { on: placesOn, off: placesOff });
+						check('Own 92: each is hidden at rest and shows on hover, and a press there reaches it', named.every((n) => placesOn[n].resting === '0' && placesOn[n].hovered === '1' && placesOn[n].hit), placesOn);
+						check('Own 92: the + buttons say what they do, as Obsidian\'s do', placesOn.below.tip === placesOff.below.tip && placesOn.side.tip === placesOff.side.tip && !!placesOn.below.tip, { on: [placesOn.below.tip, placesOn.side.tip], off: [placesOff.below.tip, placesOff.side.tip] });
+
+						// Own 93: dragging Cactus above Fern, then Room past Notes, against the same drags with the switch off.
+						const dragsFor = async (on) => {
+							preview.use(on);
+							await sleep(400);
+							view = await open('Two report tables');
+							await sleep(300);
+							await leaveAll(view);
+							const text = view.state.doc.toString();
+							const out = {};
+							const cactus = gripOf(view, on, null, 'row', 3);
+							const from = centre(cactus);
+							await press(from);
+							const fern = cellOf(view, on, null, 1, 0).getBoundingClientRect();
+							const to = { x: from.x, y: fern.top + fern.height / 2 };
+							await glide(from, to);
+							const line = view.contentDOM.querySelector('.table-drag-target.mod-row');
+							out.rowLine = line ? Math.round(line.getBoundingClientRect().top + line.getBoundingClientRect().height / 2 - fern.top) : null;
+							out.dragging = !!view.contentDOM.querySelector('.cm-table-widget.is-dragging');
+							await release(to);
+							out.afterRow = view.state.doc.toString();
+							out.cellAfterRow = on ? tableAt(view, null)?.cell ?? null : undefined;
+							out.leftOver = view.contentDOM.querySelectorAll('.table-drag-target, .selectable-tables-dragged, .cm-table-widget.is-dragging').length;
+							await key('z', { meta: true });
+							out.undoneRow = view.state.doc.toString() === text;
+							await leaveAll(view);
+							const room = gripOf(view, on, null, 'column', 1);
+							const start = centre(room);
+							await press(start);
+							const notes = cellOf(view, on, null, 0, 2).getBoundingClientRect();
+							const end = { x: notes.left + notes.width / 2, y: start.y };
+							await glide(start, end);
+							const colLine = view.contentDOM.querySelector('.table-drag-target.mod-col');
+							out.colLine = colLine ? Math.round(colLine.getBoundingClientRect().left + colLine.getBoundingClientRect().width / 2 - notes.right) : null;
+							await release(end);
+							out.afterColumn = view.state.doc.toString();
+							out.cellAfterColumn = on ? tableAt(view, null)?.cell ?? null : undefined;
+							await key('z', { meta: true });
+							out.undoneColumn = view.state.doc.toString() === text;
+							await leaveAll(view);
+							await restore(view, text);
+							out.text = text;
+							return out;
+						};
+						const dragsOff = await dragsFor(false);
+						const dragsOn = await dragsFor(true);
+						const firstTable = (text) => text.slice(text.indexOf('| Plant'), text.indexOf('A short line between'));
+						check('Own 93: dragging Cactus\'s grip onto Fern puts Cactus above Fern, as Obsidian\'s own table does', dragsOn.afterRow === dragsOff.afterRow && dragsOn.afterRow !== dragsOn.text && /\| Cactus[^\n]*\n\| Fern/.test(dragsOn.afterRow), { on: firstTable(dragsOn.afterRow), off: firstTable(dragsOff.afterRow) });
+						check('Own 93: dragging Room\'s grip onto Notes puts Room after Notes, as Obsidian\'s own table does', dragsOn.afterColumn === dragsOff.afterColumn && /\| Plant +\| Notes +\| Room/.test(dragsOn.afterColumn), { on: firstTable(dragsOn.afterColumn), off: firstTable(dragsOff.afterColumn) });
+						check('Own 93: while dragging, Obsidian\'s blue line shows on the landing row\'s top and the landing column\'s far edge, as with the switch off', dragsOn.dragging && dragsOn.rowLine !== null && Math.abs(dragsOn.rowLine) <= 2 && dragsOn.colLine !== null && Math.abs(dragsOn.colLine) <= 2 && dragsOff.rowLine !== null && Math.abs(dragsOff.rowLine) <= 2, { on: [dragsOn.rowLine, dragsOn.colLine], off: [dragsOff.rowLine, dragsOff.colLine] });
+						check('Own 93: let go, the moved row\'s first cell, or the moved column\'s header, is selected, and nothing of the drag is left', dragsOn.cellAfterRow?.row === 1 && dragsOn.cellAfterRow?.column === 0 && dragsOn.cellAfterColumn?.row === 0 && dragsOn.cellAfterColumn?.column === 2 && dragsOn.leftOver === 0, { row: dragsOn.cellAfterRow, column: dragsOn.cellAfterColumn, leftOver: dragsOn.leftOver });
+						check('Own 93: one Undo puts each back', dragsOn.undoneRow && dragsOn.undoneColumn, dragsOn);
+
+						// Own 94: the grips' menus, right-clicked and clicked, against Obsidian's grips' menus with the switch off.
+						const gripMenusFor = async (on) => {
+							preview.use(on);
+							await sleep(400);
+							view = await open('Two report tables');
+							await sleep(300);
+							await leaveAll(view);
+							const out = {};
+							for (const [kind, index] of [['row', 2], ['column', 1]]) {
+								const p = centre(gripOf(view, on, null, kind, index));
+								await press(p, 'right');
+								await release(p, 'right');
+								await sleep(200);
+								out[`${kind} right-click`] = titlesOf(menusShown()[0]);
+								await closeMenus();
+								await leaveAll(view);
+								if (!on) continue;
+								const q = centre(gripOf(view, on, null, kind, index));
+								await press(q);
+								await release(q);
+								await sleep(200);
+								out[`${kind} click`] = titlesOf(menusShown()[0]);
+								out[`${kind} selected`] = tableAt(view, null)?.cell ?? null;
+								await closeMenus();
+								await leaveAll(view);
+							}
+							out.text = view.state.doc.toString();
+							return out;
+						};
+						const gripMenusOff = await gripMenusFor(false);
+						const gripMenusOn = await gripMenusFor(true);
+						check('Own 94: a right-click on a row\'s grip shows that row\'s items, and on a column\'s grip Sort and its items, as Obsidian\'s grips do', gripMenusOn['row right-click'].join() === gripMenusOff['row right-click'].join() && gripMenusOn['column right-click'].join() === gripMenusOff['column right-click'].join() && gripMenusOn['row right-click'].length >= 5 && gripMenusOn['column right-click'].length >= 8, { on: gripMenusOn, off: gripMenusOff });
+						check('Own 94: a click on a grip without dragging shows the same menu, and selects its row\'s first cell or its column\'s header', gripMenusOn['row click'].join() === gripMenusOn['row right-click'].join() && gripMenusOn['column click'].join() === gripMenusOn['column right-click'].join() && gripMenusOn['row selected']?.row === 2 && gripMenusOn['column selected']?.column === 1 && gripMenusOn['column selected']?.row === 0, gripMenusOn);
+
+						// Own 95: the + buttons, against Obsidian's: a row at the end, its first cell open; a column at the end, its
+						// header open.
+						const plusFor = async (on) => {
+							preview.use(on);
+							await sleep(400);
+							view = await open('Two report tables');
+							await sleep(300);
+							await leaveAll(view);
+							const text = view.state.doc.toString();
+							const out = {};
+							for (const which of ['row', 'col']) {
+								const button = widgetOf(view, on, null).querySelector(`.table-${which}-btn`);
+								const p = centre(button);
+								await press(p);
+								await release(p);
+								await sleep(300);
+								out[which] = view.state.doc.toString();
+								out[`${which} open`] = on ? (preview.openCell(view) ? `${preview.openCell(view).cell.row},${preview.openCell(view).cell.column}` : null) : !!view.contentDOM.querySelector('.cm-table-widget.has-focus');
+								await key('z', { meta: true });
+								out[`${which} undone`] = view.state.doc.toString() === text;
+								await leaveAll(view);
+								await restore(view, text);
+							}
+							return out;
+						};
+						const plusOff = await plusFor(false);
+						const plusOn = await plusFor(true);
+						check('Own 95: the + below adds a row at the table\'s end and opens its first cell, the + at the side a column and opens its header, writing what Obsidian\'s own buttons write', plusOn.row === plusOff.row && plusOn.col === plusOff.col && plusOn.row !== dragsOn.text && plusOn['row open'] === '4,0' && plusOn['col open'] === '0,3', { on: { row: firstTable(plusOn.row), col: firstTable(plusOn.col), open: [plusOn['row open'], plusOn['col open']] }, off: { row: firstTable(plusOff.row), col: firstTable(plusOff.col) } });
+						check('Own 95: one Undo takes each back', plusOn['row undone'] && plusOn['col undone'], plusOn);
+
+						// Own 96: a phone's layout: the grips show only for the selected cell's row and column, and the + buttons only
+						// while a cell is selected.
+						preview.use(true);
+						await sleep(400);
+						view = await open('Two report tables');
+						await sleep(300);
+						await leaveAll(view);
+						const body = document.body;
+						const wasMobile = body.classList.contains('is-mobile');
+						const phone = {};
+						try {
+							body.classList.add('is-mobile');
+							const model = tableAt(view, null);
+							const shows = (el) => !!el && getComputedStyle(el).display !== 'none' && getComputedStyle(el).opacity === '1';
+							phone.before = { grip: shows(gripOf(view, true, null, 'row', 2)), plus: shows(widgetOf(view, true, null).querySelector('.table-row-btn')) };
+							await press(centre(cellOf(view, true, null, 2, 1)));
+							await release(centre(cellOf(view, true, null, 2, 1)));
+							await key('Escape');
+							phone.cell = model.cell ?? (preview.openCell(view)?.cell ?? null);
+							phone.after = {
+								rowGrip: shows(gripOf(view, true, null, 'row', 2)),
+								otherRowGrip: shows(gripOf(view, true, null, 'row', 1)),
+								columnGrip: shows(gripOf(view, true, null, 'column', 1)),
+								otherColumnGrip: shows(gripOf(view, true, null, 'column', 0)),
+								plus: shows(widgetOf(view, true, null).querySelector('.table-row-btn')),
+							};
+						} finally {
+							if (!wasMobile) body.classList.remove('is-mobile');
+							await leaveAll(view);
+						}
+						check('Own 96: on a phone, only the selected cell\'s row and column show their grips, and the + buttons show only while a cell is selected', !phone.before.grip && !phone.before.plus && phone.after.rowGrip && !phone.after.otherRowGrip && phone.after.columnGrip && !phone.after.otherColumnGrip && phone.after.plus, phone);
+
+						// Own 97: a drag cancelled by a change from a second pane on the same note: nothing moves, and nothing of the
+						// drag is left.
+						{
+							const text = view.state.doc.toString();
+							const grip = gripOf(view, true, null, 'row', 3);
+							const from = centre(grip);
+							await press(from);
+							const fern = cellOf(view, true, null, 1, 0).getBoundingClientRect();
+							const to = { x: from.x, y: fern.top + fern.height / 2 };
+							await glide(from, to, 5);
+							const second = app.workspace.getLeaf('split');
+							await second.openFile(app.vault.getAbstractFileByPath('Two report tables.md'), { state: { mode: 'source', source: false } });
+							await sleep(400);
+							const other = second.view.editor.cm;
+							other.dispatch({ changes: { from: other.state.doc.length, insert: '\nFrom the second pane.' } });
+							await sleep(300);
+							const during = view.contentDOM.querySelectorAll('.table-drag-target, .selectable-tables-dragged, .cm-table-widget.is-dragging').length;
+							await release(to);
+							const after = view.state.doc.toString();
+							second.detach();
+							await sleep(300);
+							check('Own 97: a change from a second pane cancels a drag: the row stays, only the change is in the note, and nothing of the drag is left', after === `${text}\nFrom the second pane.` && during === 0, { during, tail: after.slice(-80), table: firstTable(after) });
+							await restore(view, text);
+							await leaveAll(view);
+						}
+
+						// Own 98: in Table 2000 by 12, row 3 dragged to the pane's bottom and held: the note scrolls, and let go around
+						// row 300, the row lands where the blue line was. Then column 2 dragged to the table's right side: the table
+						// moves sideways, and let go on column 11, the column lands there. The plugin's work per frame, timed.
+						view = await open('Table 2000 by 12');
+						await sleep(1500);
+						await leaveAll(view);
+						const big = models(view)[0];
+						// The table's header at the pane's top: the note has lines of text above it.
+						const toTable = async () => {
+							view.dispatch({ effects: view.constructor.scrollIntoView(big.from, { y: 'start', yMargin: 40 }) });
+							await sleep(500);
+							await frames(4);
+						};
+						await toTable();
+						const bigText = view.state.doc.toString();
+						const header = view.state.doc.lineAt(big.from).number;
+						const bigLines = () => {
+							const out = [];
+							for (let n = header; n <= view.state.doc.lineAt(models(view)[0].to).number; n++) out.push(view.state.doc.line(n).text);
+							return out;
+						};
+						const linesBefore = bigLines();
+						const pane = view.scrollDOM.getBoundingClientRect();
+						const rowGrip = gripOf(view, true, null, 'row', 3);
+						const rowFrom = centre(rowGrip);
+						preview.profile.on = true;
+						preview.profile.drag = 0;
+						preview.profile.frames = 0;
+						await press(rowFrom);
+						const edge = { x: rowFrom.x, y: pane.bottom - 2 };
+						await glide(rowFrom, edge);
+						const landingAt = (y) => {
+							const layout = big.rowLayout(y);
+							return layout ? big.rowAtHeight(y - layout.top).index : -1;
+						};
+						const scrollStart = view.scrollDOM.scrollTop;
+						for (let i = 0; i < 300 && landingAt(edge.y) < 300; i++) await sleep(100);
+						const scrolled = view.scrollDOM.scrollTop - scrollStart;
+						const still = { x: edge.x, y: pane.bottom - 120 };
+						await glide(edge, still, 4);
+						await frames(4);
+						const landed = landingAt(still.y);
+						const line = view.contentDOM.querySelector('.table-drag-target.mod-row');
+						const lineShown = !!line?.isConnected;
+						await release(still);
+						const rowMs = preview.profile.frames ? preview.profile.drag / preview.profile.frames : null;
+						preview.profile.on = false;
+						const movedRow = bigLines();
+						const expectedRow = [...linesBefore];
+						const [taken] = expectedRow.splice(1 + 3, 1);
+						expectedRow.splice(1 + landed, 0, taken);
+						check('Own 98: in Table 2000 by 12, row 3 held at the pane\'s bottom scrolls the note, and let go around row 300, it lands on the row the blue line was on', scrolled > 3000 && landed >= 250 && lineShown && movedRow.join('\n') === expectedRow.join('\n'), { scrolled, landed, lineShown, at: movedRow.findIndex((l, i) => l !== expectedRow[i]) });
+						await key('z', { meta: true });
+						await sleep(400);
+						check('Own 98: one Undo puts row 3 back', view.state.doc.toString() === bigText, { first: bigLines().findIndex((l, i) => l !== linesBefore[i]) });
+						await leaveAll(view);
+						await restore(view, bigText);
+						await toTable();
+						const columnGrip = gripOf(view, true, null, 'column', 1);
+						const columnFrom = centre(columnGrip);
+						const box = big.sidewaysBox();
+						preview.profile.on = true;
+						preview.profile.drag = 0;
+						preview.profile.frames = 0;
+						await press(columnFrom);
+						const side = { x: box.right - 2, y: columnFrom.y };
+						await glide(columnFrom, side);
+						for (let i = 0; i < 100 && big.sideways().scroll < big.sideways().slide - 1; i++) await sleep(100);
+						const slid = big.sideways();
+						const eleventh = cellOf(view, true, null, 0, 10).getBoundingClientRect();
+						const onEleventh = { x: Math.min(eleventh.left + eleventh.width / 2, box.right - 60), y: columnFrom.y };
+						await glide(side, onEleventh, 4);
+						await frames(4);
+						await release(onEleventh);
+						const columnMs = preview.profile.frames ? preview.profile.drag / preview.profile.frames : null;
+						preview.profile.on = false;
+						const movedColumn = bigLines();
+						const cellsOf = (line) => line.split('|').slice(1, -1).map((c) => c.trim());
+						const expectedColumn = linesBefore.map((l) => {
+							const cells = cellsOf(l);
+							const [c] = cells.splice(1, 1);
+							cells.splice(10, 0, c);
+							return cells.join('|');
+						});
+						check('Own 98: column 2 held at the table\'s right side moves the table sideways, and let go on column 11, it lands there', slid.scroll >= slid.slide - 1 && slid.slide > 0 && movedColumn.map((l) => cellsOf(l).join('|')).join('\n') === expectedColumn.join('\n'), { slid, onEleventh, first: [cellsOf(movedColumn[0]).join('|').slice(0, 120), expectedColumn[0].slice(0, 120)] });
+						results.push({ name: 'Own 98 drag work per frame (ms)', ok: true, detail: { row: rowMs, column: columnMs } });
+						check('Own 98: a drag\'s own work stays within 1 ms a frame', rowMs !== null && rowMs <= 1 && columnMs !== null && columnMs <= 1, { rowMs, columnMs });
+						await key('z', { meta: true });
+						await leaveAll(view);
+						await restore(view, bigText);
+
+						// Own 98: scrolled to its end and moved sideways, the + below sits clear of the sideways scrollbar.
+						// The table's end well inside the pane, so its bar is at rest under it.
+						view.dispatch({ effects: view.constructor.scrollIntoView(big.to, { y: 'end', yMargin: 150 }) });
+						await sleep(600);
+						await frames(4);
+						big.slideBy(100000);
+						await sleep(300);
+						const bar = big.sideways().bar?.getBoundingClientRect() ?? null;
+						const below = big.boxes.filter((b) => b.isConnected).pop()?.querySelector('.table-row-btn')?.getBoundingClientRect() ?? null;
+						// Aimed inside the table's box: the slide has moved the button's start out of it.
+						const shownLeft = Math.max(below?.left ?? 0, big.sidewaysBox()?.left ?? 0);
+						const belowHit = below && document.elementFromPoint(shownLeft + 40, below.top + below.height / 2)?.closest('.table-row-btn');
+						check('Own 98: in Table 2000 by 12, scrolled to its end and sideways, the + below sits clear of the scrollbar, and a press there reaches it', !!bar && !!below && below.bottom <= bar.top + 0.5 && !!belowHit, { bar: bar && [bar.top, bar.bottom], below: below && [below.top, below.bottom], hit: !!belowHit });
+
+						// Own 99: Frozen tables' Plants, scrolled so its header is pinned: a body row's grip and the pinned header's
+						// column grips move the row and the columns, as with the switch off.
+						const frozenFor = async (on) => {
+							preview.use(on);
+							await sleep(400);
+							view = await open('Frozen tables');
+							await sleep(400);
+							await leaveAll(view);
+							const text = view.state.doc.toString();
+							const start = text.indexOf('## Plants');
+							view.dispatch({ effects: view.constructor.scrollIntoView(start, { y: 'start' }) });
+							await sleep(400);
+							const head = cellOf(view, on, 'Plants', 0, 0);
+							view.scrollDOM.scrollTop += head.getBoundingClientRect().bottom - view.scrollDOM.getBoundingClientRect().top + 200;
+							await sleep(500);
+							await frames(4);
+							const out = {};
+							const pinnedTop = cellOf(view, on, 'Plants', 0, 1)?.getBoundingClientRect().top;
+							out.pinned = Math.abs(pinnedTop - view.scrollDOM.getBoundingClientRect().top) <= 2;
+							// A body row a few rows below the pinned ones, dragged up one row.
+							const pane = view.scrollDOM.getBoundingClientRect();
+							const hit = document.elementFromPoint(pane.left + 100, pane.top + 260)?.closest('tr');
+							const rowIndex = hit ? (on ? tableAt(view, 'Plants').cellAt(hit.cells[0])?.row : hit.rowIndex) : null;
+							out.row = rowIndex;
+							const rowGripEl = rowIndex ? gripOf(view, on, 'Plants', 'row', rowIndex) : null;
+							if (rowGripEl) {
+								const from = centre(rowGripEl);
+								const above = cellOf(view, on, 'Plants', rowIndex - 1, 0).getBoundingClientRect();
+								await press(from);
+								await glide(from, { x: from.x, y: above.top + above.height / 2 });
+								await release({ x: from.x, y: above.top + above.height / 2 });
+								out.afterRow = view.state.doc.toString();
+								await leaveAll(view);
+								await restore(view, text);
+								await sleep(300);
+							}
+							// The pinned header's grip for Bed, dragged onto Sown.
+							const bed = gripOf(view, on, 'Plants', 'column', 1);
+							const bedAt = bed && centre(bed);
+							out.columnReachable = !!bed && document.elementFromPoint(bedAt.x, bedAt.y) === bed || !!bed?.contains(document.elementFromPoint(bedAt.x, bedAt.y));
+							if (bed) {
+								const sown = cellOf(view, on, 'Plants', 0, 2).getBoundingClientRect();
+								await press(bedAt);
+								await glide(bedAt, { x: sown.left + sown.width / 2, y: bedAt.y });
+								await release({ x: sown.left + sown.width / 2, y: bedAt.y });
+								out.afterColumn = view.state.doc.toString();
+								await leaveAll(view);
+							}
+							await restore(view, text);
+							out.text = text;
+							return out;
+						};
+						const frozenOff = await frozenFor(false);
+						const frozenOn = await frozenFor(true);
+						const plants = (text) => text?.slice(text.indexOf('## Plants'), text.indexOf('## Plants') + 900);
+						check('Own 99: in Plants with its header pinned, a body row dragged up one row moves there, as with the switch off', frozenOn.pinned && frozenOn.row === frozenOff.row && frozenOn.afterRow === frozenOff.afterRow && frozenOn.afterRow !== frozenOn.text, { on: { pinned: frozenOn.pinned, row: frozenOn.row, text: plants(frozenOn.afterRow) }, off: { pinned: frozenOff.pinned, row: frozenOff.row, text: plants(frozenOff.afterRow) } });
+						results.push({ name: 'Own 99 pinned header\'s column grip reachable (switch on, off)', ok: true, detail: [frozenOn.columnReachable, frozenOff.columnReachable] });
+						check('Own 99: the pinned header\'s grip for a column can be reached and moves the column as with the switch off', frozenOn.columnReachable && frozenOn.columnReachable === frozenOff.columnReachable && frozenOn.afterColumn === frozenOff.afterColumn && frozenOn.afterColumn !== frozenOn.text, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn) }, off: { reachable: frozenOff.columnReachable, text: plants(frozenOff.afterColumn) } });
+						check('Own 99: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						await closeMenus();
+						preview.profile.on = false;
 						if (hadNative) config.nativeMenus = nativeBefore;
 						else delete config.nativeMenus;
 						app.updateUseNativeMenu();

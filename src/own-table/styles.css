@@ -518,6 +518,132 @@ body {
 }
 
 /*
+ * A soft shadow under the pinned rows and beside the frozen columns while cells pass under them, with a line at its
+ * inner edge, over the pinned cells' last pixel: where a theme draws its line there it lies on that line, and where a
+ * theme draws it on the cells passing under, as Baseline does, it brings that line back (STA-41). Each fades by an
+ * opacity animation on a timeline the scroll drives, so it keeps up with any flick and nothing runs on the page.
+ *
+ * The rows' fades by a view timeline of each block's own table: in over the first 16 px after the table's top passes
+ * where rows pin, on the first block, and out over the 16 px before the rows leave with the table's end, on the last.
+ * It rides each block's rail under its copy of the rows (pins.ts), so across a seam it hands over as they do, and a
+ * table of one block has a rail for it alone, above its real pinned rows. It moves sideways with the table, inside a
+ * box that stays put and clips it at the table's start while frozen columns pin: the box's padding beside them is
+ * outside the table.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pin-rows {
+	--selectable-tables-shade-depth: 8px;
+
+	timeline-scope: --selectable-tables-rows;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pin-rows > .table-wrapper > table {
+	view-timeline: --selectable-tables-rows block;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-rail.selectable-tables-shade-rail {
+	z-index: 3;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > .selectable-tables-shade-clip {
+	position: absolute;
+	inset-inline-end: 0;
+	z-index: 2;
+	top: calc(var(--selectable-tables-pinned, 0px) - var(--table-border-width, 1px));
+	height: calc(var(--selectable-tables-shade-depth, 8px) + var(--table-border-width, 1px));
+	overflow: clip;
+	pointer-events: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade-clip > .selectable-tables-shade {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-slides .selectable-tables-shade-clip > .selectable-tables-shade {
+	will-change: transform;
+	animation: selectable-tables-slide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade > .selectable-tables-shade-fade {
+	position: absolute;
+	inset: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade-fade.selectable-tables-fades-in {
+	animation: selectable-tables-shade-in linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing 0 exit-crossing 16px;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade-fade::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-top: var(--table-border-width, 1px) solid var(--table-border-color);
+	background-image: linear-gradient(var(--background-modifier-box-shadow), transparent);
+	background-clip: padding-box;
+	background-origin: padding-box;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade-fade.selectable-tables-fades-out::after {
+	animation: selectable-tables-shade-out linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing calc(100% - var(--selectable-tables-pinned, 0px) - 16px) exit-crossing calc(100% - var(--selectable-tables-pinned, 0px));
+}
+
+@keyframes selectable-tables-shade-in {
+	from {
+		opacity: 0;
+	}
+
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes selectable-tables-shade-out {
+	from {
+		opacity: 1;
+	}
+
+	to {
+		opacity: 0;
+	}
+}
+
+/*
+ * The columns' shadow, beside the strip, fades in over the first 24 px the table moves sideways, on its scrollbar's
+ * timeline, and stays until the table is back at its start. In a table of more blocks the copy of the pinned rows
+ * lies over the strip beside them, so the corner over that copy has one too.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides > .selectable-tables-strip::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides > .table-wrapper > .selectable-tables-strip::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides .selectable-tables-copy > .selectable-tables-corner::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	inset-inline-start: calc(100% - var(--table-border-width, 1px));
+	width: calc(var(--selectable-tables-shade-depth, 8px) + var(--table-border-width, 1px));
+	border-inline-start: var(--table-border-width, 1px) solid var(--table-border-color);
+	background-image: linear-gradient(to right, var(--background-modifier-box-shadow), transparent);
+	background-clip: padding-box;
+	background-origin: padding-box;
+	pointer-events: none;
+	animation: selectable-tables-shade-in linear both;
+	animation-timeline: var(--selectable-tables-x);
+	animation-range: 0 24px;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides:dir(rtl) > .selectable-tables-strip::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides:dir(rtl) > .table-wrapper > .selectable-tables-strip::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides:dir(rtl) .selectable-tables-copy > .selectable-tables-corner::after {
+	background-image: linear-gradient(to left, var(--background-modifier-box-shadow), transparent);
+}
+
+/*
  * Obsidian's drag handles and + buttons (grips.ts). While a handle is dragged, the one that moves is a copy that
  * follows the pointer (drag.ts): every other handle hides, the one pressed too, which Obsidian keeps showing while
  * it's held, and the copy looks as Obsidian's held handle does.

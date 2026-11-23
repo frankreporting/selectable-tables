@@ -60,15 +60,18 @@ export interface RailBlock {
 
 /**
  * Where a block's copy of the frozen rows can ride, as the `top` and `bottom` of its rail in the block, for rows
- * `pinned` px tall together. The copy has no height and sticks where rows pin, so it's there while the rail crosses
- * that line, and the block clips the rest. The first block's rail starts at the table's top, so the copy lies over
- * the real rows there. Every other block's starts the rows' height above its top, and every block but the last ends
- * that far below its bottom: across a seam, one block's copy slides out of its block as the next one's slides in,
- * and the two halves make one. The last block's ends that far above the table's end, so the rows leave with it.
+ * `pinned` px tall together, with a shadow `shade` px deep under them. The copy has no height and sticks where rows
+ * pin, so it's there while the rail crosses that line, and the block clips the rest. The first block's rail starts at
+ * the table's top, so the copy lies over the real rows there. Every other block's starts the rows' height and the
+ * shadow's depth above its top, and every block but the last ends the rows' height below its bottom: across a seam,
+ * one block's copy and shadow slide out of its block as the next one's slide in, and the two halves make one. Started
+ * only the rows' height above, the next block's shadow would ride in at its top while the seam crosses the shadow, a
+ * band of its own below the one sliding out (STA-41). The last block's ends the rows' height above the table's end,
+ * so the rows leave with it.
  */
-export function railOf(block: RailBlock, pinned: number): { top: number; bottom: number } {
+export function railOf(block: RailBlock, pinned: number, shade = 0): { top: number; bottom: number } {
 	return {
-		top: block.first ? block.tableTop : -pinned,
+		top: block.first ? block.tableTop : -(pinned + shade),
 		bottom: block.last ? block.height - block.tableBottom + pinned : -pinned,
 	};
 }

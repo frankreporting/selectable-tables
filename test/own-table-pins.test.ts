@@ -35,6 +35,11 @@ test("a block's copy of the frozen rows rides from the table's top, or the rows'
 	assert.deepEqual(railOf({ first: false, last: false, tableTop: 0, tableBottom: 5000, height: 5000 }, 60), { top: -60, bottom: -60 });
 	// The last block's ends the rows' height above the table's end, so the rows leave with the table.
 	assert.deepEqual(railOf({ first: false, last: true, tableTop: 0, tableBottom: 3000, height: 3016 }, 60), { top: -60, bottom: 76 });
+	// With a shadow 8 px deep under the rows, every block but the first starts its rail that much higher too, so its
+	// shadow is stuck under the rows before the seam reaches them, and the ends stay.
+	assert.deepEqual(railOf({ first: false, last: false, tableTop: 0, tableBottom: 5000, height: 5000 }, 60, 8), { top: -68, bottom: -60 });
+	assert.deepEqual(railOf({ first: false, last: true, tableTop: 0, tableBottom: 3000, height: 3016 }, 60, 8), { top: -68, bottom: 76 });
+	assert.deepEqual(railOf({ first: true, last: true, tableTop: 16, tableBottom: 3016, height: 3032 }, 60, 8), { top: 16, bottom: 76 });
 });
 
 test("an open frozen row deep in a long table moves with the note between its place and the table's end", () => {

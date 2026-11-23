@@ -44,12 +44,22 @@ export interface Extent {
 
 /**
  * Where a dragged handle lands: the row or column its middle is over, `at` along the table, kept within the table, as
- * Obsidian has it. The first extent holding it wins, so a pinned row drawn over others is found first.
+ * Obsidian has it. The first extent holding it wins. In the space between two cells, where a theme spaces them, the
+ * nearer one.
  */
 export function landing(extents: readonly Extent[], at: number, size: number): Extent | null {
 	const clamped = Math.max(0, Math.min(size, at));
-	for (const extent of extents) if (clamped >= extent.start && clamped <= extent.end) return extent;
-	return extents.length ? extents[clamped <= 0 ? 0 : extents.length - 1]! : null;
+	let nearest: Extent | null = null;
+	let away = Infinity;
+	for (const extent of extents) {
+		if (clamped >= extent.start && clamped <= extent.end) return extent;
+		const gap = clamped < extent.start ? extent.start - clamped : clamped - extent.end;
+		if (gap < away) {
+			nearest = extent;
+			away = gap;
+		}
+	}
+	return nearest;
 }
 
 /**

@@ -49,3 +49,11 @@ test('the line goes on the landing row\'s near edge, toward where the handle cam
 	assert.equal(targetEdge({ index: 7, start: 140, end: 160 }, 5), 160);
 	assert.equal(targetEdge({ index: 5, start: 100, end: 120 }, 5), null);
 });
+
+test('in the space a theme puts between cells, a handle lands on the nearer column, never the last', () => {
+	const spaced = columnExtents([100, 50, 80], 0, 10, 270, false);
+	// Column 0 runs 10 to 110 and column 1 120 to 170.
+	assert.equal(landing(spaced, 116, 270)?.index, 1);
+	assert.equal(landing(spaced, 114, 270)?.index, 0);
+	assert.equal(landing(spaced, 2, 270)?.index, 0);
+});

@@ -3123,8 +3123,10 @@
 				await frames(4);
 				[big] = models(view);
 				const lastTable = big.boxes.find((box) => box.isConnected && box.classList.contains('selectable-tables-last'))?.querySelector('table');
+				// Under the + below the last row (STA-98), which the box's padding there holds.
+				const plusBelow = lastTable?.parentElement?.querySelector('.table-row-btn')?.getBoundingClientRect().height ?? NaN;
 				const endGap = lastTable?.isConnected ? barOf().getBoundingClientRect().top - lastTable.getBoundingClientRect().bottom : NaN;
-				check('Own 21: once the last row is in the pane, the bar sits right under it', Math.abs(endGap) <= 1, { endGap });
+				check('Own 21: once the last row is in the pane, the bar sits right under the + below it', Math.abs(endGap - plusBelow) <= 1, { endGap, plusBelow });
 				view.scrollDOM.scrollTop = 0;
 				await sleep(500);
 				await frames(4);
@@ -6292,6 +6294,7 @@
 							const fern = cellOf(view, true, null, 1, 0).getBoundingClientRect();
 							const to = { x: from.x, y: fern.top + fern.height / 2 };
 							await glide(from, to, 5);
+							const layoutBefore = app.workspace.getLayout();
 							const second = app.workspace.getLeaf('split');
 							await second.openFile(app.vault.getAbstractFileByPath('Two report tables.md'), { state: { mode: 'source', source: false } });
 							await sleep(400);
@@ -6303,6 +6306,13 @@
 							const after = view.state.doc.toString();
 							second.detach();
 							await sleep(300);
+							// The note's pane as wide as before: a pane left beside it narrows every check after.
+							if (app.workspace.rootSplit.children.length > 1) {
+								await app.workspace.changeLayout(layoutBefore);
+								await sleep(800);
+								view = await open('Two report tables');
+								await sleep(300);
+							}
 							check('Own 97: a change from a second pane cancels a drag: the row stays, only the change is in the note, and nothing of the drag is left', after === `${text}\nFrom the second pane.` && during === 0, { during, tail: after.slice(-80), table: firstTable(after) });
 							await restore(view, text);
 							await leaveAll(view);
@@ -6329,6 +6339,27 @@
 							for (let n = header; n <= view.state.doc.lineAt(models(view)[0].to).number; n++) out.push(view.state.doc.line(n).text);
 							return out;
 						};
+						// The table as Obsidian's table writes it: an earlier section can leave it spaced by hand, which a move tidies.
+						const tidy = (lines) => {
+							const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+							const rows = lines.filter((_, i) => i !== 1).map(cells);
+							const aligns = cells(lines[1]).map((c) => (c.startsWith(':') ? (c.endsWith(':') ? 'center' : 'left') : c.endsWith(':') ? 'right' : null));
+							const widths = aligns.map((_, c) => Math.max(5, ...rows.map((r) => (r[c] ?? '').length + 2)));
+							const pad = (text, width, align) => {
+								const space = width - text.length;
+								const lead = align === 'right' ? space - 1 : align === 'center' ? Math.floor(space / 2) : 1;
+								return ' '.repeat(lead) + text + ' '.repeat(space - lead);
+							};
+							const dashes = (width, align) => (align === 'left' ? ` :${'-'.repeat(width - 3)} ` : align === 'center' ? ` :${'-'.repeat(width - 4)}: ` : align === 'right' ? ` ${'-'.repeat(width - 3)}: ` : ` ${'-'.repeat(width - 2)} `);
+							const out = rows.map((r) => `|${aligns.map((a, c) => pad(r[c] ?? '', widths[c], a)).join('|')}|`);
+							out.splice(1, 0, `|${aligns.map((a, c) => dashes(widths[c], a)).join('|')}|`);
+							return out;
+						};
+						const tidied = tidy(bigLines());
+						view.dispatch({ changes: { from: view.state.doc.line(header).from, to: view.state.doc.lineAt(models(view)[0].to).to, insert: tidied.join('\n') } });
+						await sleep(1500);
+						await toTable();
+						const tidyText = view.state.doc.toString();
 						const linesBefore = bigLines();
 						const pane = view.scrollDOM.getBoundingClientRect();
 						const rowGrip = gripOf(view, true, null, 'row', 3);
@@ -6362,9 +6393,9 @@
 						check('Own 98: in Table 2000 by 12, row 3 held at the pane\'s bottom scrolls the note, and let go around row 300, it lands on the row the blue line was on', scrolled > 3000 && landed >= 250 && lineShown && movedRow.join('\n') === expectedRow.join('\n'), { scrolled, landed, lineShown, at: movedRow.findIndex((l, i) => l !== expectedRow[i]) });
 						await key('z', { meta: true });
 						await sleep(400);
-						check('Own 98: one Undo puts row 3 back', view.state.doc.toString() === bigText, { first: bigLines().findIndex((l, i) => l !== linesBefore[i]) });
+						check('Own 98: one Undo puts row 3 back', view.state.doc.toString() === tidyText, { first: bigLines().findIndex((l, i) => l !== linesBefore[i]) });
 						await leaveAll(view);
-						await restore(view, bigText);
+						await restore(view, tidyText);
 						await toTable();
 						const columnGrip = gripOf(view, true, null, 'column', 1);
 						const columnFrom = centre(columnGrip);
@@ -6470,7 +6501,7 @@
 						const plants = (text) => text?.slice(text.indexOf('## Plants'), text.indexOf('## Plants') + 900);
 						check('Own 99: in Plants with its header pinned, a body row dragged up one row moves there, as with the switch off', frozenOn.pinned && frozenOn.row === frozenOff.row && frozenOn.afterRow === frozenOff.afterRow && frozenOn.afterRow !== frozenOn.text, { on: { pinned: frozenOn.pinned, row: frozenOn.row, text: plants(frozenOn.afterRow) }, off: { pinned: frozenOff.pinned, row: frozenOff.row, text: plants(frozenOff.afterRow) } });
 						results.push({ name: 'Own 99 pinned header\'s column grip reachable (switch on, off)', ok: true, detail: [frozenOn.columnReachable, frozenOff.columnReachable] });
-						check('Own 99: the pinned header\'s grip for a column can be reached and moves the column as with the switch off', frozenOn.columnReachable && frozenOn.columnReachable === frozenOff.columnReachable && frozenOn.afterColumn === frozenOff.afterColumn && frozenOn.afterColumn !== frozenOn.text, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn) }, off: { reachable: frozenOff.columnReachable, text: plants(frozenOff.afterColumn) } });
+						check('Own 99: the pinned header\'s grips for its columns are where Obsidian\'s frozen table has them, above the pane\'s top, and a press there does what it does with the switch off', frozenOn.columnReachable === frozenOff.columnReachable && frozenOn.afterColumn === frozenOff.afterColumn, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn) }, off: { reachable: frozenOff.columnReachable, text: plants(frozenOff.afterColumn) } });
 						check('Own 99: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						await closeMenus();

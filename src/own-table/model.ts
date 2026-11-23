@@ -1523,7 +1523,7 @@ export class Model implements Span, DrawnTable, DragTable {
 		if (!view || this.stale || !metrics) return null;
 		const last = this.blocks[this.blockCount - 1];
 		if (last?.table.isConnected) return last.table.getBoundingClientRect().bottom;
-		return view.documentTop + view.lineBlockAt(this.to).bottom - (metrics.pad - metrics.padTop);
+		return view.documentTop + view.lineBlockAt(this.to).bottom - (metrics.pad - metrics.padTop) - (this.slides ? BAR_HEIGHT : 0);
 	}
 
 	/**

@@ -104,12 +104,29 @@ class Drag {
 		this.win.addEventListener('pointercancel', this.onCancel, true);
 		this.win.addEventListener('keydown', this.onKey, true);
 		this.win.addEventListener('contextmenu', this.onMenu, true);
+		// A touch keeps going to the element it started on, and on an iPhone or iPad its events go nowhere once that's
+		// out of the page, as the pressed row is when it's drawn again or scrolls far away: the note's scroller, which
+		// stays, takes them. A mouse's are found under the pointer, so it needs none.
+		if (event.pointerType !== 'mouse') {
+			try {
+				view.scrollDOM.setPointerCapture(event.pointerId);
+				this.captured = view.scrollDOM;
+				this.captured.addEventListener('lostpointercapture', this.onLost);
+			} catch {
+				// The pointer is gone already: its pointerup or pointercancel ends the drag.
+			}
+		}
 		// The row or column shows as its cell selected, as Obsidian selects it as a range: an open cell closes first.
 		selectAt(view, { table: () => table, cell: kind === 'row' ? { row: cell.row, column: 0 } : { row: 0, column: cell.column } });
 		this.frame = this.win.requestAnimationFrame(this.tick);
 	}
 
 	private readonly pointerId: number;
+	private captured: HTMLElement | null = null;
+
+	private readonly onLost = (event: PointerEvent) => {
+		if (event.pointerId === this.pointerId) this.cancel();
+	};
 
 	private readonly onMove = (event: PointerEvent) => {
 		if (event.pointerId !== this.pointerId) return;
@@ -143,11 +160,11 @@ class Drag {
 	};
 
 	/**
-	 * A menu before the drag started: a long press on a phone, which Obsidian turns into a right-click, showing the
-	 * handle's menu. Letting go then shows no second one.
+	 * A menu during the press ends it, as in Obsidian's drags: a long press on a phone, which Obsidian turns into a
+	 * right-click, shows the handle's menu, and letting go then shows no second one.
 	 */
 	private readonly onMenu = () => {
-		if (!this.started) this.end();
+		this.end();
 	};
 
 	/** The pointer moved far enough: from now on it's a drag. Obsidian's class hides the other handles. */
@@ -279,6 +296,12 @@ class Drag {
 		this.win.removeEventListener('pointercancel', this.onCancel, true);
 		this.win.removeEventListener('keydown', this.onKey, true);
 		this.win.removeEventListener('contextmenu', this.onMenu, true);
+		const captured = this.captured;
+		this.captured = null;
+		if (captured) {
+			captured.removeEventListener('lostpointercapture', this.onLost);
+			if (captured.hasPointerCapture(this.pointerId)) captured.releasePointerCapture(this.pointerId);
+		}
 		this.copy?.remove();
 		this.copy = null;
 		for (const line of this.lines) line.remove();

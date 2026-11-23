@@ -37,6 +37,24 @@ export function cellPlace(doc: Text, table: Span, { row, column }: Cell): CellPl
 	return { line, segment, from: line.from + segment.from + lead, source };
 }
 
+/**
+ * The row a body row's line went to in a change that wrote it again: Sync and a second pane send rows put in or taken
+ * out above it as one change rewriting its line along with them. It's the row nearest its old place, within `reach`
+ * rows, whose line reads exactly as it did; with none, or for the header, the same row.
+ */
+export function movedRow(before: Text, was: Span, doc: Text, table: Span, row: number, reach = 200): number {
+	const old = row > 0 ? rowLine(before, was, row) : null;
+	if (!old) return row;
+	const first = doc.lineAt(table.from).number;
+	const rows = doc.lineAt(table.to).number - first - 1;
+	const reads = (at: number) => at >= 1 && at <= rows && doc.line(first + at + 1).text === old.text;
+	for (let step = 0; step <= reach; step++) {
+		if (reads(row + step)) return row + step;
+		if (step && reads(row - step)) return row - step;
+	}
+	return row;
+}
+
 /** How a cell's column is padded: Obsidian's way, at a width, with the widest of the column's other cells. */
 export interface Padding {
 	obsidian: boolean;

@@ -6,7 +6,7 @@ import { writesCell, writesTable } from '../editor/decide';
 import { type OwnCell, openCells } from '../editor/layout';
 import { type Cell, type Span, toCellEditor, toCellSource } from '../editor/table-text';
 import { type CellEditor, type CellHooks, makeCellEditor, suggesting } from './cell-editor';
-import { cellPlace, type Padding, paddingFor, writeCell } from './cell-write';
+import { cellPlace, movedRow, type Padding, paddingFor, writeCell } from './cell-write';
 import type { Click, Model } from './model';
 import { timed } from './profile';
 
@@ -459,7 +459,12 @@ export class OpenCell implements OwnCell {
 			return;
 		}
 		if (!this.element.isConnected || !this.model.holdsOpen(this.element)) {
-			this.reopen(this.model);
+			// Its row was drawn again: a row put in or taken out above it, as Sync and a second pane send it, rewrites its
+			// line too. The cell opens again in the row its line went to.
+			const { model } = this;
+			const back = update.changes.invertedDesc;
+			const was = { from: back.mapPos(model.from, 1), to: back.mapPos(model.to, -1) };
+			this.reopen(model, movedRow(update.startState.doc, was, update.state.doc, model, this.cell.row));
 			return;
 		}
 		const row = this.model.rowOfOpen();
@@ -536,12 +541,14 @@ export class OpenCell implements OwnCell {
 	}
 
 	/**
-	 * The cell's row went from the page, as a rewrite of the whole table takes it: the cell opens again at the same
-	 * row and column, with the caret where the note's selection is, if the table still has them.
+	 * The cell's row went from the page, as a rewrite of the whole table takes it: the cell opens again in the same
+	 * column of `row`, the row its line went to or else the same row, with the caret where the note's selection is, if
+	 * the table still has them.
 	 */
-	private reopen(model: Model | null): void {
+	private reopen(model: Model | null, row = this.cell.row): void {
 		const focused = this.editor.view.hasFocus || this.focused;
-		const { cell, setup, note } = this;
+		const { setup, note } = this;
+		const cell = { row, column: this.cell.column };
 		this.close(focused);
 		if (!model || model.view !== note) return;
 		queueMicrotask(() => {

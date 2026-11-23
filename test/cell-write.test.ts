@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ChangeSet, Text } from '@codemirror/state';
 import { toCellEditor, toCellSource, writtenByObsidian } from '../src/editor/table-text';
-import { cellPlace, paddingFor, writeCell } from '../src/own-table/cell-write';
+import { cellPlace, movedRow, paddingFor, writeCell } from '../src/own-table/cell-write';
 
 const doc = (...lines: string[]) => Text.of(lines);
 const whole = (text: Text) => ({ from: 0, to: text.length });
@@ -102,4 +102,22 @@ test('padding a right-aligned column again puts the spaces before each cell\'s t
 	assert.ok(writtenByObsidian(wide.after, whole(wide.after)));
 	const narrow = writeCell(wide.after, whole(wide.after), { row: 1, column: 0 }, 'Fern', wide.written.padding)!;
 	assert.deepEqual(ChangeSet.of(narrow.changes, wide.after.length).apply(wide.after).toJSON(), lines);
+});
+
+test('an open cell\'s row is found again where its line went, after rows are put in or taken out above it', () => {
+	const before = doc('| a | b |', '| - | - |', '| 1 | x |', '| 2 | y |', '| 3 | z |');
+	// A row put in under the header, as Sync writes it: row 1's line is now row 2.
+	const added = doc('| a | b |', '| - | - |', '| new | n |', '| 1 | x |', '| 2 | y |', '| 3 | z |');
+	assert.equal(movedRow(before, whole(before), added, whole(added), 1), 2);
+	assert.equal(movedRow(before, whole(before), added, whole(added), 3), 4);
+	// Taken out again.
+	assert.equal(movedRow(added, whole(added), before, whole(before), 2), 1);
+	// A line that changed, or the header, stays at its row.
+	const edited = doc('| a | b |', '| - | - |', '| new | n |', '| 1 | xx |', '| 2 | y |', '| 3 | z |');
+	assert.equal(movedRow(before, whole(before), edited, whole(edited), 1), 1);
+	assert.equal(movedRow(before, whole(before), added, whole(added), 0), 0);
+	// Of two rows that read alike, the nearer.
+	const twins = doc('| a | b |', '| - | - |', '| 1 | x |', '| 2 | y |', '| 1 | x |');
+	const twinsAdded = doc('| a | b |', '| - | - |', '| new | n |', '| 1 | x |', '| 2 | y |', '| 1 | x |');
+	assert.equal(movedRow(twins, whole(twins), twinsAdded, whole(twinsAdded), 3), 4);
 });

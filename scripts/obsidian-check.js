@@ -4327,6 +4327,8 @@
 						const r = view.scrollDOM.getBoundingClientRect();
 						return { top: r.top + view.scrollDOM.clientTop, bottom: r.top + view.scrollDOM.clientTop + view.scrollDOM.clientHeight };
 					};
+					// Where rows pin: a grip's height below the pane's top, so the pinned header's column grips show (STA-116).
+					const pinOf = (view) => paneOf(view).top + (parseFloat(getComputedStyle(view.dom).getPropertyValue('--selectable-tables-band')) || 0);
 					const oc = (view) => preview.openCell(view);
 					const realOf = (model, el) => el && !el.closest('.selectable-tables-strip, .selectable-tables-rail');
 					const realMarked = (view) => Array.from(view.contentDOM.querySelectorAll('.selectable-tables-own .selectable-tables-cell')).filter((el) => realOf(null, el));
@@ -4455,7 +4457,7 @@
 					}
 					const tableTop = firstBox(plants).querySelector('table').getBoundingClientRect().top;
 					check('Own 65: holding ↓, → and ↑ in Plants keeps the selected cell clear of the pinned rows and the frozen column', moves.every(([, at]) => at === 'clear'), moves.filter(([, at]) => at !== 'clear'));
-					check('Own 65: ↑ into a frozen row takes the table back to its top', plants.cell.row === 0 && tableTop >= paneOf(view).top - 1, { cell: plants.cell, tableTop, pane: paneOf(view).top });
+					check('Own 65: ↑ into a frozen row takes the table back to its top, where rows pin, its column grips in view', plants.cell.row === 0 && tableTop >= pinOf(view) - 1, { cell: plants.cell, tableTop, pin: pinOf(view) });
 					for (let i = 0; i < 8; i++) await key('ArrowLeft', { repeat: i > 0 });
 					check('Own 65: ← into a frozen column takes the table back to its start', plants.cell.column === 0 && plants.sideways().scroll === 0, { cell: plants.cell, scroll: plants.sideways().scroll });
 					check('Own 65: the selected cell\'s copy in the frozen column shows its outline, once', view.contentDOM.querySelectorAll('.selectable-tables-strip .selectable-tables-cell').length === 1 && realMarked(view).length === 1);
@@ -4609,7 +4611,7 @@
 							ink.push(open ? await inked(open.view.contentDOM) : 0);
 						}
 						const topNow = th()?.getBoundingClientRect().top;
-						check(`Own 67: in ${label}, a cell in a frozen row and a frozen column, moved sideways, opens where it is, the table stays, and it stays drawn at the pane's top as rows pass under it`, open?.cell.row === 0 && open.cell.column === column && model.sideways().scroll === slidAt && !!copyAt && Math.abs(openAt.left - copyAt.left) <= 1 && ink.every((each) => each > 20) && Math.abs(topNow - paneOf(view).top) <= 2 && shows(open.view.contentDOM), { open: open?.cell, scroll: model.sideways().scroll, slidAt, openLeft: openAt?.left, copyLeft: copyAt?.left, ink, top: topNow, pane: paneOf(view).top });
+						check(`Own 67: in ${label}, a cell in a frozen row and a frozen column, moved sideways, opens where it is, the table stays, and it stays drawn where rows pin as rows pass under it`, open?.cell.row === 0 && open.cell.column === column && model.sideways().scroll === slidAt && !!copyAt && Math.abs(openAt.left - copyAt.left) <= 1 && ink.every((each) => each > 20) && Math.abs(topNow - pinOf(view)) <= 2 && shows(open.view.contentDOM), { open: open?.cell, scroll: model.sideways().scroll, slidAt, openLeft: openAt?.left, copyLeft: copyAt?.left, ink, top: topNow, pin: pinOf(view) });
 						const beforeSwipe = th()?.getBoundingClientRect();
 						model.slideBy(-120);
 						await sleep(250);
@@ -4831,7 +4833,7 @@
 					await toRow(view, big, 520);
 					const crossing = () => big.boxes.find((box) => {
 						const r = box.isConnected && box.getBoundingClientRect();
-						return r && r.top <= paneOf(view).top && r.bottom > paneOf(view).top;
+						return r && r.top <= pinOf(view) && r.bottom > pinOf(view);
 					});
 					const copyCell = (column) => crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[0]?.cells[column];
 					const pressed = copyCell(2);
@@ -4851,7 +4853,7 @@
 					view.scrollDOM.scrollTop += 600;
 					await sleep(300);
 					await frames(3);
-					check('Own 71: scrolled on with it open, the open header cell pins at the pane\'s top and still shows', !!deep && shows(deep.view.contentDOM) && Math.abs(deep.view.dom.closest('th').getBoundingClientRect().top - paneOf(view).top) <= 2, { top: deep?.view.dom.closest('th')?.getBoundingClientRect().top, pane: paneOf(view).top });
+					check('Own 71: scrolled on with it open, the open header cell pins where rows pin and still shows', !!deep && shows(deep.view.contentDOM) && Math.abs(deep.view.dom.closest('th').getBoundingClientRect().top - pinOf(view)) <= 2, { top: deep?.view.dom.closest('th')?.getBoundingClientRect().top, pin: pinOf(view) });
 					// Shift+Enter grows the open header a line: Row 1's copies stay right under it, in every block, and the rows
 					// passing under them stay where they are on the screen.
 					const midRow = () => {
@@ -4882,7 +4884,7 @@
 						await frames(3);
 						const head = deepHead()?.getBoundingClientRect();
 						const one = crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[1]?.getBoundingClientRect();
-						seamsOpen.push({ top: head && Math.round((head.top - paneOf(view).top) * 100) / 100, under: head && one ? Math.round((one.top - head.bottom) * 100) / 100 : null, shows: shows(deep.view.contentDOM), ink: await inked(deep.view.contentDOM) });
+						seamsOpen.push({ top: head && Math.round((head.top - pinOf(view)) * 100) / 100, under: head && one ? Math.round((one.top - head.bottom) * 100) / 100 : null, shows: shows(deep.view.contentDOM), ink: await inked(deep.view.contentDOM) });
 					}
 					check('Own 83: scrolled on past three seams with real gestures, the open header stays pinned and drawn, with Row 1 right under it', seamsOpen.every((s) => Math.abs(s.top) <= 1 && s.under !== null && Math.abs(s.under) <= 1 && s.shows && s.ink > 20), seamsOpen);
 					// Near the table's end the open header still pins, Row 1's copy under it; past it, both leave with the table's
@@ -4901,7 +4903,7 @@
 					}
 					await toRow(view, big, 1500);
 					const back = deepHead()?.getBoundingClientRect().top;
-					check('Own 84: past the table\'s end the open header leaves with its last row, Row 1\'s copy under it, and comes back pinned, still open', ends.every((e) => e.head && e.one && Math.abs(e.head[1] - e.one[0]) <= 1) && Math.abs(ends[0].head[0] - paneOf(view).top) <= 1 && Math.abs(ends[1].one[1] - ends[1].end) <= 1 && Math.abs(back - paneOf(view).top) <= 1 && oc(view) === deep && shows(deep.view.contentDOM), { ends, back, pane: paneOf(view).top });
+					check('Own 84: past the table\'s end the open header leaves with its last row, Row 1\'s copy under it, and comes back pinned, still open', ends.every((e) => e.head && e.one && Math.abs(e.head[1] - e.one[0]) <= 1) && Math.abs(ends[0].head[0] - pinOf(view)) <= 1 && Math.abs(ends[1].one[1] - ends[1].end) <= 1 && Math.abs(back - pinOf(view)) <= 1 && oc(view) === deep && shows(deep.view.contentDOM), { ends, back, pin: pinOf(view) });
 					// Undo and Redo in the open cell: it stays open where it's pinned.
 					const undoRows = [];
 					for (const redo of [false, true]) {
@@ -4910,7 +4912,7 @@
 						await frames(3);
 						undoRows.push({ redo, open: oc(view) === deep, top: deepHead()?.getBoundingClientRect().top, text: deep.view.state.doc.toString() });
 					}
-					check('Own 85: Undo and Redo in the open header deep down keep it open where it\'s pinned', undoRows.every((u) => u.open && Math.abs(u.top - paneOf(view).top) <= 1) && undoRows[1].text.endsWith('q\nw') && !undoRows[0].text.endsWith('q\nw'), undoRows);
+					check('Own 85: Undo and Redo in the open header deep down keep it open where it\'s pinned', undoRows.every((u) => u.open && Math.abs(u.top - pinOf(view)) <= 1) && undoRows[1].text.endsWith('q\nw') && !undoRows[0].text.endsWith('q\nw'), undoRows);
 					await leave();
 					await toRow(view, big, 520);
 					check('Own 71: after Escape, the pinned header deep down shows what was typed', copyCell(2)?.textContent === `${pressedText}qw`, { copy: copyCell(2)?.textContent });
@@ -4946,7 +4948,7 @@
 					await frames(4);
 					pinnedMoves.push(['Tab', openAt()]);
 					await until('ArrowDown', '1,3');
-					const pinTop = paneOf(view).top;
+					const pinTop = pinOf(view);
 					const inPlace = pinnedMoves.every(([, m], index) => m.shows && Math.abs(m.scroll) <= 1 && Math.abs(m.top - (m.cell.startsWith('0,') ? pinTop : rowOneTop)) <= 1 && m.cell === ['1,2', '0,2', '0,3', '1,3'][index]);
 					await until('ArrowDown', '2,3');
 					const out = openAt();
@@ -4970,7 +4972,7 @@
 					await sleep(400);
 					await frames(4);
 					const below = big.cellElement({ row: 0, column: 1 })?.getBoundingClientRect();
-					const hitRow = below && document.elementFromPoint(below.left + below.width / 2, paneOf(view).top + below.height + 6)?.closest('tr');
+					const hitRow = below && document.elementFromPoint(below.left + below.width / 2, pinOf(view) + below.height + 6)?.closest('tr');
 					const rowOne = !!hitRow && (hitRow.getAttribute('data-selectable-tables-row') === '1' || hitRow.getAttribute('aria-rowindex') === '2');
 					check('Own 71: with the header cell open and the note scrolled on within the first block, the header and the frozen row under it stay pinned', topOpen?.cell.row === 0 && shows(topOpen.view.contentDOM) && rowOne, { open: topOpen?.cell, shows: topOpen && shows(topOpen.view.contentDOM), hitRow: hitRow?.outerHTML.slice(0, 120) });
 					await leave();
@@ -5049,7 +5051,7 @@
 					deep2?.view.dispatch({ selection: { anchor: deep2.view.state.doc.length } });
 					await realType('q');
 					await frames(3);
-					check('Own 71: scrolled on, past a seam, the open cell stays drawn at the pane\'s top; a swipe moves the table and not the cell; what\'s typed shows', !!deep2 && deep2Ink.every((each) => each > 20) && Math.abs(deepTop - paneOf(view).top) <= 2 && big.sideways().scroll === bigSlid + 150 && Math.abs(deepAfter.left - deepBefore.left) <= 1 && deep2.view.state.doc.toString().endsWith('q') && shows(deep2.view.contentDOM), { ink: deep2Ink, top: deepTop, pane: paneOf(view).top, scroll: big.sideways().scroll, before: deepBefore?.left, after: deepAfter?.left, text: deep2?.view.state.doc.toString() });
+					check('Own 71: scrolled on, past a seam, the open cell stays drawn where rows pin; a swipe moves the table and not the cell; what\'s typed shows', !!deep2 && deep2Ink.every((each) => each > 20) && Math.abs(deepTop - pinOf(view)) <= 2 && big.sideways().scroll === bigSlid + 150 && Math.abs(deepAfter.left - deepBefore.left) <= 1 && deep2.view.state.doc.toString().endsWith('q') && shows(deep2.view.contentDOM), { ink: deep2Ink, top: deepTop, pin: pinOf(view), scroll: big.sideways().scroll, before: deepBefore?.left, after: deepAfter?.left, text: deep2?.view.state.doc.toString() });
 					const bigSlidOpen = big.sideways().scroll;
 					await leave();
 					await frames(2);
@@ -5183,17 +5185,18 @@
 									await sleep(300);
 									await frames(4);
 									const shown = Array.from(v.contentDOM.querySelectorAll('.selectable-tables-cell')).find((el) => shows(el));
-									seen.push({ k, screens, scrolled: Math.round(sc.scrollTop - before), shows: !!shown, top: shown ? Math.round(shown.getBoundingClientRect().top - paneOf(v).top) : null, text: shown?.textContent.trim().slice(0, 14) });
+									seen.push({ k, screens, scrolled: Math.round(sc.scrollTop - before), shows: !!shown, top: shown ? Math.round(shown.getBoundingClientRect().top - paneOf(v).top) : null, band: Math.round(pinOf(v) - paneOf(v).top), text: shown?.textContent.trim().slice(0, 14) });
 									await leave();
 								}
 							}
 							return seen;
 						});
-						// ↑ into the header takes the table back to its top, with the header at the pane's top. With the switch off,
-						// Obsidian's table goes back to its top too, but draws the header lower, or out of view from further down.
+						// ↑ into the header takes the table back to its top, with the header where rows pin, a grip's height below the
+						// pane's top. With the switch off, Obsidian's table goes back to its top too, but draws the header lower, or out
+						// of view from further down.
 						const matchesOff = pastEnd.own.every((seen, i) => {
 							const off = pastEnd.off[i];
-							if (seen.k === 'ArrowUp') return seen.shows && Math.abs(seen.top) <= 3 && seen.scrolled < -50000;
+							if (seen.k === 'ArrowUp') return seen.shows && Math.abs(seen.top - seen.band) <= 3 && seen.scrolled < -50000;
 							// Where the cell ends up: how far the note moves depends on where the scroll past the end landed.
 							return seen.shows && off?.shows && seen.text === off.text && Math.abs(seen.top - off.top) <= 3 && seen.scrolled < 0;
 						});
@@ -6447,8 +6450,10 @@
 						const belowHit = below && document.elementFromPoint(shownLeft + 40, below.top + below.height / 2)?.closest('.table-row-btn');
 						check('Own 98: in Table 2000 by 12, scrolled to its end and sideways, the + below sits clear of the scrollbar, and a press there reaches it', !!bar && !!below && below.bottom <= bar.top + 0.5 && !!belowHit, { bar: bar && [bar.top, bar.bottom], below: below && [below.top, below.bottom], hit: !!belowHit });
 
-						// Own 99: Frozen tables' Plants, scrolled so its header is pinned: a body row's grip and the pinned header's
-						// column grips move the row and the columns, as with the switch off.
+						// Own 99: Frozen tables' Plants, scrolled so its header is pinned: a body row's grip moves the row, as with the
+						// switch off. With the switch on, rows pin a grip's height below the pane's top (STA-116), so the pinned
+						// header's column grips are in the pane: one dragged or clicked does what it does with the header at its place.
+						// With the switch off, Obsidian's frozen table pins at the pane's top, its grips above it.
 						const frozenFor = async (on) => {
 							preview.use(on);
 							await sleep(400);
@@ -6465,7 +6470,8 @@
 							await frames(4);
 							const out = {};
 							const pinnedTop = cellOf(view, on, 'Plants', 0, 1)?.getBoundingClientRect().top;
-							out.pinned = Math.abs(pinnedTop - view.scrollDOM.getBoundingClientRect().top) <= 2;
+							out.band = on ? parseFloat(getComputedStyle(view.dom).getPropertyValue('--selectable-tables-band')) || 0 : 0;
+							out.pinned = Math.abs(pinnedTop - (view.scrollDOM.getBoundingClientRect().top + out.band)) <= 2;
 							// A body row a few rows below the pinned ones, dragged up one row.
 							const pane = view.scrollDOM.getBoundingClientRect();
 							const hit = document.elementFromPoint(pane.left + 100, pane.top + 260)?.closest('tr');
@@ -6494,6 +6500,18 @@
 								await release({ x: sown.left + sown.width / 2, y: bedAt.y });
 								out.afterColumn = view.state.doc.toString();
 								await leaveAll(view);
+								await restore(view, text);
+								await sleep(300);
+								// Clicked without dragging: its menu.
+								const bedNow = gripOf(view, on, 'Plants', 'column', 1);
+								if (on && bedNow) {
+									const at = centre(bedNow);
+									await press(at);
+									await release(at);
+									out.pinnedMenu = titlesOf(menusShown()[0]);
+									await closeMenus();
+									await leaveAll(view);
+								}
 							}
 							await restore(view, text);
 							// The header at its place: Bed's grip dragged onto Sown.
@@ -6511,7 +6529,91 @@
 								await release(to);
 								out.afterPlaceColumn = view.state.doc.toString();
 								await leaveAll(view);
+								await restore(view, text);
+								await sleep(300);
+								const bedAgain = gripOf(view, on, 'Plants', 'column', 1);
+								if (on && bedAgain) {
+									const at = centre(bedAgain);
+									await press(at);
+									await release(at);
+									out.placeMenu = titlesOf(menusShown()[0]);
+									await closeMenus();
+									await leaveAll(view);
+								}
 							}
+							await restore(view, text);
+							out.text = text;
+							return out;
+						};
+						// The same past row 300 of Frozen table 2000 by 12, where a block's copy of the header is what pins: Column 2's
+						// grip dragged onto Column 3, and clicked, against the same with the header at the table's top.
+						const deepGrip = async () => {
+							preview.use(true);
+							await sleep(400);
+							view = await open('Frozen table 2000 by 12');
+							await sleep(800);
+							await leaveAll(view);
+							const text = view.state.doc.toString();
+							// Looked up each time: putting the text back can draw the table anew.
+							const big = () => models(view)[0];
+							const first = view.state.doc.lineAt(big().from).number;
+							const pin = () => view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientTop + (parseFloat(getComputedStyle(view.dom).getPropertyValue('--selectable-tables-band')) || 0);
+							const toDeep = async () => {
+								view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(first + 2 + 320).from, { y: 'start' }) });
+								await sleep(500);
+								await frames(4);
+							};
+							// The block whose copy of the header shows where rows pin, and its copy's header cell.
+							const copyHead = (column) => {
+								const box = big().boxes.find((b) => {
+									const r = b.isConnected && b.getBoundingClientRect();
+									return r && r.top <= pin() && r.bottom > pin();
+								});
+								return box?.querySelector('.selectable-tables-copy-table table')?.rows[0]?.cells[column] ?? null;
+							};
+							const out = {};
+							const drag = async (grip, onto) => {
+								const from = centre(grip);
+								const to = { x: onto.left + onto.width / 2, y: from.y };
+								await press(from);
+								await glide(from, to);
+								await release(to);
+								const after = view.state.doc.toString();
+								await leaveAll(view);
+								await restore(view, text);
+								await sleep(400);
+								return after;
+							};
+							const click = async (grip) => {
+								const at = centre(grip);
+								await press(at);
+								await release(at);
+								const titles = titlesOf(menusShown()[0]);
+								await closeMenus();
+								await leaveAll(view);
+								return titles;
+							};
+							await toDeep();
+							const head = copyHead(2);
+							out.pinned = !!head && Math.abs(head.getBoundingClientRect().top - pin()) <= 2;
+							const grip = head?.querySelector(':scope > .table-col-drag-handle');
+							const gripAt = grip && centre(grip);
+							out.reachable = !!grip && (document.elementFromPoint(gripAt.x, gripAt.y) === grip || grip.contains(document.elementFromPoint(gripAt.x, gripAt.y)));
+							if (grip) out.afterDeep = await drag(grip, copyHead(3).getBoundingClientRect());
+							await toDeep();
+							const again = copyHead(2)?.querySelector(':scope > .table-col-drag-handle');
+							if (again) out.deepMenu = await click(again);
+							const toTop = async () => {
+								view.dispatch({ effects: view.constructor.scrollIntoView(big().from, { y: 'center' }) });
+								await sleep(500);
+								await frames(4);
+							};
+							await toTop();
+							const placeGrip = gripOf(view, true, null, 'column', 2);
+							if (placeGrip) out.afterPlace = await drag(placeGrip, cellOf(view, true, null, 0, 3).getBoundingClientRect());
+							await toTop();
+							const placeAgain = gripOf(view, true, null, 'column', 2);
+							if (placeAgain) out.placeMenu = await click(placeAgain);
 							await restore(view, text);
 							out.text = text;
 							return out;
@@ -6521,8 +6623,18 @@
 						const plants = (text) => text?.slice(text.indexOf('## Plants'), text.indexOf('## Plants') + 900);
 						check('Own 99: in Plants with its header pinned, a body row dragged up one row moves there, as with the switch off', frozenOn.pinned && frozenOn.row === frozenOff.row && frozenOn.afterRow === frozenOff.afterRow && frozenOn.afterRow !== frozenOn.text, { on: { pinned: frozenOn.pinned, row: frozenOn.row, text: plants(frozenOn.afterRow) }, off: { pinned: frozenOff.pinned, row: frozenOff.row, text: plants(frozenOff.afterRow) } });
 						results.push({ name: 'Own 99 pinned header\'s column grip reachable (switch on, off)', ok: true, detail: [frozenOn.columnReachable, frozenOff.columnReachable] });
-						check('Own 99: the pinned header\'s grips for its columns are where Obsidian\'s frozen table has them, above the pane\'s top, and a press there does what it does with the switch off', frozenOn.columnReachable === frozenOff.columnReachable && frozenOn.afterColumn === frozenOff.afterColumn, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn) }, off: { reachable: frozenOff.columnReachable, text: plants(frozenOff.afterColumn) } });
+						check('Own 99: with the switch on, Plants\' rows pin a grip\'s height below the pane\'s top, and with the switch off at its top', frozenOn.pinned && frozenOn.band > 0 && frozenOff.pinned, { on: { pinned: frozenOn.pinned, band: frozenOn.band }, off: { pinned: frozenOff.pinned } });
+						check('Own 99: with the switch on, the pinned header\'s grip for Bed is in the pane, and dragged onto Sown it writes what the same drag writes with the header at its place; with the switch off it\'s above the pane, as before', frozenOn.columnReachable && frozenOn.afterColumn === frozenOn.afterPlaceColumn && !frozenOff.columnReachable, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn)?.slice(0, 300), place: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.columnReachable } });
+						check('Own 99: a click on the pinned header\'s grip shows the same menu as at the header\'s place', !!frozenOn.pinnedMenu?.length && frozenOn.pinnedMenu.join() === frozenOn.placeMenu?.join(), { pinned: frozenOn.pinnedMenu, place: frozenOn.placeMenu });
 						check('Own 99: with the header at its place, Bed\'s grip dragged onto Sown puts Bed after Sown, as with the switch off', frozenOn.placeReachable && frozenOn.afterPlaceColumn === frozenOff.afterPlaceColumn && /\| Sown +\| Bed/.test(plants(frozenOn.afterPlaceColumn) ?? ''), { on: { reachable: frozenOn.placeReachable, text: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.placeReachable, text: plants(frozenOff.afterPlaceColumn)?.slice(0, 300) } });
+						const deep = await deepGrip();
+						const deepText = (text) => {
+							const lines = (text ?? '').split('\n');
+							const at = lines.findIndex((line) => line.includes('%%freeze'));
+							return lines.slice(at, at + 4).map((line) => line.slice(0, 160));
+						};
+						check('Own 99: past row 300 of Frozen table 2000 by 12, the pinned header\'s grip for Column 2 is in the pane, and dragged onto Column 3 it writes what the same drag writes at the table\'s top', deep.pinned && deep.reachable && !!deep.afterDeep && deep.afterDeep !== deep.text && deep.afterDeep === deep.afterPlace, { pinned: deep.pinned, reachable: deep.reachable, deep: deepText(deep.afterDeep), place: deepText(deep.afterPlace) });
+						check('Own 99: there, a click on it shows the same menu as at the table\'s top', !!deep.deepMenu?.length && deep.deepMenu.join() === deep.placeMenu?.join(), { deep: deep.deepMenu, place: deep.placeMenu });
 						check('Own 99: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						await closeMenus();
@@ -6552,6 +6664,8 @@
 					const onDiskBefore = {};
 					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
 					const port = (view) => view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientTop;
+					// Where rows pin: a grip's height below the pane's top (STA-116).
+					const pinAt = (view) => port(view) + (parseFloat(getComputedStyle(view.dom).getPropertyValue('--selectable-tables-band')) || 0);
 					const opacity = (el, pseudo) => (el ? parseFloat(getComputedStyle(el, pseudo).opacity) : NaN);
 					const near = (a, b, by = 0.08) => Math.abs(a - b) <= by;
 					const round = (n) => Math.round(n * 100) / 100;
@@ -6599,11 +6713,11 @@
 						const r = strip.getBoundingClientRect();
 						return { shows: round(opacity(strip, '::after')), gap: round(r.left + parseFloat(getComputedStyle(strip, '::after').left) - (r.right - line)) };
 					};
-					// Puts the table's top `down` px above the pane's top, aimed again until it's there: rows drawn take their real
+					// Puts the table's top `down` px above where rows pin, aimed again until it's there: rows drawn take their real
 					// heights.
 					const aimTop = async (view, model, down) => {
 						for (let i = 0; i < 8; i++) {
-							const off = model.blocks[0].table.getBoundingClientRect().top - port(view) + down;
+							const off = model.blocks[0].table.getBoundingClientRect().top - pinAt(view) + down;
 							if (Math.abs(off) < 0.3) return;
 							view.scrollDOM.scrollTop += off;
 							await frames(3);
@@ -6667,7 +6781,7 @@
 							down.push([at, rowShade(view, plants)]);
 						}
 						const under = plants.pins.room.height - line;
-						check('Own 101: in Plants, the shadow under the pinned rows fades in over the table\'s first 16 px past the pane\'s top, and lies right under them', down.every(([, s], i) => near(s.shows, [0, 0.5, 1, 1][i])) && Math.abs(down[3][1].top - under) <= 1.5, { down, under });
+						check('Own 101: in Plants, the shadow under the pinned rows fades in over the table\'s first 16 px past where rows pin, and lies right under them', down.every(([, s], i) => near(s.shows, [0, 0.5, 1, 1][i])) && Math.abs(down[3][1].top - under) <= 1.5, { down, under });
 						const end = [];
 						for (const left of [16, 8, 0]) {
 							await aimEnd(view, plants, left);
@@ -6764,7 +6878,7 @@
 						await frames(4);
 						const crossing = big.boxes.find((b) => {
 							const r = b.isConnected && b.getBoundingClientRect();
-							return r && r.top <= port(view) && r.bottom > port(view);
+							return r && r.top <= pinAt(view) && r.bottom > pinAt(view);
 						});
 						const headCopy = crossing?.querySelector('.selectable-tables-copy-table table')?.rows[0]?.cells[2];
 						if (headCopy) {

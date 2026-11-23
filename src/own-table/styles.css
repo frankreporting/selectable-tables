@@ -539,6 +539,9 @@ body {
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pin-rows > .table-wrapper > table {
 	view-timeline: --selectable-tables-rows block;
+
+	/* Rows pin a band below the pane's top (pins.ts), so the timeline's top edge is there too. */
+	view-timeline-inset: var(--selectable-tables-band, 0px) 0;
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-rail.selectable-tables-shade-rail {
@@ -642,6 +645,105 @@ body {
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides:dir(rtl) > .table-wrapper > .selectable-tables-strip::after,
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides:dir(rtl) .selectable-tables-copy > .selectable-tables-corner::after {
 	background-image: linear-gradient(to left, var(--background-modifier-box-shadow), transparent);
+}
+
+/*
+ * The band above the pinned rows (STA-116). Rows pin a grip's height below the pane's top (pins.ts), so the pinned
+ * header's column grips, which sit just above it, stay in the pane. What pins draws the band, under the grips: the
+ * real header in a table of one block, and the strip's, and in a table of more blocks the boxes holding each block's
+ * copy of the rows and its corner, at the top of their table, which a theme can border above the header. So it moves
+ * sideways with what draws it. It's painted with what shows behind the table, so nothing passing under shows there.
+ * A press on it selects the table, as one beside the cells does.
+ *
+ * On the first block it grows from the table's top as the table's top passes where rows pin, on the timeline the
+ * shadow under the rows follows, so it covers just the rows passing up there: at rest it would lie over the table's
+ * top padding and hide the selected table's frame. A later block's lies above the block, which clips it, until the
+ * block's top passes where rows pin. A transform, where the scroll runs: the same with opacity drew a faint line
+ * where two blocks met inside the band.
+ *
+ * A theme's border on the header, as some set, draws nothing where cells draw their own borders, as a pinned table's
+ * do, but it shrinks the box the header's tint is laid in (below), which then stops short of the header's edge.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows table > thead.selectable-tables-pinned-row {
+	/* stylelint-disable-next-line declaration-no-important */
+	border-width: 0 !important;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows thead.selectable-tables-pinned-row::before,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows .selectable-tables-copy > :is(.selectable-tables-copy-slides, .selectable-tables-corner)::before {
+	content: "";
+	position: absolute;
+	bottom: 100%;
+	inset-inline: calc(-1 * var(--table-drag-handle-size));
+	height: var(--selectable-tables-band, 0px);
+	background-color: var(--selectable-tables-page, var(--background-primary));
+	background-image: var(--selectable-tables-behind, none);
+	pointer-events: auto;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-first.selectable-tables-pins.selectable-tables-pin-rows thead.selectable-tables-pinned-row::before,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-first.selectable-tables-pins.selectable-tables-pin-rows .selectable-tables-copy > :is(.selectable-tables-copy-slides, .selectable-tables-corner)::before {
+	transform-origin: bottom;
+	animation: selectable-tables-band linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing 0 exit-crossing var(--selectable-tables-band, 0px);
+}
+
+@keyframes selectable-tables-band {
+	from {
+		transform: scaleY(0);
+	}
+
+	to {
+		transform: none;
+	}
+}
+
+/*
+ * A table selected whole: its tint and frame lie over everything in the table. Once rows pin, the band has to stay
+ * plain, so a real pinned header goes above them with it and takes the tint as a piece of its own, the strip's with
+ * the frame's edge at the table's start, which the strip draws; and the rails go above them too, the shadow's and
+ * those of a table of more blocks, whose copies have their own tint. At rest they stay under the tint, so its frame
+ * draws whole round the header. Each switches on the timeline the band follows: main-thread animations, while the
+ * table is selected.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected table:not(.selectable-tables-holds-cell) > thead.selectable-tables-pinned-row,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected > .selectable-tables-rail {
+	animation: selectable-tables-raise linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing 0 exit-crossing 1px;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected table:not(.selectable-tables-holds-cell) > thead.selectable-tables-pinned-row::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background-color: var(--table-selection);
+	pointer-events: none;
+	animation: selectable-tables-own-tint linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing 0 exit-crossing 1px;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected .selectable-tables-strip table:not(.selectable-tables-holds-cell) > thead.selectable-tables-pinned-row::after {
+	inset-inline-start: calc(-1 * var(--table-selection-border-width));
+	border-inline-start: var(--table-selection-border-width) solid var(--table-selection-border-color);
+}
+
+@keyframes selectable-tables-raise {
+	to {
+		z-index: 5;
+	}
+}
+
+@keyframes selectable-tables-own-tint {
+	from {
+		visibility: hidden;
+	}
+
+	to {
+		visibility: visible;
+	}
 }
 
 /*

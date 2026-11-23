@@ -73,6 +73,31 @@ export function railOf(block: RailBlock, pinned: number): { top: number; bottom:
 	};
 }
 
+/** What carrying an open frozen row down a table of more blocks reads, all on the screen but `scroll`. */
+export interface CarrySizes {
+	/** The note's scroll offset when this was read. */
+	scroll: number;
+	/** The row's top where the table lays it out, without the move. */
+	rowTop: number;
+	/** Where rows pin, and the frozen rows' height above this one. */
+	pinAt: number;
+	above: number;
+	/** The table's last row's bottom, and the frozen rows' height together. */
+	tableBottom: number;
+	pinned: number;
+}
+
+/**
+ * The note's scroll offsets between which an open frozen row of a table of more blocks moves down with the note, so it
+ * lies where the blocks' copies of the frozen rows pin (STA-93): from where it reaches its place under the rows above
+ * it, to where the last block's copies leave with the table's end (`railOf`). Between them the row moves as far as
+ * the note scrolls; it rests at its place in the table before, and that far down after.
+ */
+export function carryRange(at: CarrySizes): { from: number; to: number } {
+	const from = at.scroll + at.rowTop - (at.pinAt + at.above);
+	return { from, to: Math.max(from, at.scroll + at.tableBottom - at.pinned - at.pinAt) };
+}
+
 /** Where a cell to show is, down the pane, and what it has to stay clear of, all on the screen. */
 export interface ShowDown {
 	/** The pane's top and bottom, the bottom above a status bar floating over it. */

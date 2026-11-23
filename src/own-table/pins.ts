@@ -6,7 +6,7 @@ import type { Cell } from '../editor/table-text';
 import { type Paint, readPaint } from '../editor/theme-paint';
 import { usesBars } from './bar';
 import { type LineMatch, paintMatches } from './matches';
-import { frozenIn, pinsFit, railOf, stickyTops, stripWidth } from './pin-sums';
+import { carryRange, frozenIn, pinsFit, railOf, stickyTops, stripWidth } from './pin-sums';
 import { timed } from './profile';
 import { cellsOf } from './shape';
 
@@ -24,6 +24,10 @@ import { cellsOf } from './shape';
  *
  * What's copied is drawn again whenever the real rows change. Phones and tablets keep a box that scrolls the table
  * sideways, so nothing pins there, and nor on a device without scroll-driven animations (`canFreeze`).
+ *
+ * An open cell of the frozen rows has its editor in the real row, in the first block. In a table of more blocks that
+ * row is carried down with the note while its cell is open, by an animation on the note's scroll, so it lies where the
+ * copies pin, over every block, and its copies hide (STA-93).
  */
 
 /** On a block while its table pins anything: styles.css paints what pins, with the theme's colors. */
@@ -65,6 +69,16 @@ const HIDDEN_CLASS = 'selectable-tables-hidden-copy';
  * row and a frozen column (`holdsCorner`).
  */
 const HOLDS_STRIP_CLASS = 'selectable-tables-holds-strip';
+/**
+ * On the open cell's row while it's carried down with the note, in a table of more blocks (`carried`), and the scroll
+ * offsets its animation runs between: it moves as far as the note scrolls between them.
+ */
+const CARRIED_CLASS = 'selectable-tables-carried';
+const CARRY_FROM = '--selectable-tables-carry-from';
+const CARRY_TO = '--selectable-tables-carry-to';
+const CARRY_TRAVEL = '--selectable-tables-carry-travel';
+/** On the first block while it carries a row: it draws above the later blocks, and lets the row out of its box. */
+const CARRIES_CLASS = 'selectable-tables-carries';
 
 
 const NONE: Freeze = { rows: 0, columns: 0 };
@@ -109,6 +123,8 @@ export interface PinHost {
 	matchedRow(tr: HTMLTableRowElement): number | null;
 	/** A drawn body row's element, -1 being the header. */
 	rowElement(row: number): HTMLTableRowElement | null;
+	/** Where the table's last row ends on the screen, from the page, else from CodeMirror's heights; null unknown. */
+	tableBottom(): number | null;
 	/** A body row's height as the table holds it, measured or estimated, -1 being the header. */
 	rowHeight(row: number): number;
 }
@@ -151,7 +167,8 @@ interface Strip extends Part {
 /** What one block pins. */
 interface Parts {
 	strip: Strip | null;
-	rail: { box: HTMLDivElement; copy: HTMLDivElement; slider: HTMLDivElement; table: Part; corner: Part | null; source: number } | null;
+	/** `bottom` is where its rail ends, as `railOf` has it, kept for when the first block stops carrying a row. */
+	rail: { box: HTMLDivElement; copy: HTMLDivElement; slider: HTMLDivElement; table: Part; corner: Part | null; source: number; bottom: string } | null;
 }
 
 /** What placing the pins reads from the page. */
@@ -171,6 +188,8 @@ interface PinRead {
 		/** The real rows' heights, for the strip's copies. */
 		rows: [HTMLTableRowElement, number][];
 	}[];
+	/** The scroll offsets each frozen row in the page would be carried between, by row, 0 being the header. */
+	carry: Map<number, { from: number; to: number }>;
 }
 
 function part(parent: HTMLElement, cls: string, holding: boolean): Part {
@@ -221,6 +240,16 @@ function spacerCopy(tr: HTMLTableRowElement, columns: number): HTMLTableRowEleme
 	const td = copy.createEl('td');
 	td.colSpan = Math.max(1, columns);
 	return copy;
+}
+
+/**
+ * Where a row is laid out on the screen, down the page, leaving out its own move: a carried row's, as its animation has
+ * it at the scroll offset read with it. `offsetTop` would leave it out too, but in whole pixels.
+ */
+function laidTop(el: HTMLElement): number {
+	const top = el.getBoundingClientRect().top;
+	const transform = getComputedStyle(el).transform;
+	return !transform || transform === 'none' ? top : top - new DOMMatrixReadOnly(transform).m42;
 }
 
 function setStyle(el: HTMLElement, name: string, value: string | null) {
@@ -355,6 +384,11 @@ export class Pins {
 	private opened: { tr: HTMLTableRowElement; cell: Cell } | null = null;
 	private liftedCells: HTMLElement[] = [];
 	private hiddenCopies: HTMLElement[] = [];
+	/** A cell of the frozen rows about to open, deep in a table of more blocks, whose row is carried once it's drawn. */
+	private coming: Cell | null = null;
+	/** The scroll offsets each frozen row in the page would be carried between, from the last read, and the row carried. */
+	private carryAt = new Map<number, { from: number; to: number }>();
+	private carrying: HTMLTableRowElement | null = null;
 
 	/** What pins now: rows and columns only while they pin. */
 	get room(): Room {
@@ -371,33 +405,61 @@ export class Pins {
 	/**
 	 * The open cell, or none. In a frozen column, while the table moves sideways, its row's frozen cells take the
 	 * opposite move, so the cell stays where the strip is, with the editor in the real cell, and its row's copy in the
-	 * strip hides. In a frozen row of a table of more blocks, the first block's rows pin themselves, as a table of one
-	 * block's do, and its copy of the open row hides, since the copy lies over the real rows there. In a frozen row and a
-	 * frozen column, the first block's strip goes under the pinned rows instead (`holdsCorner`).
+	 * strip hides. In a frozen row of a table of more blocks, its row is carried down with the note (`carried`). In a
+	 * frozen row and a frozen column, the first block's strip goes under the pinned rows (`holdsCorner`).
 	 */
 	openCell(tr: HTMLTableRowElement | null, cell: Cell | null): void {
 		const was = this.opened;
 		this.opened = tr && cell ? { tr, cell } : null;
+		if (this.opened) this.coming = null;
 		if (was?.tr === this.opened?.tr && was?.cell.column === this.opened?.cell.column) return;
 		this.marks();
-		if (this.liftsRows() || (was && was.cell.row < this.freeze.rows)) this.measure();
+		if (this.carried() || (was && was.cell.row < this.freeze.rows)) this.measure();
 	}
 
 	/**
-	 * Whether the open cell is in a frozen row and a frozen column, while both pin. The strip's rows pass behind a pinned
-	 * row, so no copy hidden in the strip could show such a cell. Instead the first block's strip goes inside the table's
-	 * wrapper, under the real pinned rows, as Obsidian's own table layers them, and takes the opposite of the table's
-	 * sideways move, as do the pinned rows' frozen cells: the real cells show in place, the open one among them, and the
-	 * table still moves sideways (STA-105).
+	 * A cell of the frozen rows about to open deep in a table of more blocks, or none: its row is carried down to where
+	 * it pins as soon as it's drawn and placed, before its cell opens, so the cell opens where it was pressed.
 	 */
-	private get holdsCorner(): boolean {
-		const open = this.opened;
-		return !!open && this.fit.rows && this.fit.columns && open.cell.row < this.freeze.rows && open.cell.column < this.freeze.columns;
+	willOpen(cell: Cell | null): void {
+		this.coming = cell;
+		this.marks();
+		if (cell) this.measure();
 	}
 
-	/** Whether the first block's own rows pin, for an open cell in a frozen row of a table of more blocks. */
-	private liftsRows(): boolean {
-		return !!this.opened && this.opened.cell.row < this.freeze.rows && this.fit.rows && this.host.blockCount > 1;
+	/**
+	 * The row carried down with the note, and its cell: the open cell's, or the one about to open, while it's in a frozen
+	 * row of a table of more blocks whose rows pin, and drawn. The editor stays in the real row, in the first block, which
+	 * CodeMirror keeps in the page since the note's selection is in it, so nothing moves the editor between blocks.
+	 */
+	private carried(): { tr: HTMLTableRowElement; cell: Cell } | null {
+		if (!this.fit.rows || this.host.blockCount < 2) return null;
+		const open = this.opened;
+		if (open) return open.cell.row < this.freeze.rows && open.tr.isConnected ? open : null;
+		const coming = this.coming;
+		const tr = coming && coming.row < this.freeze.rows ? this.host.rowElement(coming.row - 1) : null;
+		return coming && tr?.isConnected ? { tr, cell: coming } : null;
+	}
+
+	/** The row carried, once a read has said where it rides; until then its copies still show. */
+	private carriedNow(): { tr: HTMLTableRowElement; cell: Cell } | null {
+		const carried = this.carried();
+		return carried && this.carryAt.has(carried.cell.row) ? carried : null;
+	}
+
+	/**
+	 * Whether the open cell is in a frozen row and a frozen column, while both pin, or in any column of a carried row. The
+	 * strip's rows pass behind a pinned row, so no copy hidden in the strip could show such a cell. Instead the first
+	 * block's strip goes inside the table's wrapper, under the real pinned rows, as Obsidian's own table layers them, and
+	 * takes the opposite of the table's sideways move, as do the pinned rows' frozen cells: the real cells show in place,
+	 * the open one among them, and the table still moves sideways (STA-105). A carried row's frozen cells stay where the
+	 * strip is the same way, deep down too, where the first block's strip is far above.
+	 */
+	private get holdsCorner(): boolean {
+		const carried = this.carriedNow();
+		const open = carried ?? this.opened;
+		if (!open || !this.fit.rows || !this.fit.columns || open.cell.row >= this.freeze.rows) return false;
+		return open.cell.column < this.freeze.columns || !!carried;
 	}
 
 	/**
@@ -467,14 +529,16 @@ export class Pins {
 		for (const el of this.hiddenCopies) el.removeClass(HIDDEN_CLASS);
 		this.liftedCells = [];
 		this.hiddenCopies = [];
-		const open = this.opened?.tr.isConnected ? this.opened : null;
+		const carried = this.carriedNow();
+		this.carry(carried);
+		const open = carried ?? (this.opened?.tr.isConnected ? this.opened : null);
 		const corner = !!open && this.holdsCorner;
 		for (const block of this.host.pinBlocks) {
 			const strip = block ? this.parts.get(block)?.strip : null;
 			if (block && strip) this.placeStrip(block, strip, corner && block.index === 0);
 		}
 		if (!open) return;
-		if (this.fit.columns && open.cell.column < this.freeze.columns) {
+		if (this.fit.columns && (open.cell.column < this.freeze.columns || corner)) {
 			const lift = (tr: HTMLTableRowElement | null) => {
 				if (!tr) return;
 				tr.addClass(LIFTED_ROW_CLASS);
@@ -502,15 +566,42 @@ export class Pins {
 				}
 			}
 		}
-		if (this.liftsRows()) {
-			// Only the open row's copy in the first block hides, so the real row, which pins itself there and is always in
-			// the page, shows through, and the other frozen rows' copies stay.
-			const first = this.host.pinBlocks[0];
-			const rail = first ? this.parts.get(first)?.rail : null;
-			const row = open.cell.row;
-			for (const tr of [rail?.table.table.rows[row], rail?.corner?.table.rows[row]]) if (tr) this.hiddenCopies.push(tr);
+		if (carried) {
+			// Every block's copy of the carried row hides, so the real row shows through, and the other frozen rows' copies stay.
+			const row = carried.cell.row;
+			for (const block of this.host.pinBlocks) {
+				const rail = block ? this.parts.get(block)?.rail : null;
+				for (const tr of [rail?.table.table.rows[row], rail?.corner?.table.rows[row]]) if (tr) this.hiddenCopies.push(tr);
+			}
 		}
 		for (const el of this.hiddenCopies) el.addClass(HIDDEN_CLASS);
+	}
+
+	/**
+	 * Carries a row down with the note, between the scroll offsets the last read found for it, or takes the move off. The
+	 * first block then draws above the later ones and lets the row out of its box, and its rail clips the copy at its
+	 * end instead, which would otherwise ride on into the next block. Set in the same task as the copies hide.
+	 */
+	private carry(carried: { tr: HTMLTableRowElement; cell: Cell } | null): void {
+		const tr = carried?.tr ?? null;
+		const was = this.carrying;
+		if (was && was !== tr) {
+			was.removeClass(CARRIED_CLASS);
+			for (const name of [CARRY_FROM, CARRY_TO, CARRY_TRAVEL]) was.style.removeProperty(name);
+		}
+		this.carrying = tr;
+		const range = carried ? this.carryAt.get(carried.cell.row) : undefined;
+		if (tr && range) {
+			setStyle(tr, CARRY_FROM, px(range.from));
+			setStyle(tr, CARRY_TO, px(range.to));
+			setStyle(tr, CARRY_TRAVEL, px(range.to - range.from));
+			tr.addClass(CARRIED_CLASS);
+		}
+		const first = this.host.pinBlocks[0];
+		if (!first) return;
+		first.dom.toggleClass(CARRIES_CLASS, !!tr);
+		const rail = this.parts.get(first)?.rail;
+		if (rail) setStyle(rail.box, 'bottom', tr ? '0px' : rail.bottom);
 	}
 
 	/** Draws a row's Find matches on its copies, -1 being the header, after taking off those they had. */
@@ -555,6 +646,9 @@ export class Pins {
 		const columns = this.fit.columns && column < this.freeze.columns;
 		if (!rows && !columns) return null;
 		const host = this.host;
+		// The carried row is drawn where it pins itself, over every block.
+		const carried = this.carriedNow();
+		if (carried && carried.cell.row === row) return { el: carried.tr.cells[column] ?? null, rows, columns, stuck: true };
 		const lifted = this.opened && this.opened.cell.row === row && this.opened.cell.column < this.freeze.columns ? this.opened.tr : null;
 		const real = host.rowElement(row - 1);
 		const single = host.blockCount === 1;
@@ -564,11 +658,6 @@ export class Pins {
 			if (rows && !single) {
 				const box = block.dom.getBoundingClientRect();
 				if (box.top > pinAt || box.bottom <= pinAt) continue;
-				// The open row pins itself there, in the first block.
-				if (block.index === 0 && this.liftsRows() && this.opened?.cell.row === row) {
-					const copy = columns && !lifted && real ? this.stripCopy(block, real)?.cells[column] : null;
-					return { el: copy ?? null, rows, columns, stuck: true };
-				}
 				const tr = columns && parts.rail?.corner ? parts.rail.corner.table.rows[row] : parts.rail?.table.table.rows[row];
 				return { el: tr?.cells[column] ?? null, rows, columns };
 			}
@@ -618,11 +707,11 @@ export class Pins {
 			run();
 			return;
 		}
-		this.placed = run;
+		this.placed.push(run);
 		this.measure();
 	}
 
-	private placed: (() => void) | null = null;
+	private placed: (() => void)[] = [];
 
 	/** Places what pins on CodeMirror's next measure. */
 	measure(): void {
@@ -639,8 +728,8 @@ export class Pins {
 			write: (read) => {
 				timed('draw', () => this.write(read));
 				const placed = this.placed;
-				this.placed = null;
-				placed?.();
+				this.placed = [];
+				for (const run of placed) run();
 			},
 		});
 	}
@@ -723,7 +812,35 @@ export class Pins {
 			}
 			return { block, start, top, inner, bottom: top + table.offsetHeight, height: dom.offsetHeight, rows: real };
 		});
-		return { pin, fit, heights, paint, blocks };
+		return { pin, fit, heights, paint, blocks, carry: this.readCarry(heights, Math.floor(paneTop * ratio + 0.001) / ratio + scroller.clientTop) };
+	}
+
+	/**
+	 * Where each frozen row in the first block would be carried, for an open cell of a table of more blocks: the scroll
+	 * offsets between which it moves with the note, read as the table is laid out now. A carried row's height is its
+	 * real row's, which an open cell's editor can grow past its copies'. Read on every measure, so a row whose cell opens
+	 * next, as an arrow key or Tab moves to it, is carried in the same task as it opens.
+	 */
+	private readCarry(heights: number[], pinAt: number): PinRead['carry'] {
+		const host = this.host;
+		const view = host.view;
+		const first = host.pinBlocks[0];
+		const at: PinRead['carry'] = new Map();
+		if (!view || host.blockCount < 2 || !this.freeze.rows || !first?.dom.isConnected) return at;
+		const carried = this.carried();
+		const real = carried?.tr.getBoundingClientRect().height;
+		if (carried && real) heights[carried.cell.row] = real;
+		const bottom = host.tableBottom();
+		if (bottom === null) return at;
+		const tops = stickyTops(heights);
+		const pinned = heights.reduce((sum, height) => sum + height, 0);
+		const scroll = view.scrollDOM.scrollTop;
+		for (let row = 0; row < this.freeze.rows; row++) {
+			const tr = host.rowElement(row - 1);
+			if (!tr?.isConnected || !first.dom.contains(tr)) continue;
+			at.set(row, carryRange({ scroll, rowTop: laidTop(tr), pinAt, above: tops[row] ?? 0, tableBottom: bottom, pinned }));
+		}
+		return at;
 	}
 
 	/**
@@ -766,13 +883,14 @@ export class Pins {
 		this.fit = read.fit;
 		this.paint = read.paint;
 		this.heights = read.heights;
+		this.carryAt = read.carry;
 		setStyle(view.dom, PIN_VARIABLE, px(read.pin));
 		const single = host.blockCount === 1;
 		const tops = stickyTops(read.heights);
 		const pinned = read.heights.reduce((sum, height) => sum + height, 0);
 		let again = false;
 		let rebuilt = false;
-		const lifts = this.liftsRows();
+		const carriedRow = this.carriedNow()?.cell.row ?? -1;
 		// Until the theme's colors are read, what pins is built but not painted, and read on the next measure.
 		if (!read.paint) again = true;
 		for (const { block, start, top, inner, bottom, height, rows } of read.blocks) {
@@ -783,8 +901,9 @@ export class Pins {
 			dom.toggleClass(SINGLE_CLASS, single);
 			for (const [name, value] of read.paint?.variables ?? []) setStyle(dom, name, any ? value : null);
 			const parts = this.partsOf(block);
-			// The first block's own rows pin in a table of one block, and for an open cell in a frozen row.
-			const own = this.fit.rows && (single || (block.index === 0 && lifts));
+			// The first block's own rows pin in a table of one block. In a table of more blocks the copies pin, and an open
+			// cell's row is carried (`carry`).
+			const own = this.fit.rows && single;
 			if (block.index === 0) this.realRows(block, own ? tops : null);
 			// The strip of frozen columns.
 			if (this.fit.columns) {
@@ -825,7 +944,9 @@ export class Pins {
 				const rail = (parts.rail ??= this.makeRail(dom));
 				const { top: railTop, bottom: railBottom } = railOf({ first: block.index === 0, last: block.index === host.blockCount - 1, tableTop: top, tableBottom: bottom, height }, pinned);
 				setStyle(rail.box, 'top', px(railTop));
-				setStyle(rail.box, 'bottom', px(railBottom));
+				// `carry` ends the first block's rail at its end while it carries a row.
+				rail.bottom = px(railBottom);
+				setStyle(rail.box, 'bottom', rail.bottom);
 				setStyle(rail.slider, 'inset-inline-start', px(start));
 				this.shape(rail.table, host.columns);
 				setStyle(rail.table.table, 'width', host.tableWidth);
@@ -841,6 +962,11 @@ export class Pins {
 					if (rail.corner) rail.corner.applied = '';
 					rebuilt = true;
 				}
+				// A carried row's copy, hidden, takes its real row's height, so the copies of the rows under it stay under it as
+				// its open cell grows.
+				Array.from(rail.table.table.rows)
+					.filter((tr) => !tr.hasClass(SPACER_CLASS))
+					.forEach((tr, index) => setStyle(tr, 'height', index === carriedRow ? px(read.heights[index] ?? 0) : null));
 				if (this.fit.columns) {
 					rail.corner ??= part(rail.copy, CORNER_CLASS, this.holding);
 					const corner = rail.corner;
@@ -888,7 +1014,7 @@ export class Pins {
 		const copy = box.createDiv(COPY_CLASS);
 		const slider = copy.createDiv(SLIDER_CLASS);
 		const table = part(slider, 'selectable-tables-copy-table', this.holding);
-		return { box, copy, slider, table, corner: null, source: -1 };
+		return { box, copy, slider, table, corner: null, source: -1, bottom: '' };
 	}
 
 	/** Columns and width for a small table of the first `columns` columns. */

@@ -247,8 +247,10 @@ interface ShowRead {
 	side: { left: number; right: number };
 	top: number;
 	bottom: number;
-	/** How far down from the pane's top the frozen rows cover, for a cell that passes under them. */
+	/** How far down from the pane's top the frozen rows cover, the band above them included, for a cell that passes under them. */
 	under: number;
+	/** How far below the pane's top rows pin: the band left for the pinned header's column grips. */
+	band: number;
 	/** How far in from the box's start the frozen columns cover, for a cell that passes under them. */
 	clear: number;
 	/** Whether the cell is pinned down the note, or sideways: then it's always in view that way. */
@@ -754,6 +756,7 @@ export class Model implements Span, DrawnTable, DragTable {
 			top,
 			bottom,
 			under: room.rows && cell.row >= room.rows ? room.height : 0,
+			band: room.band,
 			clear: room.columns && cell.column >= room.columns ? this.stripClear() : 0,
 			// A cell about to open in a frozen column opens where the strip is: the table stays where it is sideways.
 			pinned: { rows: !!pinned?.rows, columns: !!pinned?.columns || (this.showReal && cell.column < room.columns) },

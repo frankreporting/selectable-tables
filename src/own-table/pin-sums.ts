@@ -110,8 +110,10 @@ export interface ShowDown {
 	cellBottom: number;
 	/** The cell's own scroll margin. */
 	margin: number;
-	/** How far down from the pane's top the pinned rows cover, for a cell that passes under them. */
+	/** How far down from the pane's top the pinned rows cover, the band above them included, for a cell that passes under them. */
 	under: number;
+	/** How far below the pane's top rows pin: the band left for the pinned header's column grips. */
+	band: number;
 	/** Whether the cell is in the pinned rows, which always show while the table crosses the pane's top. */
 	pinned: boolean;
 	/** For a key that went up into the pinned rows: where the table's top is, to take it back there. */
@@ -122,12 +124,12 @@ export interface ShowDown {
  * How far to scroll the note to show a cell, as `scrollIntoView` with `nearest` would, clear of the pinned rows: a cell
  * that passes under them stays below them, and one of them is scrolled to only when it's out of the pane altogether, as
  * past the table's end, since a scroll margin would move the note on every key there. A key that went up into them
- * takes the table back to its top. Positive scrolls down.
+ * takes the table back to its top, to where rows pin, so the header's column grips show above it. Positive scrolls down.
  */
 export function showDown(at: ShowDown): number {
 	const { bottom, cellTop, cellBottom } = at;
 	if (at.pinned) {
-		if (at.tableTop !== null && at.tableTop < at.top) return at.tableTop - at.top;
+		if (at.tableTop !== null && at.tableTop < at.top + at.band) return at.tableTop - (at.top + at.band);
 		if (cellBottom <= at.top) return cellTop - at.top;
 		if (cellTop >= bottom) return cellBottom - bottom;
 		return 0;

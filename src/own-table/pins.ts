@@ -52,8 +52,13 @@ const CORNER_CLASS = 'selectable-tables-corner';
 const FILLER_CLASS = 'selectable-tables-filler';
 /** On a copied row: the table's row it copies, 0 being the header, so a press on it reaches the real cell. */
 export const ROW_ATTRIBUTE = 'data-selectable-tables-row';
-/** On the editor: how far above the scroller's content box rows pin, so they pin at the pane's top. */
+/**
+ * On the editor: how far above the scroller's content box rows pin, so they pin a grip's height below the pane's top,
+ * leaving a band above the pinned header for its column grips (STA-116).
+ */
 const PIN_VARIABLE = '--selectable-tables-own-pin';
+/** On the editor: how tall that band is, Obsidian's `--table-drag-handle-size` in device pixels, for styles.css. */
+const BAND_VARIABLE = '--selectable-tables-band';
 /** As model.ts names them: rows that stand in for others, and hidden rows that only count for a theme's rules. */
 const SPACER_CLASS = 'selectable-tables-spacer';
 const PARITY_CLASS = 'selectable-tables-parity';
@@ -205,6 +210,8 @@ interface Parts {
 /** What placing the pins reads from the page. */
 interface PinRead {
 	pin: number;
+	/** How far below the pane's top rows pin: the band left for the pinned header's column grips. */
+	band: number;
 	fit: { rows: boolean; columns: boolean };
 	heights: number[];
 	paint: Paint | null;
@@ -310,10 +317,14 @@ function setStyle(el: HTMLElement, name: string, value: string | null) {
 	} else if (el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value);
 }
 
-/** What pins now, for showing a cell clear of it: how many rows and columns, and how tall the rows are together. */
+/**
+ * What pins now, for showing a cell clear of it: how many rows and columns, how far below the pane's top rows pin (the
+ * band left for the pinned header's grips), and how far down from the pane's top they cover, the band included.
+ */
 export interface Room {
 	rows: number;
 	columns: number;
+	band: number;
 	height: number;
 }
 
@@ -338,6 +349,8 @@ export class Pins {
 	private paint: Paint | null = null;
 	private fit = { rows: false, columns: false };
 	private heights: number[] = [];
+	/** How far below the pane's top rows pin, from the last read. */
+	private band = 0;
 	private readonly parts = new WeakMap<PinBlock, Parts>();
 	private readonly key = {};
 	private pending = false;
@@ -445,7 +458,8 @@ export class Pins {
 	/** What pins now: rows and columns only while they pin. */
 	get room(): Room {
 		const rows = this.fit.rows ? this.freeze.rows : 0;
-		return { rows, columns: this.fit.columns ? this.freeze.columns : 0, height: rows ? this.heights.reduce((sum, height) => sum + height, 0) : 0 };
+		const band = rows ? this.band : 0;
+		return { rows, columns: this.fit.columns ? this.freeze.columns : 0, band, height: rows ? band + this.heights.reduce((sum, height) => sum + height, 0) : 0 };
 	}
 
 	/** The selected cell, or none: its copies show its outline, wherever they're drawn. */
@@ -699,14 +713,15 @@ export class Pins {
 
 	/**
 	 * Where a pinned cell is drawn on top, for showing it: a copy in the strip, a copy of the frozen rows in the block
-	 * that holds where rows pin (`pinAt`, on the screen), or null where the real cell is what shows. Null for a cell
-	 * that doesn't pin.
+	 * that holds where rows pin, a band below the pane's top (`paneTop`, on the screen), or null where the real cell is
+	 * what shows. Null for a cell that doesn't pin.
 	 */
-	pinnedCell({ row, column }: Cell, pinAt: number): PinnedCell | null {
+	pinnedCell({ row, column }: Cell, paneTop: number): PinnedCell | null {
 		const rows = this.fit.rows && row < this.freeze.rows;
 		const columns = this.fit.columns && column < this.freeze.columns;
 		if (!rows && !columns) return null;
 		const host = this.host;
+		const pinAt = paneTop + this.band;
 		// The carried row is drawn where it pins itself, over every block.
 		const carried = this.carriedNow();
 		if (carried && carried.cell.row === row) return { el: carried.tr.cells[column] ?? null, rows, columns, stuck: true };
@@ -862,7 +877,10 @@ export class Pins {
 		// into one, as under Minimal, that row of pixels showed the rows passing under.
 		const paneTop = scroller.getBoundingClientRect().top;
 		const ratio = window.devicePixelRatio || 1;
-		const pin = -(parseFloat(getComputedStyle(scroller).paddingTop) || 0) - (paneTop - Math.floor(paneTop * ratio + 0.001) / ratio);
+		// And a grip's height lower than that, so the pinned header's column grips, which sit above it, stay in the pane.
+		const handle = parseFloat(getComputedStyle(shown[0]!.dom).getPropertyValue('--table-drag-handle-size')) || 0;
+		const band = Math.round(handle * ratio) / ratio;
+		const pin = band - (parseFloat(getComputedStyle(scroller).paddingTop) || 0) - (paneTop - Math.floor(paneTop * ratio + 0.001) / ratio);
 		// The theme's colors, read from the table as drawn before anything pins: styles.css paints what pins over them.
 		// The header comes from the first block, or from a copy of it, and the body's rows from a block with rows drawn.
 		let paint = this.paint;
@@ -907,7 +925,7 @@ export class Pins {
 			}
 			return { block, start, top, inner, bottom: top + table.offsetHeight, height: dom.offsetHeight, rows: real };
 		});
-		return { pin, fit, heights, paint, blocks, carry: this.readCarry(heights, Math.floor(paneTop * ratio + 0.001) / ratio + scroller.clientTop) };
+		return { pin, band, fit, heights, paint, blocks, carry: this.readCarry(heights, Math.floor(paneTop * ratio + 0.001) / ratio + scroller.clientTop + band) };
 	}
 
 	/**
@@ -979,7 +997,9 @@ export class Pins {
 		this.paint = read.paint;
 		this.heights = read.heights;
 		this.carryAt = read.carry;
+		this.band = read.band;
 		setStyle(view.dom, PIN_VARIABLE, px(read.pin));
+		setStyle(view.dom, BAND_VARIABLE, px(read.band));
 		const single = host.blockCount === 1;
 		const tops = stickyTops(read.heights);
 		const pinned = read.heights.reduce((sum, height) => sum + height, 0);

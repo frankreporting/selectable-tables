@@ -434,6 +434,9 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 				});
 			}
 			if (update.viewportChanged || update.heightChanged || update.geometryChanged) this.onScroll();
+			// A row carried down with the note rides between scroll offsets that hold its place in the note: a change of
+			// height above it moves that place (STA-93).
+			if (update.heightChanged || update.docChanged || update.geometryChanged) for (const model of this.models) if (model.view === update.view) model.keepCarried();
 		}
 
 		/** The pane's width or the theme changed: every table is laid out again, once its editor can be measured. */

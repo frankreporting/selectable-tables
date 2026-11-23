@@ -4814,9 +4814,9 @@
 					await leave();
 					await restore(view, frozenText);
 
-					// The 2,000-row table, in blocks of 100: deep down, a press on the pinned header opens the real cell at the
-					// table's top, where it shows, and pins with the note while it's open; what's typed shows in the pinned
-					// header's copies; a selected header cell's outline shows on the copy at every seam.
+					// The 2,000-row table, in blocks of 100: deep down, a press on the pinned header opens the cell where it's pinned
+					// (STA-93), its real row carried down with the note while it's open; what's typed shows in the pinned header's
+					// copies; a selected header cell's outline shows on the copy at every seam.
 					view = await open('Frozen table 2000 by 12');
 					await sleep(800);
 					const bigText = view.state.doc.toString();
@@ -4829,11 +4829,14 @@
 					const copyCell = (column) => crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[0]?.cells[column];
 					const pressed = copyCell(2);
 					const pressedText = pressed?.textContent;
+					const pressedTop = pressed?.getBoundingClientRect().top;
+					const pressScroll = view.scrollDOM.scrollTop;
 					if (pressed) await pointAt(middle(pressed, -6));
 					await sleep(400);
 					await frames(4);
 					const deep = oc(view);
-					check('Own 71: deep in the table, a press on the pinned header opens the real cell at the table\'s top, where it shows, with the keyboard', deep?.cell.row === 0 && deep.cell.column === 2 && deep.view.hasFocus && shows(deep.view.contentDOM) && deep.view.state.doc.toString() === pressedText, { open: deep?.cell, shows: deep && shows(deep.view.contentDOM), text: [deep?.view.state.doc.toString(), pressedText] });
+					const deepHead = () => deep?.view.dom.closest('th');
+					check('Own 71: deep in the table, a press on the pinned header opens the cell right where it\'s pinned, with the keyboard, and the note doesn\'t move', deep?.cell.row === 0 && deep.cell.column === 2 && deep.view.hasFocus && shows(deep.view.contentDOM) && deep.view.state.doc.toString() === pressedText && Math.abs(view.scrollDOM.scrollTop - pressScroll) <= 1 && Math.abs(deepHead().getBoundingClientRect().top - pressedTop) <= 1, { open: deep?.cell, shows: deep && shows(deep.view.contentDOM), text: [deep?.view.state.doc.toString(), pressedText], scroll: view.scrollDOM.scrollTop - pressScroll, top: [deepHead()?.getBoundingClientRect().top, pressedTop] });
 					const deepInk = deep ? await inked(deep.view.contentDOM) : 0;
 					check('Own 71: the open header cell is drawn on screen, its text showing under the hidden copy', deepInk > 20, { ink: deepInk });
 					await key('End');
@@ -4842,10 +4845,106 @@
 					await sleep(300);
 					await frames(3);
 					check('Own 71: scrolled on with it open, the open header cell pins at the pane\'s top and still shows', !!deep && shows(deep.view.contentDOM) && Math.abs(deep.view.dom.closest('th').getBoundingClientRect().top - paneOf(view).top) <= 2, { top: deep?.view.dom.closest('th')?.getBoundingClientRect().top, pane: paneOf(view).top });
+					// Shift+Enter grows the open header a line: Row 1's copies stay right under it, in every block, and the rows
+					// passing under them stay where they are on the screen.
+					const midRow = () => {
+						const mid = (paneOf(view).top + paneOf(view).bottom) / 2;
+						return big.drawnRows().map((entry) => entry.tr).filter((tr) => tr.isConnected).sort((a, b) => Math.abs(a.getBoundingClientRect().top - mid) - Math.abs(b.getBoundingClientRect().top - mid))[0];
+					};
+					const watched = midRow();
+					const watchedTop = watched?.getBoundingClientRect().top;
+					const tallBefore = deepHead()?.getBoundingClientRect().height ?? 0;
+					const shiftEnter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 8 };
+					await cdp.sendCommand('Input.dispatchKeyEvent', { ...shiftEnter, type: 'rawKeyDown' });
+					await cdp.sendCommand('Input.dispatchKeyEvent', { ...shiftEnter, type: 'char', text: '\r' });
+					await cdp.sendCommand('Input.dispatchKeyEvent', { ...shiftEnter, type: 'keyUp' });
+					await settle();
+					await realType('w');
+					await sleep(300);
+					await frames(3);
+					const grownHead = deepHead()?.getBoundingClientRect();
+					const rowOnes = big.boxes.filter((box) => box.isConnected).map((box) => box.querySelector('.selectable-tables-copy-table table')).filter(Boolean).map((table) => table.rows[1].getBoundingClientRect().top - table.rows[0].getBoundingClientRect().top);
+					const crossingOne = crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[1]?.getBoundingClientRect();
+					check('Own 82: Shift+Enter in the open header deep down grows it, Row 1\'s copies stay right under it in every block, and the rows passing under don\'t move', !!grownHead && grownHead.height > tallBefore + 5 && !!crossingOne && Math.abs(crossingOne.top - grownHead.bottom) <= 1 && rowOnes.length > 0 && rowOnes.every((gap) => Math.abs(gap - grownHead.height) <= 1) && !!watched?.isConnected && Math.abs(watched.getBoundingClientRect().top - watchedTop) <= 1 && deep.view.state.doc.toString().endsWith('q\nw'), { tall: [tallBefore, grownHead?.height], rowOne: crossingOne?.top, bottom: grownHead?.bottom, rowOnes, watched: [watchedTop, watched?.getBoundingClientRect().top], text: deep.view.state.doc.toString() });
+					// Scrolled on with real gestures, past three seams: the open cell stays pinned and drawn, Row 1 right under it.
+					const seamsOpen = [];
+					for (let i = 0; i < 3; i++) {
+						const r = paneOf(view);
+						await cdp.sendCommand('Input.synthesizeScrollGesture', { x: Math.round(view.scrollDOM.getBoundingClientRect().left + 300), y: Math.round((r.top + r.bottom) / 2), xDistance: 0, yDistance: -5400, speed: 6000, gestureSourceType: 'mouse', preventFling: true });
+						await sleep(200);
+						await frames(3);
+						const head = deepHead()?.getBoundingClientRect();
+						const one = crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[1]?.getBoundingClientRect();
+						seamsOpen.push({ top: head && Math.round((head.top - paneOf(view).top) * 100) / 100, under: head && one ? Math.round((one.top - head.bottom) * 100) / 100 : null, shows: shows(deep.view.contentDOM), ink: await inked(deep.view.contentDOM) });
+					}
+					check('Own 83: scrolled on past three seams with real gestures, the open header stays pinned and drawn, with Row 1 right under it', seamsOpen.every((s) => Math.abs(s.top) <= 1 && s.under !== null && Math.abs(s.under) <= 1 && s.shows && s.ink > 20), seamsOpen);
+					// Near the table's end the open header still pins, Row 1's copy under it; past it, both leave with the table's
+					// last row; and the header comes back pinned.
+					await toRow(view, big, 1990);
+					const lastBox = big.boxes[big.boxes.length - 1];
+					const lastTable = () => lastBox.querySelector(':scope > .table-wrapper > table');
+					const ends = [];
+					for (const past of [150, -60]) {
+						view.scrollDOM.scrollTop += lastTable().getBoundingClientRect().bottom - (paneOf(view).top + past);
+						await sleep(300);
+						await frames(3);
+						const head = deepHead()?.getBoundingClientRect();
+						const one = lastBox.querySelector('.selectable-tables-copy-table table')?.rows[1]?.getBoundingClientRect();
+						ends.push({ past, head: head && [head.top, head.bottom], one: one && [one.top, one.bottom], end: lastTable().getBoundingClientRect().bottom });
+					}
+					await toRow(view, big, 1500);
+					const back = deepHead()?.getBoundingClientRect().top;
+					check('Own 84: past the table\'s end the open header leaves with its last row, Row 1\'s copy under it, and comes back pinned, still open', ends.every((e) => e.head && e.one && Math.abs(e.head[1] - e.one[0]) <= 1) && Math.abs(ends[0].head[0] - paneOf(view).top) <= 1 && Math.abs(ends[1].one[1] - ends[1].end) <= 1 && Math.abs(back - paneOf(view).top) <= 1 && oc(view) === deep && shows(deep.view.contentDOM), { ends, back, pane: paneOf(view).top });
+					// Undo and Redo in the open cell: it stays open where it's pinned.
+					const undoRows = [];
+					for (const redo of [false, true]) {
+						await key('z', { meta: true, shift: redo });
+						await sleep(400);
+						await frames(3);
+						undoRows.push({ redo, open: oc(view) === deep, top: deepHead()?.getBoundingClientRect().top, text: deep.view.state.doc.toString() });
+					}
+					check('Own 85: Undo and Redo in the open header deep down keep it open where it\'s pinned', undoRows.every((u) => u.open && Math.abs(u.top - paneOf(view).top) <= 1) && undoRows[1].text.endsWith('q\nw') && !undoRows[0].text.endsWith('q\nw'), undoRows);
 					await leave();
 					await toRow(view, big, 520);
-					check('Own 71: after Escape, the pinned header deep down shows what was typed', copyCell(2)?.textContent === `${pressedText}q`, { copy: copyCell(2)?.textContent });
-					for (let i = 0; i < 4 && view.state.doc.toString() !== bigText; i++) await key('z', { meta: true });
+					check('Own 71: after Escape, the pinned header deep down shows what was typed', copyCell(2)?.textContent === `${pressedText}qw`, { copy: copyCell(2)?.textContent });
+					for (let i = 0; i < 8 && view.state.doc.toString() !== bigText; i++) await key('z', { meta: true });
+					await leave();
+					await restore(view, bigText);
+					// Deep down, between pinned cells: a press on Row 1, ↑ to the header, Tab, then ↓ back to Row 1, each opening in
+					// place with the note still; ↓ out of the pinned rows goes to Row 2 at the table's top, as with the switch off.
+					await toRow(view, big, 820);
+					const keysScroll = view.scrollDOM.scrollTop;
+					const rowOneCopy = crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[1]?.cells[2];
+					const rowOneTop = rowOneCopy?.getBoundingClientRect().top;
+					if (rowOneCopy) await pointAt(middle(rowOneCopy, -8));
+					await sleep(300);
+					await frames(4);
+					const openAt = () => {
+						const c = oc(view);
+						const td = c?.view.dom.closest('td, th');
+						return { cell: c ? `${c.cell.row},${c.cell.column}` : null, top: td ? Math.round(td.getBoundingClientRect().top * 100) / 100 : null, scroll: Math.round(view.scrollDOM.scrollTop - keysScroll), shows: !!c && shows(c.view.contentDOM) };
+					};
+					const pinnedMoves = [['press', openAt()]];
+					const until = async (name, cell) => {
+						for (let i = 0; i < 3 && openAt().cell !== cell; i++) {
+							await key(name);
+							await sleep(300);
+							await frames(4);
+						}
+						pinnedMoves.push([name, openAt()]);
+					};
+					await until('ArrowUp', '0,2');
+					await key('Tab');
+					await sleep(300);
+					await frames(4);
+					pinnedMoves.push(['Tab', openAt()]);
+					await until('ArrowDown', '1,3');
+					const pinTop = paneOf(view).top;
+					const inPlace = pinnedMoves.every(([, m], index) => m.shows && Math.abs(m.scroll) <= 1 && Math.abs(m.top - (m.cell.startsWith('0,') ? pinTop : rowOneTop)) <= 1 && m.cell === ['1,2', '0,2', '0,3', '1,3'][index]);
+					await until('ArrowDown', '2,3');
+					const out = openAt();
+					const firstTable = big.boxes[0].querySelector(':scope > .table-wrapper > table');
+					check('Own 86: deep down, a press on Row 1 and ↑, Tab and ↓ between the pinned cells each open in place with the note still; ↓ out of them goes to Row 2 at the table\'s top', inPlace && out.cell === '2,3' && out.shows && Math.abs(firstTable.getBoundingClientRect().top - paneOf(view).top) <= 120, { pinnedMoves, out, rowOneTop, pinTop, tableTop: firstTable.getBoundingClientRect().top });
 					await leave();
 					await restore(view, bigText);
 					// With the header cell open at the table's top, scrolled on within the first block past where its rows are
@@ -4897,8 +4996,8 @@
 					check('Own 72: a selected header cell\'s outline shows on the pinned header across every seam', seams.every(([, ok]) => ok), seams);
 					await leave();
 
-					// The 2,000-row table frozen 2 by 2, moved sideways: deep down, a press on the pinned header's Column 1 takes the
-					// note to the table's top, as before, and the cell opens there with the table where it was sideways (STA-105).
+					// The 2,000-row table frozen 2 by 2, moved sideways: deep down, a press on the pinned header's Column 1 opens it
+					// where it's pinned (STA-93), with the table where it was sideways (STA-105).
 					view.scrollDOM.scrollTop = 0;
 					await sleep(300);
 					view.dispatch({ effects: view.constructor.scrollIntoView(big.from, { y: 'center' }) });
@@ -4927,7 +5026,7 @@
 					const deep2 = oc(view);
 					const deepTh = () => deep2?.view.dom.closest('th');
 					const deep2Ink = [deep2 ? await inked(deep2.view.contentDOM) : 0];
-					check('Own 71: frozen 2 by 2 and moved sideways, a press deep down on the pinned header\'s Column 1 opens it at the table\'s top, where it was across, with the table where it was sideways', deep2?.cell.row === 0 && deep2.cell.column === 1 && big.sideways().scroll === bigSlid && !!deepAt && Math.abs(deepTh().getBoundingClientRect().left - deepAt.left) <= 1 && deep2Ink[0] > 20 && shows(deep2.view.contentDOM), { open: deep2?.cell, hit: deepHit, scroll: big.sideways().scroll, bigSlid, left: deepTh()?.getBoundingClientRect().left, was: deepAt?.left, ink: deep2Ink });
+					check('Own 71: frozen 2 by 2 and moved sideways, a press deep down on the pinned header\'s Column 1 opens it where it\'s pinned, with the table where it was sideways', deep2?.cell.row === 0 && deep2.cell.column === 1 && big.sideways().scroll === bigSlid && !!deepAt && Math.abs(deepTh().getBoundingClientRect().left - deepAt.left) <= 1 && Math.abs(deepTh().getBoundingClientRect().top - deepAt.top) <= 1 && deep2Ink[0] > 20 && shows(deep2.view.contentDOM), { open: deep2?.cell, hit: deepHit, scroll: big.sideways().scroll, bigSlid, left: deepTh()?.getBoundingClientRect().left, was: deepAt?.left, top: [deepTh()?.getBoundingClientRect().top, deepAt?.top], ink: deep2Ink });
 					for (const step of [500, 700, 900]) {
 						view.scrollDOM.scrollTop += step;
 						await sleep(300);
@@ -4943,7 +5042,7 @@
 					deep2?.view.dispatch({ selection: { anchor: deep2.view.state.doc.length } });
 					await realType('q');
 					await frames(3);
-					check('Own 71: scrolled on to about row 90, the open cell stays drawn at the pane\'s top; a swipe moves the table and not the cell; what\'s typed shows', !!deep2 && deep2Ink.every((each) => each > 20) && Math.abs(deepTop - paneOf(view).top) <= 2 && big.sideways().scroll === bigSlid + 150 && Math.abs(deepAfter.left - deepBefore.left) <= 1 && deep2.view.state.doc.toString().endsWith('q') && shows(deep2.view.contentDOM), { ink: deep2Ink, top: deepTop, pane: paneOf(view).top, scroll: big.sideways().scroll, before: deepBefore?.left, after: deepAfter?.left, text: deep2?.view.state.doc.toString() });
+					check('Own 71: scrolled on, past a seam, the open cell stays drawn at the pane\'s top; a swipe moves the table and not the cell; what\'s typed shows', !!deep2 && deep2Ink.every((each) => each > 20) && Math.abs(deepTop - paneOf(view).top) <= 2 && big.sideways().scroll === bigSlid + 150 && Math.abs(deepAfter.left - deepBefore.left) <= 1 && deep2.view.state.doc.toString().endsWith('q') && shows(deep2.view.contentDOM), { ink: deep2Ink, top: deepTop, pane: paneOf(view).top, scroll: big.sideways().scroll, before: deepBefore?.left, after: deepAfter?.left, text: deep2?.view.state.doc.toString() });
 					const bigSlidOpen = big.sideways().scroll;
 					await leave();
 					await frames(2);

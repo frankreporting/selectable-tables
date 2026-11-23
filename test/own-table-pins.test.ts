@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { frozenIn, pinsFit, railOf, showDown, stickyTops, stripWidth } from '../src/own-table/pin-sums';
+import { carryRange, frozenIn, pinsFit, railOf, showDown, stickyTops, stripWidth } from '../src/own-table/pin-sums';
 
 const sizes = { rows: 60, table: 2000, pane: 700, columns: 120, room: 600, slides: true };
 
@@ -35,6 +35,17 @@ test("a block's copy of the frozen rows rides from the table's top, or the rows'
 	assert.deepEqual(railOf({ first: false, last: false, tableTop: 0, tableBottom: 5000, height: 5000 }, 60), { top: -60, bottom: -60 });
 	// The last block's ends the rows' height above the table's end, so the rows leave with the table.
 	assert.deepEqual(railOf({ first: false, last: true, tableTop: 0, tableBottom: 3000, height: 3016 }, 60), { top: -60, bottom: 76 });
+});
+
+test("an open frozen row deep in a long table moves with the note between its place and the table's end", () => {
+	// The header, laid out 26,000 px above the pane, rows pinning at 78: it reaches its place 26,078 px further down, and
+	// rides until the table's end, 90,000 px below the pane, is the 60 px of rows above where rows pin.
+	const header = { scroll: 30000, rowTop: -26000, pinAt: 78, above: 0, tableBottom: 90000, pinned: 60 };
+	assert.deepEqual(carryRange(header), { from: 30000 - 26078, to: 30000 + 90000 - 60 - 78 });
+	// The row under it reaches its place under the header, which is 31 px tall, and leaves with the header.
+	assert.deepEqual(carryRange({ ...header, rowTop: -25969, above: 31 }), carryRange(header));
+	// A table that ends above where the row would start riding: it never rides.
+	assert.deepEqual(carryRange({ ...header, tableBottom: -26100 }), { from: 3922, to: 3922 });
 });
 
 test("the strip is as wide as the frozen columns, the space between them, and the table's border at its start", () => {

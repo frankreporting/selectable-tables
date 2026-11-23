@@ -176,11 +176,12 @@ body {
 /*
  * The bar, in the note's scroller: under the table's last row, and carried up to the pane's bottom while the table
  * crosses it, by an animation on the note's own scroll, so it never trails a scroll. Its look is the system's, or
- * Obsidian's where Obsidian styles scrollbars.
+ * Obsidian's where Obsidian styles scrollbars. It draws above a first block that carries an open frozen row (pins.ts,
+ * `carry`), which draws above the later blocks.
  */
 .markdown-source-view.mod-cm6 .cm-scroller > .selectable-tables-bar {
 	position: absolute;
-	z-index: 1;
+	z-index: 4;
 	overflow-x: auto;
 	overflow-y: hidden;
 	will-change: transform;
@@ -223,9 +224,46 @@ body {
 	display: none;
 }
 
-.markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows {
+.markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows:not(.selectable-tables-carries) {
 	overflow-x: visible;
 	overflow-y: clip;
+}
+
+/*
+ * An open cell of the frozen rows in a table of more blocks (pins.ts, `carry`): its real row, in the first block, is
+ * carried down with the note by an animation on the note's own scroll, which runs where the scroll does, so it lies
+ * where the blocks' copies pin, and its copies hide. It rests in its place before the scroll offset where it reaches
+ * its pin, and leaves with the table's end after the other. The first block draws above the later ones while it
+ * carries the row, and doesn't clip it; its rail clips the copy at the block's end instead.
+ */
+.markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-carries {
+	position: relative;
+	z-index: 3;
+	overflow: visible;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-carries > .selectable-tables-rail {
+	overflow-x: visible;
+	overflow-y: clip;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins tr.selectable-tables-carried {
+	position: relative;
+	z-index: 3;
+	will-change: transform;
+	animation: selectable-tables-carry linear both;
+	animation-timeline: scroll(nearest block);
+	animation-range: var(--selectable-tables-carry-from) var(--selectable-tables-carry-to);
+}
+
+@keyframes selectable-tables-carry {
+	from {
+		transform: none;
+	}
+
+	to {
+		transform: translateY(var(--selectable-tables-carry-travel));
+	}
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins thead.selectable-tables-pinned-row {
@@ -311,32 +349,32 @@ body {
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) thead > tr,
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins thead.selectable-tables-pinned-row > tr,
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins thead > tr.selectable-tables-lifted-row {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins thead > tr:is(.selectable-tables-lifted-row, .selectable-tables-carried) {
 	--selectable-tables-odd-cell: var(--selectable-tables-head-odd-cell);
 	--selectable-tables-even-cell: var(--selectable-tables-head-even-cell);
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tbody > tr:nth-child(odd),
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tbody > tr:is(.selectable-tables-pinned-row, .selectable-tables-lifted-row):nth-child(odd) {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tbody > tr:is(.selectable-tables-pinned-row, .selectable-tables-lifted-row, .selectable-tables-carried):nth-child(odd) {
 	--selectable-tables-odd-cell: var(--selectable-tables-odd-row-odd-cell);
 	--selectable-tables-even-cell: var(--selectable-tables-odd-row-even-cell);
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tbody > tr:nth-child(even),
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tbody > tr:is(.selectable-tables-pinned-row, .selectable-tables-lifted-row):nth-child(even) {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tbody > tr:is(.selectable-tables-pinned-row, .selectable-tables-lifted-row, .selectable-tables-carried):nth-child(even) {
 	--selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
 	--selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer) > :is(th, td),
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr) > :is(th, td),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr, tr.selectable-tables-carried) > :is(th, td),
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tr.selectable-tables-lifted-row > .selectable-tables-lifted {
 	background-color: var(--selectable-tables-page, var(--background-primary));
 	background-image: var(--selectable-tables-odd-cell, none);
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer) > :is(th, td):nth-child(even),
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr) > :is(th, td):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr, tr.selectable-tables-carried) > :is(th, td):nth-child(even),
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tr.selectable-tables-lifted-row > .selectable-tables-lifted:nth-child(even) {
 	background-image: var(--selectable-tables-even-cell, none);
 }
@@ -368,7 +406,7 @@ body {
  * theme-paint.ts reads it, so cells passing under don't show there.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer),
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr) {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr, tr.selectable-tables-carried) {
 	box-shadow: var(--selectable-tables-corners, inset 0 0 0 100vmax var(--background-primary));
 }
 

@@ -2,7 +2,7 @@ import type { ChangeSet, Text } from '@codemirror/state';
 import type { EditorView, Rect } from '@codemirror/view';
 import { type App, Component, editorInfoField, getLinkpath, MarkdownRenderer } from 'obsidian';
 import { CELL_CLASS, HOLDS_CELL_CLASS } from '../editor/cells';
-import type { Grid } from '../editor/decide';
+import { type Grid, writesCell } from '../editor/decide';
 import { OWN_BORDERS_CLASS } from '../editor/freeze';
 import { markedCells } from '../editor/freeze-mark';
 import { type DrawnTable, openCells } from '../editor/layout';
@@ -18,6 +18,7 @@ import { type LineMatch, type Match, MATCH_SELECTOR, matchSpans, paintMatches } 
 import { barPlace, type BarPlace, clampSlide, maxSlide, revealDelta } from './sideways';
 import { type PinHost, Pins, ROW_ATTRIBUTE } from './pins';
 import { showDown } from './pin-sums';
+import { cellPlace } from './cell-write';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 
 /**
@@ -348,8 +349,10 @@ export class Model implements Span, DrawnTable {
 	/** The row of the open cell, kept in the page however far the note scrolls from it, and its column. */
 	private openRow: HTMLTableRowElement | null = null;
 	private openColumn = -1;
-	/** A cell to open once its row is drawn. */
-	private toOpen: { cell: Cell; run: () => void; near?: boolean } | null = null;
+	/** A cell to open once its row is drawn: `carried` for a pinned one deep in a table of more blocks (`whenDrawn`). */
+	private toOpen: { cell: Cell; run: () => void; near?: boolean; carried?: boolean } | null = null;
+	/** That pinned cell, whose row is kept in the page, as the open cell's is, until it opens. */
+	private coming: Cell | null = null;
 
 	// Frozen rows and columns, on a computer.
 	private readonly pins = new Pins(this.pinHost());
@@ -491,10 +494,30 @@ export class Model implements Span, DrawnTable {
 	}
 
 	/**
-	 * Runs `run` once a cell's row is drawn, bringing the real row into view: a cell to open that isn't drawn yet, such as
-	 * one of the pinned rows pressed deep in a table of more blocks, whose real row is at the table's top.
+	 * Runs `run` once a cell's row is drawn, bringing the real row into view: a cell to open that isn't drawn yet.
+	 *
+	 * A cell of the pinned rows, as pressed deep in a table of more blocks, opens where it's pinned instead, with the note
+	 * where it is (STA-93): its real row, in the first block at the table's top, is carried down to where the rows pin
+	 * (pins.ts, `carried`), and the cell opens once it's there. The note's selection goes in the cell's text first,
+	 * without scrolling, so CodeMirror draws the first block, as it does while a cell is open.
 	 */
 	whenDrawn(cell: Cell, run: () => void): void {
+		const view = this.view;
+		if (view && cell.row < this.pins.room.rows && this.blockCount > 1) {
+			this.toOpen = { cell, run, carried: true };
+			this.coming = cell;
+			this.pins.willOpen(cell);
+			// After the press's or key's own handling, outside any update of the note.
+			queueMicrotask(() => {
+				if (this.coming !== cell || this.view !== view) return;
+				const place = cellPlace(view.state.doc, this, cell);
+				if (place) view.dispatch({ selection: { anchor: place.from }, annotations: writesCell.of(true) });
+			});
+			this.todo = true;
+			this.schedule(true);
+			return;
+		}
+		this.endComing();
 		this.toOpen = { cell, run };
 		this.showing = cell;
 		this.toward = null;
@@ -506,6 +529,31 @@ export class Model implements Span, DrawnTable {
 	/** Whether the cell showing is shown as its real cell, not where it's pinned: a cell about to open. */
 	private showReal = false;
 
+	/** Opens the pinned cell waiting deep in the table, now its row is carried to where it pins. */
+	private openComing(waiting: { cell: Cell; run: () => void }): void {
+		waiting.run();
+		// It didn't open, as when another cell opened first: its row goes back.
+		if (this.coming === waiting.cell) this.endComing();
+	}
+
+	/** No pinned cell waits to open any more: its row isn't kept in the page or carried. */
+	private endComing(): void {
+		if (!this.coming) return;
+		this.coming = null;
+		this.pins.willOpen(null);
+		this.todo = true;
+		this.schedule(true);
+	}
+
+	/** The body row kept in the page away from the rows drawn: the open cell's, or a pinned cell's about to open. */
+	private heldRow(): { index: number; tr: HTMLTableRowElement } | null {
+		const open = this.rowOfOpen();
+		if (open !== null) return open > 0 && this.openRow ? { index: open - 1, tr: this.openRow } : null;
+		const coming = this.coming;
+		const tr = coming && coming.row > 0 ? this.rendered.get(coming.row - 1) : undefined;
+		return coming && tr ? { index: coming.row - 1, tr } : null;
+	}
+
 	/**
 	 * Keeps the open cell's row in the page while it's open, however far the note scrolls, so typing still reaches its
 	 * editor: CodeMirror keeps the block holding the note's selection in the page, and the selection follows the cell's
@@ -516,6 +564,7 @@ export class Model implements Span, DrawnTable {
 		const wasRow = this.openRow;
 		this.openRow = tr;
 		this.openColumn = column;
+		if (tr) this.coming = null;
 		const row = tr ? this.rowOfOpen() : null;
 		this.pins.openCell(tr, row === null ? null : { row, column });
 		if (tr || was === null) return;
@@ -541,6 +590,11 @@ export class Model implements Span, DrawnTable {
 		if (tr === this.blocks[0]?.thead?.firstElementChild) return 0;
 		for (const [row, drawn] of this.rendered) if (drawn === tr) return row + 1;
 		return null;
+	}
+
+	/** Something in the note changed height: a row carried down with the note is placed again (STA-93). */
+	keepCarried(): void {
+		this.pins.keepCarried();
 	}
 
 	/** The open cell's editor changed its height: the rows are measured again, and what pins is placed again. */
@@ -1230,8 +1284,8 @@ export class Model implements Span, DrawnTable {
 	 */
 	private arrange(): void {
 		const rows = String(this.count + 1);
-		const openRow = this.rowOfOpen();
-		const open = openRow !== null && openRow > 0 ? openRow - 1 : -1;
+		const held = this.heldRow();
+		const open = held?.index ?? -1;
 		const top = (row: number) => this.heights.top(row);
 		for (const block of this.blocks) {
 			if (!block || block.index >= this.blockCount) continue;
@@ -1240,7 +1294,7 @@ export class Model implements Span, DrawnTable {
 			const run = body.rows;
 			// The open cell's row, kept in the page away from the rows drawn, sits among spacers of its own. Its stripe may
 			// be off while it's out of view; the drawn rows' are right.
-			const apart = open >= first && open < end && (open < run.first || open >= run.end) ? this.openRow : null;
+			const apart = held && open >= first && open < end && (open < run.first || open >= run.end) ? held.tr : null;
 			let above = body.above;
 			let below = body.below;
 			let gap: number | null = null;
@@ -1398,7 +1452,18 @@ export class Model implements Span, DrawnTable {
 				const tr = row < 0 ? model.blocks[0]?.thead?.firstElementChild : model.rendered.get(row);
 				return tr?.instanceOf(HTMLTableRowElement) ? tr : null;
 			},
+			tableBottom: () => this.tableBottom(),
 		};
+	}
+
+	/** Where the table's last row ends on the screen: from the page where the last block is in it, else from CodeMirror's heights. */
+	private tableBottom(): number | null {
+		const view = this.view;
+		const metrics = this.metrics;
+		if (!view || this.stale || !metrics) return null;
+		const last = this.blocks[this.blockCount - 1];
+		if (last?.table.isConnected) return last.table.getBoundingClientRect().bottom;
+		return view.documentTop + view.lineBlockAt(this.to).bottom - (metrics.pad - metrics.padTop);
 	}
 
 	/**
@@ -1676,6 +1741,7 @@ export class Model implements Span, DrawnTable {
 			anchor = range.end > range.first ? Math.max(range.first, Math.min(range.end - 1, anchor)) : -1;
 		}
 		const anchorTop = anchor >= 0 ? topInBlock(this.heights, anchor, this.headHeight) : 0;
+		const coming = this.coming && this.coming.row > 0 && this.coming.row <= this.count ? this.coming.row - 1 : -1;
 		for (const [row, tr] of this.rendered) {
 			const changed = this.dirty.has(row);
 			// The open cell's row stays, wherever the pane is, and its other cells are drawn again in it.
@@ -1683,6 +1749,8 @@ export class Model implements Span, DrawnTable {
 				if (changed && row < this.count) this.patchOpen(row, tr);
 				continue;
 			}
+			// So does the row of a pinned cell about to open.
+			if (row === coming && !changed) continue;
 			if (row >= first && row < end && !changed) continue;
 			tr.remove();
 			this.rendered.delete(row);
@@ -1697,6 +1765,7 @@ export class Model implements Span, DrawnTable {
 		this.dirty.clear();
 		const need: number[] = [];
 		for (let row = first; row < end; row++) if (!this.rendered.has(row)) need.push(row);
+		if (coming >= 0 && !this.rendered.has(coming) && !need.includes(coming)) need.push(coming);
 		let built = false;
 		for (const row of need) {
 			const index = blockOf(this.count, row);
@@ -1728,7 +1797,10 @@ export class Model implements Span, DrawnTable {
 		const waiting = this.toOpen;
 		if (waiting && this.cellElement(waiting.cell)?.isConnected) {
 			this.toOpen = null;
-			queueMicrotask(waiting.run);
+			// A pinned cell deep in the table opens once its row is carried to where it pins, so its editor's scroll to the
+			// caret finds it in view.
+			if (waiting.carried) this.pins.afterPlacing(() => queueMicrotask(() => this.openComing(waiting)));
+			else queueMicrotask(waiting.run);
 		} else if (waiting?.near) this.whenDrawn(waiting.cell, waiting.run);
 	}
 

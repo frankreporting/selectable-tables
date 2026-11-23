@@ -218,7 +218,8 @@ body {
  * beside the table that doesn't take its sideways move, with a corner over the copy where frozen rows and columns
  * meet. Nothing shows until the theme's colors are read.
  */
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own:not(.selectable-tables-pins) > :is(.selectable-tables-strip, .selectable-tables-rail) {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own:not(.selectable-tables-pins) > :is(.selectable-tables-strip, .selectable-tables-rail),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own:not(.selectable-tables-pins) > .table-wrapper > .selectable-tables-strip {
 	display: none;
 }
 
@@ -237,7 +238,8 @@ body {
 	z-index: 2;
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .table-wrapper > .selectable-tables-strip {
 	position: absolute;
 	z-index: 1;
 }
@@ -344,7 +346,8 @@ body {
  * passes there, its cells, and the selected table's frame, which would run on past the strip's corner. The strip's
  * first column covers the rows; this covers the frame's edges above and below them.
  */
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins > .selectable-tables-strip::before {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins > .selectable-tables-strip::before,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins > .table-wrapper > .selectable-tables-strip::before {
 	content: "";
 	position: absolute;
 	top: -4px;
@@ -427,24 +430,38 @@ body {
 }
 
 /*
+ * An open cell in a frozen row and a frozen column (pins.ts, `holdsCorner`): the first block's strip goes inside the
+ * table's wrapper, under the pinned rows, as Obsidian's own table layers them, and takes the opposite of the table's
+ * sideways move, as the pinned rows' frozen cells do. So the real cells show where the strip is, the open one among
+ * them, the rows passing under the pinned rows pass under them in the strip too, and the table still moves sideways.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .table-wrapper.selectable-tables-holds-strip {
+	position: relative;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-slides > .table-wrapper > .selectable-tables-strip {
+	will-change: transform;
+	animation: selectable-tables-unslide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+/*
  * A copy over a cell that's open: the open row's in the strip, and, for an open cell in a frozen row of a table of more
  * blocks, the first block's copy of the frozen rows, which lies over its real rows, while those pin themselves. Only
  * the copies' cells take presses, so one where a copy's row is hidden reaches the open cell under it.
  */
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .table-wrapper > .selectable-tables-strip {
 	pointer-events: none;
 }
 
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > :is(.selectable-tables-strip, .selectable-tables-rail) :is(th, td) {
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > :is(.selectable-tables-strip, .selectable-tables-rail) :is(th, td),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .table-wrapper > .selectable-tables-strip :is(th, td) {
 	pointer-events: auto;
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-hidden-copy {
 	visibility: hidden;
-}
-
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip.selectable-tables-strip-off {
-	display: none;
 }
 
 /*

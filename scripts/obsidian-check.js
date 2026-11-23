@@ -4878,11 +4878,11 @@
 						seamsOpen.push({ top: head && Math.round((head.top - paneOf(view).top) * 100) / 100, under: head && one ? Math.round((one.top - head.bottom) * 100) / 100 : null, shows: shows(deep.view.contentDOM), ink: await inked(deep.view.contentDOM) });
 					}
 					check('Own 83: scrolled on past three seams with real gestures, the open header stays pinned and drawn, with Row 1 right under it', seamsOpen.every((s) => Math.abs(s.top) <= 1 && s.under !== null && Math.abs(s.under) <= 1 && s.shows && s.ink > 20), seamsOpen);
-					// Past the table's end, the open header leaves with the table's last row, right above Row 1's copy; and comes
-					// back pinned.
+					// Near the table's end the open header still pins, Row 1's copy under it; past it, both leave with the table's
+					// last row; and the header comes back pinned.
+					await toRow(view, big, 1990);
 					const lastBox = big.boxes[big.boxes.length - 1];
 					const lastTable = () => lastBox.querySelector(':scope > .table-wrapper > table');
-					await toRow(view, big, 1990);
 					const ends = [];
 					for (const past of [150, -60]) {
 						view.scrollDOM.scrollTop += lastTable().getBoundingClientRect().bottom - (paneOf(view).top + past);
@@ -4894,7 +4894,7 @@
 					}
 					await toRow(view, big, 1500);
 					const back = deepHead()?.getBoundingClientRect().top;
-					check('Own 84: past the table\'s end the open header leaves with its last row, Row 1\'s copy under it, and comes back pinned, still open', ends.every((e) => e.head && e.one && Math.abs(e.head[1] - e.one[0]) <= 1 && Math.abs(e.one[1] - e.end) <= 1) && Math.abs(ends[0].head[0] - paneOf(view).top) <= 1 && Math.abs(back - paneOf(view).top) <= 1 && oc(view) === deep && shows(deep.view.contentDOM), { ends, back, pane: paneOf(view).top });
+					check('Own 84: past the table\'s end the open header leaves with its last row, Row 1\'s copy under it, and comes back pinned, still open', ends.every((e) => e.head && e.one && Math.abs(e.head[1] - e.one[0]) <= 1) && Math.abs(ends[0].head[0] - paneOf(view).top) <= 1 && Math.abs(ends[1].one[1] - ends[1].end) <= 1 && Math.abs(back - paneOf(view).top) <= 1 && oc(view) === deep && shows(deep.view.contentDOM), { ends, back, pane: paneOf(view).top });
 					// Undo and Redo in the open cell: it stays open where it's pinned.
 					const undoRows = [];
 					for (const redo of [false, true]) {

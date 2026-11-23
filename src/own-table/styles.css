@@ -176,11 +176,12 @@ body {
 /*
  * The bar, in the note's scroller: under the table's last row, and carried up to the pane's bottom while the table
  * crosses it, by an animation on the note's own scroll, so it never trails a scroll. Its look is the system's, or
- * Obsidian's where Obsidian styles scrollbars.
+ * Obsidian's where Obsidian styles scrollbars. It draws above a first block that carries an open frozen row (pins.ts,
+ * `carry`), which draws above the later blocks.
  */
 .markdown-source-view.mod-cm6 .cm-scroller > .selectable-tables-bar {
 	position: absolute;
-	z-index: 1;
+	z-index: 4;
 	overflow-x: auto;
 	overflow-y: hidden;
 	will-change: transform;

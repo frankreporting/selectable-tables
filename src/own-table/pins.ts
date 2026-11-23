@@ -441,6 +441,15 @@ export class Pins {
 		return coming && tr?.isConnected ? { tr, cell: coming } : null;
 	}
 
+	/**
+	 * Places the carried row again after a change of height anywhere in the note: its scroll offsets hold its place in
+	 * the note, which a line added above the table, or a picture above it loading, moves. A few reads, and only while a
+	 * row is carried.
+	 */
+	keepCarried(): void {
+		if (this.carried()) this.measure();
+	}
+
 	/** The row carried, once a read has said where it rides; until then its copies still show. */
 	private carriedNow(): { tr: HTMLTableRowElement; cell: Cell } | null {
 		const carried = this.carried();

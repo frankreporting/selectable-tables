@@ -592,6 +592,11 @@ export class Model implements Span, DrawnTable {
 		return null;
 	}
 
+	/** Something in the note changed height: a row carried down with the note is placed again (STA-93). */
+	keepCarried(): void {
+		this.pins.keepCarried();
+	}
+
 	/** The open cell's editor changed its height: the rows are measured again, and what pins is placed again. */
 	cellResized(): void {
 		this.schedule(true);

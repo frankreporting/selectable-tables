@@ -689,15 +689,6 @@ body {
 	animation-range: exit-crossing 0 exit-crossing var(--selectable-tables-band, 0px);
 }
 
-/*
- * The strip's and the corner's run on over the start of the next column's grip, to cover the shadow beside them:
- * presses go through them, to that grip or to the table's own band beneath.
- */
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows .selectable-tables-strip thead.selectable-tables-pinned-row::before,
-.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows .selectable-tables-copy > .selectable-tables-corner::before {
-	pointer-events: none;
-}
-
 @keyframes selectable-tables-band {
 	from {
 		transform: scaleY(0);

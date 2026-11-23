@@ -45,6 +45,8 @@ export interface Grid {
 	drawn: number[];
 	/** The rows the plugin draws that Obsidian drops, by their place in `drawn`. */
 	dropped: Set<number>;
+	/** The line each of `rows` is on, in the table's lines. */
+	lineOf: number[];
 }
 
 /** A row of only dashes, which Obsidian's table parser drops rather than read as a row. */
@@ -61,18 +63,21 @@ export function readTable(lines: readonly string[]): Grid {
 	const rows: string[][] = [];
 	const drawn: number[] = [];
 	const dropped = new Set<number>();
+	const lineOf: number[] = [];
 	lines.forEach((line, index) => {
 		if (index === 1) return;
 		const cells = cellsOf(line).map((cell) => cell.trim());
-		if (index === 0 || !cells.every((cell) => dashCell.test(cell))) rows.push(cells);
-		else dropped.add(drawn.length);
+		if (index === 0 || !cells.every((cell) => dashCell.test(cell))) {
+			rows.push(cells);
+			lineOf.push(index);
+		} else dropped.add(drawn.length);
 		drawn.push(rows.length - 1);
 	});
 	const columns = Math.max(alignments.length, ...rows.map((row) => row.length));
 	while (alignments.length < columns) alignments.push(null);
 	for (const row of rows) while (row.length < columns) row.push('');
 	const widths = alignments.map((_, column) => Math.max(MIN_COLUMN_WIDTH, ...rows.map((row) => row[column]!.length + CELL_PADDING)));
-	return { rows, alignments, widths, drawn, dropped };
+	return { rows, alignments, widths, drawn, dropped, lineOf };
 }
 
 /** A table's lines as Obsidian's table editor writes them, the delimiter included, each column at its width. */
@@ -83,10 +88,15 @@ export function writeTable({ rows, alignments, widths }: Grid): string[] {
 	return lines;
 }
 
-/** What an edit leaves: the table's new lines, or null when it takes the whole table away, and the cell it goes to. */
+/**
+ * What an edit leaves: the table's new lines, or null when it takes the whole table away, and the cell it goes to. `from`
+ * says which of the table's lines before each new line was, or -1 for a line that's new, so lines that stay can be
+ * written where they were.
+ */
 export interface Edited {
 	lines: string[] | null;
 	cell: Cell;
+	from?: number[];
 }
 
 /** What an edit needs besides the table: which way the table reads, for Align left and right, and a cell's shown text, for Sort. */
@@ -213,7 +223,18 @@ export function editTable(lines: readonly string[], edit: TableEdit, { row, colu
 	// A cell that took the mark is wider: its column grows to fit, as typing it would have it.
 	widths.forEach((width, index) => (widths[index] = Math.max(width, ...rows.map((cells) => cells[index]!.length + CELL_PADDING))));
 	const cell = { row: clamp(to.row, 0, rows.length - 1), column: clamp(to.column, 0, alignments.length - 1) };
-	return { lines: writeTable(grid), cell };
+	// Which line each new line was: the delimiter stays the delimiter while the header is the same row, and a row's copy
+	// is new.
+	const used = new Set<number>();
+	const lineFrom = (origin: number) => {
+		const line = origin >= 0 ? grid.lineOf[origin] ?? -1 : -1;
+		if (line < 0 || used.has(line)) return -1;
+		used.add(line);
+		return line;
+	};
+	const from = origins.map(lineFrom);
+	from.splice(1, 0, origins[0] === 0 ? 1 : -1);
+	return { lines: writeTable(grid), cell, from };
 }
 
 /**
@@ -241,7 +262,7 @@ export interface LineChange {
  * say, stays where it was: one change for each line that differs when there are as many lines as before, else one for
  * the lines between those that stay the same at either end. Also where the table ends after them.
  */
-export function lineChanges(doc: Text, table: Span, lines: readonly string[]): { changes: LineChange[]; to: number } {
+export function lineChanges(doc: Text, table: Span, lines: readonly string[], from?: readonly number[]): { changes: LineChange[]; to: number } {
 	const first = doc.lineAt(table.from).number;
 	const old: string[] = [];
 	for (let n = first; n <= doc.lineAt(table.to).number; n++) old.push(doc.line(n).text);
@@ -254,6 +275,8 @@ export function lineChanges(doc: Text, table: Span, lines: readonly string[]): {
 		});
 		return { changes, to };
 	}
+	const aligned = from && alignedChanges(doc, first, old, lines, from);
+	if (aligned) return { changes: aligned, to };
 	let start = 0;
 	while (start < old.length && start < lines.length && old[start] === lines[start]) start++;
 	let end = 0;
@@ -273,6 +296,50 @@ export function lineChanges(doc: Text, table: Span, lines: readonly string[]): {
 		else changes.push({ from: doc.line(first).from, to: doc.line(last + 1).from, insert: '' });
 	}
 	return { changes, to };
+}
+
+/**
+ * The changes for a row added or taken out, line by line: a line that stays is rewritten in place when it differs, a
+ * new line goes in between, and a line that goes is taken out with its line break. Each line that stays maps to itself,
+ * so CodeMirror, which keeps the note still by a place in its text, keeps it still: one change over the stretch from
+ * the first line that differs to the last would move that place to the stretch's edge. Null when the lines that stay
+ * don't keep their order.
+ */
+function alignedChanges(doc: Text, first: number, old: readonly string[], lines: readonly string[], from: readonly number[]): LineChange[] | null {
+	let last = -1;
+	for (const line of from) {
+		if (line < 0) continue;
+		if (line <= last) return null;
+		last = line;
+	}
+	const kept = new Set(from.filter((line) => line >= 0));
+	const changes: LineChange[] = [];
+	const lineAt = (index: number) => doc.line(first + index);
+	let i = 0;
+	let j = 0;
+	while (i < old.length || j < lines.length) {
+		if (i < old.length && !kept.has(i)) {
+			// A line that goes, with the line break after it, or before it for the table's last line, which needs the line
+			// before it to stay: else the two would overlap.
+			const line = lineAt(i);
+			if (i + 1 < old.length) changes.push({ from: line.from, to: lineAt(i + 1).from, insert: '' });
+			else if (i > 0 && kept.has(i - 1)) changes.push({ from: lineAt(i - 1).to, to: line.to, insert: '' });
+			else return null;
+			i++;
+		} else if (j < lines.length && from[j] !== i) {
+			// A new line, before the next line that stays, or after the table's last line.
+			if (i < old.length) changes.push({ from: lineAt(i).from, to: lineAt(i).from, insert: `${lines[j]}\n` });
+			else changes.push({ from: lineAt(old.length - 1).to, to: lineAt(old.length - 1).to, insert: `\n${lines[j]}` });
+			j++;
+		} else {
+			if (i >= old.length || j >= lines.length) return null;
+			const line = lineAt(i);
+			if (line.text !== lines[j]) changes.push({ from: line.from, to: line.to, insert: lines[j]! });
+			i++;
+			j++;
+		}
+	}
+	return changes;
 }
 
 // What a cell shows -------------------------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Text } from '@codemirror/state';
+import { ChangeSet, Text } from '@codemirror/state';
 import { editTable, lineChanges, readTable, shownText, type TableEdit } from '../src/own-table/table-edits';
 
 const cell = (row: number, column: number) => ({ row, column });
@@ -14,10 +14,11 @@ const plants = [
 	'| Cactus | Office  | 100   |',
 ];
 
+/** An edit's lines and the cell it goes to. */
 function edit(lines: string[], what: TableEdit, at: { row: number; column: number }, options = {}) {
 	const edited = editTable(lines, what, at, options);
 	assert.ok(edited, `${what} applies`);
-	return edited;
+	return { lines: edited.lines, cell: edited.cell };
 }
 
 test('reading a table as Obsidian does: cells trimmed, short rows filled, and columns as wide as their longest text', () => {
@@ -162,26 +163,47 @@ test('a table of one column and one with a short row', () => {
 	assert.deepEqual(edit(['| A | B |', '| - | - |', '| x |'], 'col-after', cell(1, 1)).lines, ['| A   | B   |     |', '| --- | --- | --- |', '| x   |     |     |']);
 });
 
+/** Applies an edit's line changes to a note holding the table, as CodeMirror does, and checks the note it leaves. */
+function applied(lines: string[], what: TableEdit, at: { row: number; column: number }, aligned = true) {
+	const doc = Text.of(['Above', '', ...lines, '', 'Below']);
+	const table = { from: doc.line(3).from, to: doc.line(2 + lines.length).to };
+	const edited = editTable(lines, what, at);
+	assert.ok(edited?.lines, `${what} applies`);
+	const { changes, to } = lineChanges(doc, table, edited.lines, aligned ? edited.from : undefined);
+	const next = ChangeSet.of(changes, doc.length).apply(doc);
+	assert.equal(next.sliceString(table.from, to), edited.lines.join('\n'));
+	assert.equal(next.toString(), ['Above', '', ...edited.lines, '', 'Below'].join('\n'));
+	return { changes, doc };
+}
+
 test('only the lines that differ change, and the table\'s end follows', () => {
-	const doc = Text.of(['Above', '', ...plants, '', 'Below']);
-	const table = { from: doc.line(3).from, to: doc.line(7).to };
-	const apply = (lines: string[]) => {
-		const { changes, to } = lineChanges(doc, table, lines);
-		const next = [...changes].reverse().reduce((text, { from, to: end, insert }) => text.replace(from, end, Text.of(insert.split('\n'))), doc);
-		assert.equal(next.sliceString(table.from, to), lines.join('\n'));
-		assert.equal(next.toString(), ['Above', '', ...lines, '', 'Below'].join('\n'));
-		return changes;
-	};
-	const moved = edit(plants, 'row-down', cell(1, 0)).lines!;
-	assert.equal(apply(moved).length, 2);
-	const added = edit(plants, 'row-before', cell(2, 0)).lines!;
-	assert.deepEqual(apply(added), [{ from: doc.line(5).to + 1, to: doc.line(5).to + 1, insert: `${added[3]}\n` }]);
-	apply(edit(plants, 'row-after', cell(3, 0)).lines!);
-	apply(edit(plants, 'row-delete', cell(3, 0)).lines!);
-	apply(edit(plants, 'row-delete', cell(1, 0)).lines!);
-	apply(edit(plants, 'row-delete', cell(0, 0)).lines!);
-	apply(edit(plants, 'row-before', cell(0, 0)).lines!);
-	apply(edit(plants, 'col-delete', cell(0, 0)).lines!);
+	assert.equal(applied(plants, 'row-down', cell(1, 0)).changes.length, 2);
+	const { changes, doc } = applied(plants, 'row-before', cell(2, 0));
+	assert.deepEqual(changes, [{ from: doc.line(5).to + 1, to: doc.line(5).to + 1, insert: '|        |         |       |\n' }]);
+	const edits: [TableEdit, number, number][] = [
+		['row-after', 3, 0], ['row-after', 1, 0], ['row-delete', 3, 0], ['row-delete', 1, 0], ['row-delete', 0, 0], ['row-before', 0, 0],
+		['row-copy', 0, 0], ['row-copy', 3, 1], ['col-delete', 0, 0], ['row-up', 1, 0],
+	];
+	for (const [what, row, column] of edits) {
+		applied(plants, what, cell(row, column));
+		applied(plants, what, cell(row, column), false);
+	}
+});
+
+test('a row added or taken out in a table every line of which is rewritten changes each line in place', () => {
+	// Spaced by hand: the edit tidies every line, and takes one out.
+	const hand = ['|Plant|Room|', '|-|-|', '|Fern|Hall|', '|Mint|Den|', '|Sage|Loft|'];
+	const { changes, doc } = applied(hand, 'row-delete', cell(2, 0));
+	// No change runs from one line into another but the one taking out Mint's line.
+	const across = changes.filter((change) => doc.lineAt(change.from).number !== doc.lineAt(change.to).number);
+	assert.deepEqual(across.map((change) => doc.sliceString(change.from, change.to)), ['|Mint|Den|\n']);
+	assert.equal(changes.length, 5);
+	applied(hand, 'row-after', cell(3, 1));
+	applied(hand, 'row-delete', cell(3, 1));
+	applied(hand, 'row-delete', cell(0, 1));
+	const dashed = ['| Plant | Room |', '| ----- | ---- |', '| Fern  | Hall |', '| Mint  | Den  |', '| ----- | ---- |'];
+	applied(dashed, 'row-delete', cell(1, 0));
+	applied(dashed, 'row-after', cell(2, 0));
 });
 
 test('a cell\'s shown text, as Obsidian draws it', () => {

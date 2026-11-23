@@ -195,7 +195,11 @@ export const tableMenus = ViewPlugin.define((view) => {
 		const own = view.state.facet(ownTables);
 		if (own?.spans(view.state)) {
 			const place = own.cellAt(view, target);
-			if (place) addItems(Menu.forEvent(event), view, place);
+			if (!place) return;
+			// The cell is selected first, so it shows which cell the menu is for. An open cell's empty space keeps it open.
+			const open = openCell(view)?.place.cell;
+			if (open?.row !== place.cell.row || open?.column !== place.cell.column) selectAt(view, place);
+			addItems(Menu.forEvent(event), view, place);
 			return;
 		}
 		if (!event.defaultPrevented || target.closest(HANDLES)) return;

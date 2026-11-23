@@ -103,7 +103,7 @@ export function runEdit(view: EditorView, edit: TableEdit, end: EditEnd = {}): b
 		view.focus();
 		return true;
 	}
-	const { changes, to } = lineChanges(doc, table, edited.lines);
+	const { changes, to } = lineChanges(doc, table, edited.lines, edited.from);
 	const { main } = view.state.selection;
 	if (changes.length) view.dispatch({ changes, selection: wholeTable({ from: table.from, to }, main.anchor < main.head), annotations, scrollIntoView: false });
 	const at = { row: edited.cell.row, column: end.column ?? edited.cell.column };

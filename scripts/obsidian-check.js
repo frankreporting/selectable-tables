@@ -5060,6 +5060,7 @@
 							await sleep(300);
 							const read = {};
 							await pointAt(middle(cellOf(view, on, null, 2, 0)), 'right');
+							read.selected = on ? tableAt(view, null)?.cell ?? null : undefined;
 							read.closed = await readMenu();
 							await closeMenus();
 							await openCellAt(view, on, null, 1, 0);
@@ -5074,6 +5075,7 @@
 						const onMenus = await menusFor(true);
 						const tableTop = ['Row', 'Column', 'Sort by column (A to Z)', 'Sort by column (Z to A)', 'Freeze rows up to here', 'Freeze columns up to here', 'Freeze rows and columns up to here'];
 						check('Own 74: a right-click on a cell that isn\'t open shows Row, Column, the two sorts, then the freeze items, as Obsidian\'s own table does', onMenus.closed.top.join() === tableTop.join() && offMenus.closed.top.join() === tableTop.join(), { on: onMenus.closed.top, off: offMenus.closed.top });
+						check('Own 74: the right-clicked cell is selected as its menu shows', onMenus.selected?.row === 2 && onMenus.selected?.column === 0, onMenus.selected);
 						check('Own 74: its Row and Column submenus hold Obsidian\'s items, worded and ordered as in Obsidian\'s', JSON.stringify([onMenus.closed.Row, onMenus.closed.Column]) === JSON.stringify([offMenus.closed.Row, offMenus.closed.Column]) && onMenus.closed.Row?.length === 6 && onMenus.closed.Column?.length === 8, { on: [onMenus.closed.Row, onMenus.closed.Column], off: [offMenus.closed.Row, offMenus.closed.Column] });
 						// Obsidian's open cell puts the freeze items, from editor-menu, before its own table items; the plugin's cell puts
 						// the table items first, then the freeze items, as on a cell that isn't open.
@@ -5305,10 +5307,11 @@
 						const tidyText = view.state.doc.toString();
 						const before = tidied;
 						// The row at the pane's bottom, by its first cell, which counts the rows, and where it is; and the note's scroll.
+						// A row on screen above the edit, by its first cell, which counts the rows, and where it is: no edit below it moves it.
 						const bottomRow = () => {
 							const pane = view.scrollDOM.getBoundingClientRect();
 							const left = view.contentDOM.getBoundingClientRect().left;
-							const hit = document.elementFromPoint(left + 40, pane.top + view.scrollDOM.clientHeight - 80)?.closest('tr');
+							const hit = document.elementFromPoint(left + 40, pane.top + 100)?.closest('tr');
 							return { text: hit?.cells[0]?.textContent.trim() ?? null, top: hit?.getBoundingClientRect().top ?? null, scroll: view.scrollDOM.scrollTop };
 						};
 						const timedEdit = async (row, column, id) => {
@@ -5335,6 +5338,19 @@
 						const moved = await timedEdit(100, 1, 'selectable-tables:table-row-down');
 						const movedRight = moved.lines.join('\n') === [...before.slice(0, 101), before[102], before[101], ...before.slice(103)].join('\n');
 						await restore(view, tidyText);
+						// A column edit rewrites the header: the rows keep the heights they were drawn at, and stay where they are.
+						const column = await timedEdit(1500, 1, 'selectable-tables:table-col-after');
+						const columnRight = column.lines.length === before.length && rowCells(column.lines[1501]).length === rowCells(before[1501]).length + 1;
+						await restore(view, tidyText);
+						// The first edit of a table spaced by hand tidies every line, the header's too.
+						const spacedLines = [...tidied];
+						spacedLines[951] = spacedLines[951].replace(/ \|/g, '     |');
+						view.dispatch({ changes: { from: bigStart, to: view.state.doc.lineAt(models(view)[0].to).to, insert: spacedLines.join('\n') } });
+						await sleep(1500);
+						await frames(3);
+						const spaced = await timedEdit(1500, 1, 'selectable-tables:table-row-delete');
+						const spacedRight = spaced.lines.join('\n') === [...before.slice(0, 1501), ...before.slice(1502)].join('\n');
+						await restore(view, tidyText);
 						// Sort through the menu, since it has no command.
 						await leaveAll(view);
 						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(headerLine + 400).from, { y: 'center' }) });
@@ -5360,15 +5376,15 @@
 						await leaveAll(view);
 						await restore(view, bigText);
 						// The note doesn't scroll, and below an edit that keeps the number of rows, the row at the bottom is the same one.
-						const stays = (r, sameRow) => Math.abs(r.bottom.scroll - r.now.scroll) <= 2 && (!sameRow || (r.bottom.text === r.now.text && Math.abs(r.bottom.top - r.now.top) <= 2));
+						const stays = (r) => !!r.bottom.text && r.bottom.text === r.now.text && Math.abs(r.bottom.top - r.now.top) <= 2;
 						const firstOff = (got, want) => {
 							const i = want.findIndex((line, n) => got[n] !== line);
 							return i < 0 ? (got.length === want.length ? null : { lengths: [got.length, want.length] }) : { at: i, got: got[i]?.slice(0, 80), want: want[i]?.slice(0, 80), lengths: [got.length, want.length] };
 						};
-						check('Own 81: in Table 2000 by 12, Delete row on row 1,500, Move row down on row 100 across a seam, and Sort A to Z each write the right text', deletedRight && movedRight && bodySorted && sameRows && !!sortItem, { deletedRight, movedRight, bodySorted, sameRows, sortItem: !!sortItem, deleted: firstOff(deleted.lines, [...before.slice(0, 1501), ...before.slice(1502)]), moved: firstOff(moved.lines, [...before.slice(0, 101), before[102], before[101], ...before.slice(103)]), sortHeader: [sortedLines[0]?.slice(0, 60), before[0]?.slice(0, 60)], sortLengths: [sortedLines.length, before.length] });
-						check('Own 81: each takes under 1 s', deleted.ms < 1000 && moved.ms < 1000 && sortMs < 1000, { deleted: deleted.ms, moved: moved.ms, sort: sortMs });
-						check('Own 81: the row at the pane\'s bottom stays where it was', stays(deleted, false) && stays(moved, true) && stays({ bottom: sortBottom, now: sortNow }, false), { deleted: [deleted.bottom, deleted.now], moved: [moved.bottom, moved.now], sort: [sortBottom, sortNow] });
-						results.push({ name: 'Own 81 timings (ms)', ok: true, detail: { deleteRow1500: deleted.ms, moveRow100: moved.ms, sortColumn2: sortMs } });
+						check('Own 81: in Table 2000 by 12, Delete row on row 1,500, Move row down on row 100 across a seam, and Sort A to Z each write the right text', deletedRight && movedRight && columnRight && spacedRight && bodySorted && sameRows && !!sortItem, { deletedRight, movedRight, columnRight, spacedRight, bodySorted, sameRows, sortItem: !!sortItem, deleted: firstOff(deleted.lines, [...before.slice(0, 1501), ...before.slice(1502)]), moved: firstOff(moved.lines, [...before.slice(0, 101), before[102], before[101], ...before.slice(103)]), sortHeader: [sortedLines[0]?.slice(0, 60), before[0]?.slice(0, 60)], sortLengths: [sortedLines.length, before.length] });
+						check('Own 81: each takes under 1 s', deleted.ms < 1000 && moved.ms < 1000 && column.ms < 1000 && spaced.ms < 1000 && sortMs < 1000, { deleted: deleted.ms, moved: moved.ms, column: column.ms, spaced: spaced.ms, sort: sortMs });
+						check('Own 81: the rows on screen above the edit stay where they were, after Delete row, Move row down, Add column to the right, and Delete row on a copy spaced by hand, and Sort doesn\'t scroll the note', stays(deleted) && stays(moved) && stays(column) && stays(spaced) && Math.abs(sortBottom.scroll - sortNow.scroll) <= 2, { deleted: [deleted.bottom, deleted.now], moved: [moved.bottom, moved.now], column: [column.bottom, column.now], spaced: [spaced.bottom, spaced.now], sort: [sortBottom, sortNow] });
+						results.push({ name: 'Own 81 timings (ms)', ok: true, detail: { deleteRow1500: deleted.ms, moveRow100: moved.ms, addColumn: column.ms, deleteRowSpaced: spaced.ms, sortColumn2: sortMs } });
 						check('Own 81: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						await closeMenus();

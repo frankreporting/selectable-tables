@@ -37,9 +37,8 @@ import { cellsOf } from './shape';
 
 /** On a block while its table pins anything: styles.css paints what pins, with the theme's colors. */
 export const PINS_CLASS = 'selectable-tables-pins';
-/** On a block while its table's rows pin, and while its columns do. */
+/** On a block while its table's rows pin. */
 const PIN_ROWS_CLASS = 'selectable-tables-pin-rows';
-const PIN_COLUMNS_CLASS = 'selectable-tables-pin-columns';
 /** On a block of a table drawn as one block. */
 const SINGLE_CLASS = 'selectable-tables-single';
 /** On a real frozen row of a table of one block, and on its copy in the strip: it sticks. */
@@ -100,7 +99,7 @@ const FADES_OUT_CLASS = 'selectable-tables-fades-out';
 const SHADE_RAIL_CLASS = 'selectable-tables-shade-rail';
 /** On a block while its rows pin: how tall they are together, for the shadow's place and its fade. */
 const PINNED_VARIABLE = '--selectable-tables-pinned';
-/** How deep the shadow under the pinned rows is, as styles.css draws it. */
+/** How deep the shadow under the pinned rows is, as styles.css draws it (`--selectable-tables-shade-depth`). */
 const SHADE_DEPTH = 8;
 
 
@@ -994,7 +993,6 @@ export class Pins {
 			const any = (this.fit.rows || this.fit.columns) && !!read.paint;
 			dom.toggleClass(PINS_CLASS, any);
 			dom.toggleClass(PIN_ROWS_CLASS, this.fit.rows);
-			dom.toggleClass(PIN_COLUMNS_CLASS, this.fit.columns);
 			dom.toggleClass(SINGLE_CLASS, single);
 			setStyle(dom, PINNED_VARIABLE, this.fit.rows ? px(pinned) : null);
 			for (const [name, value] of read.paint?.variables ?? []) setStyle(dom, name, any ? value : null);
@@ -1245,7 +1243,7 @@ export class Pins {
 		const view = this.host.view;
 		for (const block of this.host.pinBlocks) {
 			if (!block) continue;
-			block.dom.removeClass(PINS_CLASS, PIN_ROWS_CLASS, PIN_COLUMNS_CLASS, SINGLE_CLASS);
+			block.dom.removeClass(PINS_CLASS, PIN_ROWS_CLASS, SINGLE_CLASS);
 			for (const [name] of this.paint?.variables ?? []) block.dom.style.removeProperty(name);
 			block.dom.style.removeProperty(PINNED_VARIABLE);
 			this.realRows(block, null);

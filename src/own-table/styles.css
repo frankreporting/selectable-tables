@@ -531,6 +531,7 @@ body {
  * outside the table.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pin-rows {
+	/* As deep as pins.ts's SHADE_DEPTH, which starts the rails that much higher. */
 	--selectable-tables-shade-depth: 8px;
 
 	timeline-scope: --selectable-tables-rows;

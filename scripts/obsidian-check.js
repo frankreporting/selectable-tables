@@ -6653,7 +6653,7 @@
 							await frames(2);
 							rest[heading || note] = { same: shown.equals(taken), row: rowShade(view, model).shows, column: columnShade(model).shows, pinned: model.pins.pinned };
 						}
-						check('Own 100: at rest, Plants, Tools and the 2,000-row table look the same with their shadows taken out', Object.values(rest).every((r) => r.same && r.row === 0 && !(r.column > 0)), rest);
+						check('Own 100: at rest, Plants, Tools and the 2,000-row table look the same with their shadows taken out', Object.values(rest).every((r) => r.pinned.rows && r.same && r.row === 0 && !(r.column > 0)), rest);
 
 						view = await open('Frozen tables');
 						await sleep(400);
@@ -6705,25 +6705,36 @@
 							await slideTo(plants, 200);
 							await aimTop(view, plants, 100);
 						}
-						check('Own 105: a press under the row shadow and under the column shadow opens the cell under it', Object.values(presses).every((p) => p.want && p.opened), presses);
+						check('Own 104: a press under the row shadow and under the column shadow opens the cell under it', Object.values(presses).every((p) => p.want && p.opened), presses);
 
 						// Nothing of the plugin's runs as the note scrolls or the table moves sideways: what pins isn't placed again.
 						let placed = 0;
+						const moved = { down: 0, up: 0, sideways: 0 };
 						const measure = plants.pins.measure;
 						plants.pins.measure = function () {
 							placed++;
 							return measure.call(this);
 						};
-						const box = plants.blocks[0].dom.getBoundingClientRect();
-						const centre = { x: Math.round(box.left + 300), y: Math.round(port(view) + 250) };
-						await cdp.sendCommand('Input.synthesizeScrollGesture', { ...centre, xDistance: 0, yDistance: -300, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
-						await sleep(300);
-						await cdp.sendCommand('Input.synthesizeScrollGesture', { ...centre, xDistance: 0, yDistance: 300, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
-						await sleep(300);
-						await cdp.sendCommand('Input.synthesizeScrollGesture', { ...centre, xDistance: -250, yDistance: 0, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
-						await sleep(300);
-						delete plants.pins.measure;
-						check('Own 107: as the note scrolls and the table moves sideways, what pins and its shadows aren\'t placed again', placed === 0, { placed });
+						try {
+							const box = plants.blocks[0].dom.getBoundingClientRect();
+							const centre = { x: Math.round(box.left + 300), y: Math.round(port(view) + 250) };
+							const gesture = async (xDistance, yDistance) => {
+								await cdp.sendCommand('Input.synthesizeScrollGesture', { ...centre, xDistance, yDistance, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
+								await sleep(300);
+							};
+							let at = view.scrollDOM.scrollTop;
+							await gesture(0, -300);
+							moved.down = Math.round(view.scrollDOM.scrollTop - at);
+							at = view.scrollDOM.scrollTop;
+							await gesture(0, 300);
+							moved.up = Math.round(at - view.scrollDOM.scrollTop);
+							const slid = plants.sideways().scroll;
+							await gesture(-250, 0);
+							moved.sideways = Math.round(plants.sideways().scroll - slid);
+						} finally {
+							delete plants.pins.measure;
+						}
+						check('Own 105: as the note scrolls and the table moves sideways, what pins and its shadows aren\'t placed again', placed === 0 && moved.down > 100 && moved.up > 100 && moved.sideways !== 0, { placed, moved });
 
 						// Sheds frozen 2 by 2 and moved sideways: a cell open in a pinned row and a frozen column keeps both shadows
 						// at their edges, with the strip under the pinned rows.
@@ -6789,7 +6800,7 @@
 								joins.push({ k, y, ok: joined && parts.every((s) => near(s.shows, 1, 0.02)) && Math.abs(span - (8 + line)) <= 0.6 && Math.abs(parts[0].from - (big.pins.room.height - line)) <= 1.5, parts });
 							}
 						}
-						check('Own 104: across the 2,000-row table\'s joins, the shadow under the pinned rows is one band, whole, with none at a block\'s top', joins.every((j) => j.ok), joins.filter((j) => !j.ok));
+						check('Own 107: across the 2,000-row table\'s joins, the shadow under the pinned rows is one band, whole, with none at a block\'s top', joins.every((j) => j.ok), joins.filter((j) => !j.ok));
 
 						// The same joins as the screen shows them, scrolled with real input: in every frame, the strip of pixels just
 						// inside a cell's end, where no text is drawn, is darker right under the pinned rows than below, and nowhere
@@ -6847,8 +6858,8 @@
 								}
 							}
 						}
-						check('Own 104: scrolled with real input across two joins, every frame the screen gets shows the shadow under the pinned rows and no band anywhere below', sampleX > 0 && screens.frames > 20 && screens.faint === 0 && screens.bands === 0, { ...screens, sampleX });
-						results.push({ name: `Own 104 frames read: ${screens.frames}, at x ${Math.round(sampleX)}`, ok: true });
+						check('Own 107: scrolled with real input across two joins, every frame the screen gets shows the shadow under the pinned rows and no band anywhere below', sampleX > 0 && screens.frames > 20 && screens.faint === 0 && screens.bands === 0, { ...screens, sampleX });
+						results.push({ name: `Own 107 frames read: ${screens.frames}, at x ${Math.round(sampleX)}`, ok: true });
 
 						// With the switch off, Obsidian's own frozen table has none of it.
 						preview.use(false);

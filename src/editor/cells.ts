@@ -1,6 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/view';
-import { Cells, Grid, selectedTable } from './decide';
+import { Cells, Grid, sameCell, selectedTable } from './decide';
 import { type DrawnTable, ownTables, viewLayout } from './layout';
 import type { Cell, Span } from './table-text';
 import { holdWidth } from './width-copy';
@@ -98,7 +98,10 @@ export function cellSelected(state: EditorState): boolean {
  * inside a widget costs the same on any note, and CodeMirror doesn't take it for an edit.
  */
 class CellSelection implements PluginValue, Cells {
+	/** The selected cell, or the end of a range of cells moved to last. */
 	selected: Cell | null = null;
+	/** The cell a range of cells started from, on the plugin's own table; none while one cell is selected. */
+	anchor: Cell | null = null;
 	left: Cell | null = null;
 	/** Where the table all this belongs to starts. */
 	private start: number | null = null;
@@ -126,6 +129,7 @@ class CellSelection implements PluginValue, Cells {
 		const { view } = this;
 		this.start ??= selectedTable(view.state, viewLayout(view))?.from ?? null;
 		this.selected = cell;
+		this.anchor = null;
 		this.left = null;
 		statesWithCell.add(view.state);
 		const own = this.ownTable();
@@ -135,6 +139,23 @@ class CellSelection implements PluginValue, Cells {
 		}
 		this.mark(this.tableElement());
 		view.requestMeasure(this.reveal);
+	}
+
+	/**
+	 * Selects a range of cells of the plugin's own table, from `anchor` to `cell`, the end that moves: it's drawn as its rows
+	 * are, and `cell` is brought into view, unless `show` is false, as for a drag that scrolls the note itself. A range of
+	 * one cell is that cell selected. Nothing is dispatched, as for a selected cell's moves.
+	 */
+	selectRange(anchor: Cell, cell: Cell, toward?: 'up' | 'left', show = true) {
+		const { view } = this;
+		const own = this.ownTable();
+		if (!own) return;
+		this.start ??= selectedTable(view.state, viewLayout(view))?.from ?? null;
+		this.selected = cell;
+		this.anchor = sameCell(anchor, cell) ? null : anchor;
+		this.left = null;
+		statesWithCell.add(view.state);
+		if (this.draw(own) && show) own.showCell(cell, toward);
 	}
 
 	/** Escape on the selected cell: back to the selected table, remembering the cell for Enter. */
@@ -231,6 +252,7 @@ class CellSelection implements PluginValue, Cells {
 
 	private deselect() {
 		this.selected = null;
+		this.anchor = null;
 		statesWithCell.delete(this.view.state);
 		this.mark(null);
 		this.drawing?.markCell(null);
@@ -274,15 +296,18 @@ class CellSelection implements PluginValue, Cells {
 	 * that's gone, after an edit took its row or column, leaves its table selected. Says whether the cell is there.
 	 */
 	private draw(own: DrawnTable): boolean {
-		const { selected } = this;
-		if (!selected || selected.row >= own.grid.rows || selected.column >= own.grid.columns(selected.row)) {
+		const { selected, anchor } = this;
+		const fits = (cell: Cell) => cell.row < own.grid.rows && cell.column < own.grid.columns(cell.row);
+		if (!selected || !fits(selected)) {
 			this.left = null;
 			this.deselect();
 			return false;
 		}
+		// A range whose start an edit took away is the cell moved to last.
+		if (anchor && !fits(anchor)) this.anchor = null;
 		if (this.drawing !== own) this.drawing?.markCell(null);
 		this.drawing = own;
-		own.markCell(selected);
+		own.markCell(selected, this.anchor);
 		return true;
 	}
 

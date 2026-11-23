@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, showsCellAfter, stay, stopsEdit, tab, typeBelow, typesText, writesTable } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
+import type { Cell } from '../src/editor/table-text';
 
 const TABLE = '| Plant  | Room |\n| ------ | ---- |\n| Fern   | Hall |';
 
@@ -336,7 +337,7 @@ describe('a selected cell', () => {
 	});
 
 	test('Copy gives the cell\'s Markdown', () => {
-		assert.equal(copied(on(state(), cellAt(1, 1))), 'e');
+		assert.deepEqual(copied(on(state(), cellAt(1, 1))), { text: 'e' });
 	});
 
 	test('Copy steps aside with no cell selected', () => {
@@ -346,8 +347,83 @@ describe('a selected cell', () => {
 	test('Copy on a header cell leaves out the freeze mark, which belongs to the table', () => {
 		const frozen = '| %%freeze 2 1%% a | b   |\n| ----------------- | --- |\n| %%freeze 2 1%% d  | e   |';
 		const frozenState = () => note(`\n⟨${frozen}⟩\n`);
-		assert.equal(copied(on(frozenState(), cellAt(0, 0))), 'a');
-		assert.equal(copied(on(frozenState(), cellAt(1, 0))), '%%freeze 2 1%% d', 'a body cell has no mark, only text');
+		assert.deepEqual(copied(on(frozenState(), cellAt(0, 0))), { text: 'a' });
+		assert.deepEqual(copied(on(frozenState(), cellAt(1, 0))), { text: '%%freeze 2 1%% d' }, 'a body cell has no mark, only text');
+	});
+});
+
+describe('a range of cells, on the plugin\'s own table', () => {
+	const BIG = '| a   | b   | c   |\n| --- | --- | --- |\n| d   | e   | f   |\n| g   | h   | i   |';
+	const grid: Grid = { rows: 3, columns: () => 3 };
+	const state = () => note(`\n⟨${BIG}⟩\n`);
+	const cell = (row: number, column: number) => ({ row, column });
+	/** The cell moved to last, and where the range started, if it's a range. */
+	const cells = (selected: Cell, anchor: Cell | null = null): Cells => ({ selected, anchor, left: null, grid });
+	const own = (at: Cells) => ({ ...on(state(), at, { own: true }), leavesLine: () => true });
+	const range = (anchor: Cell, to: Cell, toward?: 'up' | 'left'): Action => ({ type: 'range', anchor, cell: to, ...(toward && { toward }) });
+	const one = (row: number, column: number, toward?: 'up' | 'left'): Action => ({ type: 'cell', cell: cell(row, column), ...(toward && { toward }) });
+
+	test('Shift with an arrow starts a range from the selected cell', () => {
+		assert.deepEqual(arrow(own(cells(cell(1, 1))), 'right', true), range(cell(1, 1), cell(1, 2)));
+		assert.deepEqual(arrow(own(cells(cell(1, 1))), 'down', true), range(cell(1, 1), cell(2, 1)));
+		assert.deepEqual(arrow(own(cells(cell(1, 1))), 'up', true), range(cell(1, 1), cell(0, 1), 'up'));
+		assert.deepEqual(arrow(own(cells(cell(1, 1))), 'left', true), range(cell(1, 1), cell(1, 0), 'left'));
+	});
+
+	test('it moves the end moved to last, and keeps where the range started', () => {
+		assert.deepEqual(arrow(own(cells(cell(1, 2), cell(0, 0))), 'down', true), range(cell(0, 0), cell(2, 2)));
+		assert.deepEqual(arrow(own(cells(cell(2, 2), cell(0, 0))), 'left', true), range(cell(0, 0), cell(2, 1), 'left'));
+	});
+
+	test('back on the cell it started from, it\'s that cell selected', () => {
+		assert.deepEqual(arrow(own(cells(cell(1, 2), cell(1, 1))), 'left', true), one(1, 1, 'left'));
+	});
+
+	test('it stops at the table\'s edge', () => {
+		assert.deepEqual(arrow(own(cells(cell(2, 2), cell(1, 1))), 'down', true), range(cell(1, 1), cell(2, 2)));
+		assert.deepEqual(arrow(own(cells(cell(2, 2), cell(1, 1))), 'right', true), range(cell(1, 1), cell(2, 2)));
+	});
+
+	test('Shift with a jump stretches it to the table\'s edge that way, along its row or column', () => {
+		assert.deepEqual(shifted(own(cells(cell(1, 1))), 'down'), range(cell(1, 1), cell(2, 1)));
+		assert.deepEqual(shifted(own(cells(cell(1, 1))), 'up'), range(cell(1, 1), cell(0, 1), 'up'));
+		assert.deepEqual(shiftedRowEnd(own(cells(cell(1, 1))), true), range(cell(1, 1), cell(1, 2)));
+		assert.deepEqual(shiftedRowEnd(own(cells(cell(2, 1), cell(1, 1))), false), range(cell(1, 1), cell(2, 0), 'left'));
+	});
+
+	test('a plain arrow ends it on its corner that way: top left, or bottom right', () => {
+		const at = cells(cell(2, 2), cell(1, 1));
+		assert.deepEqual(arrow(own(at), 'up', false), one(1, 1, 'up'));
+		assert.deepEqual(arrow(own(at), 'left', false), one(1, 1, 'left'));
+		assert.deepEqual(arrow(own(at), 'down', false), one(2, 2));
+		assert.deepEqual(arrow(own(at), 'right', false), one(2, 2));
+		const backwards = cells(cell(1, 1), cell(2, 2));
+		assert.deepEqual(arrow(own(backwards), 'down', false), one(2, 2));
+		assert.deepEqual(arrow(own(backwards), 'up', false), one(1, 1, 'up'));
+	});
+
+	test('Escape goes back to the cell moved to last, then the table', () => {
+		assert.deepEqual(escape(own(cells(cell(2, 2), cell(0, 0)))), one(2, 2));
+		assert.deepEqual(escape(own(cells(cell(2, 2)))), { type: 'table' });
+	});
+
+	test('Enter opens the cell moved to last', () => {
+		assert.deepEqual(enter(own(cells(cell(2, 1), cell(0, 0)))), { type: 'edit', cell: cell(2, 1) });
+	});
+
+	test('Tab moves on from the cell moved to last, and ends the range', () => {
+		assert.deepEqual(tab(own(cells(cell(1, 1), cell(0, 0))), true), one(1, 2));
+	});
+
+	test('Copy takes the range, for the plugin\'s table to copy as a table', () => {
+		const state = note(`\n⟨${BIG}⟩\n`);
+		const table = { from: 1, to: 1 + BIG.length };
+		assert.deepEqual(copied(on(state, cells(cell(2, 2), cell(0, 1)), { own: true })), { table, anchor: cell(0, 1), head: cell(2, 2) });
+		assert.deepEqual(copied(on(state, cells(cell(2, 2)), { own: true })), { text: 'i' }, 'one cell copies its text');
+	});
+
+	test('typing goes below the table, as on a selected cell', () => {
+		assert.equal(typeBelow(on(state(), cells(cell(2, 2), cell(0, 0)), { own: true }))?.type, 'below');
 	});
 });
 
@@ -681,8 +757,9 @@ describe('a selected cell and the keys that jump', () => {
 	});
 
 	test('Shift with a jump is taken, and does nothing', () => {
-		assert.deepEqual(shifted(on3(1, 1)), { type: 'stay' });
-		assert.deepEqual(shiftedRowEnd(on3(1, 1)), { type: 'stay' });
+		for (const direction of ['up', 'down', 'left', 'right'] as const) assert.deepEqual(shifted(on3(1, 1), direction), { type: 'stay' });
+		assert.deepEqual(shiftedRowEnd(on3(1, 1), true), { type: 'stay' });
+		assert.deepEqual(shiftedRowEnd(on3(1, 1), false), { type: 'stay' });
 	});
 });
 
@@ -711,8 +788,8 @@ describe('a selected table and the keys that jump', () => {
 	});
 
 	test('Shift with Home, End, Cmd+← or Cmd+→ does nothing, since Obsidian would shrink it to a caret on its edge', () => {
-		assert.deepEqual(shiftedRowEnd(on(note(text))), { type: 'stay' });
-		assert.deepEqual(shiftedRowEnd(on(note(selected('Above\n\n', '\nBelow', false)))), { type: 'stay' });
+		assert.deepEqual(shiftedRowEnd(on(note(text)), false), { type: 'stay' });
+		assert.deepEqual(shiftedRowEnd(on(note(selected('Above\n\n', '\nBelow', false))), true), { type: 'stay' });
 	});
 
 	test('Cmd+↑ and Cmd+↓ are left to Obsidian, which goes to the note\'s start or end', () => {
@@ -721,7 +798,7 @@ describe('a selected table and the keys that jump', () => {
 	});
 
 	test('Shift with a jump is left to Obsidian', () => {
-		assert.equal(shifted(on(note(text))), null);
+		assert.equal(shifted(on(note(text)), 'down'), null);
 	});
 });
 
@@ -735,8 +812,8 @@ describe('a caret and the keys that jump', () => {
 			assert.equal(noteEnd(on(state()), forward), null);
 			assert.equal(option(on(state()), forward), null);
 		}
-		assert.equal(shifted(on(state())), null);
-		assert.equal(shiftedRowEnd(on(state())), null);
+		assert.equal(shifted(on(state()), 'up'), null);
+		assert.equal(shiftedRowEnd(on(state()), true), null);
 	});
 
 	test('Home and End with a caret on a table\'s edge, as a paste leaves it, select the table', () => {

@@ -2,7 +2,7 @@ import type { ChangeSet, Text } from '@codemirror/state';
 import type { EditorView, Rect } from '@codemirror/view';
 import { type App, Component, editorInfoField, getLinkpath, MarkdownRenderer } from 'obsidian';
 import { CELL_CLASS, HOLDS_CELL_CLASS } from '../editor/cells';
-import { type Grid, writesCell } from '../editor/decide';
+import { type Bounds, boundsOf, type Grid, sameCell, writesCell } from '../editor/decide';
 import { OWN_BORDERS_CLASS } from '../editor/freeze';
 import { markedCells } from '../editor/freeze-mark';
 import { type DrawnTable, openCells } from '../editor/layout';
@@ -23,6 +23,10 @@ import { ACTIVE_COLUMN_CLASS, ACTIVE_ROW_CLASS, addButtons, addGrips, BUTTONS, g
 import type { DragTable } from './drag';
 import { columnExtents, type Extent } from './drag-sums';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
+import { copyRange, paintRange, rangeKey } from './range';
+
+/** Starts the HTML Copy puts on the clipboard, as Obsidian's does: Obsidian's own paste then takes the Markdown instead. */
+const HTML_MARK = '<!-- obsidian -->';
 
 /**
  * Rows are drawn to OVER px past the pane, and drawn again once those drawn reach less than MARGIN past it. 1,000 px
@@ -336,9 +340,15 @@ export class Model implements Span, DrawnTable, DragTable {
 	private readonly matchKey = {};
 
 	// The navigation layer's marks.
-	/** The selected cell, row 0 being the header, drawn whenever its row is drawn. */
+	/** The selected cell, row 0 being the header, drawn whenever its row is drawn: with a range, the end that moves. */
 	private cell: Cell | null = null;
 	private cellEl: HTMLTableCellElement | null = null;
+	/** A range of cells, drawn on the rows in the page as they're drawn; none while one cell is selected. */
+	private range: Bounds | null = null;
+	/** The range each drawn row shows (`rangeKey`), so only rows whose part of the range changed are touched. */
+	private readonly rangeShown = new WeakMap<HTMLTableRowElement, string>();
+	/** Whether a row may still show a range, so a row put back in the page loses it. */
+	private rangeDrawn = false;
 	/** A cell to bring into view once its row is drawn. */
 	private showing: Cell | null = null;
 	/** The way the key that's showing a cell went, toward the table's start, if it did. */
@@ -407,13 +417,41 @@ export class Model implements Span, DrawnTable, DragTable {
 		return { rows: this.count + 1, columns: () => columns };
 	}
 
-	markCell(cell: Cell | null): void {
+	markCell(cell: Cell | null, anchor: Cell | null = null): void {
 		this.cell = cell;
+		this.range = cell && anchor && !sameCell(cell, anchor) ? boundsOf(anchor, cell) : null;
+		if (this.range) this.rangeDrawn = true;
 		if (!cell) this.showing = null;
 		for (const block of this.blocks) block?.table.toggleClass(HOLDS_CELL_CLASS, !!cell);
 		this.pins.holdCell(!!cell);
-		this.pins.markCell(cell);
+		// A range shows no outline on the cell moved to last, as Obsidian's range doesn't.
+		this.pins.markRange(this.range);
+		this.pins.markCell(this.range ? null : cell);
 		this.paintCell();
+	}
+
+	/**
+	 * What Copy puts on the clipboard for a range of cells, as Obsidian copies its own range: the Markdown table, the table
+	 * as HTML, and Obsidian's table data (`copyRange`). The HTML is the Markdown rendered as Reading view renders it, in a
+	 * document of its own, after Obsidian's marker.
+	 */
+	copy(anchor: Cell, head: Cell): [string, string][] {
+		const view = this.view;
+		if (!view) return [];
+		const { markdown, rows, alignment } = copyRange(view.state.doc.sliceString(this.from, this.to).split('\n'), anchor, head);
+		const scratch = activeDocument.implementation.createHTMLDocument('');
+		const holder = scratch.createElement('div');
+		const component = new Component();
+		component.load();
+		void MarkdownRenderer.render(this.app, markdown, holder, view.state.field(editorInfoField, false)?.file?.path ?? '', component);
+		const html = holder.querySelector('table')?.outerHTML ?? '';
+		component.unload();
+		return [
+			['text/plain', markdown],
+			['text/markdown', markdown],
+			['text/html', HTML_MARK + html],
+			['obsidian/table', JSON.stringify({ rows, alignment })],
+		];
 	}
 
 	/**
@@ -469,14 +507,36 @@ export class Model implements Span, DrawnTable, DragTable {
 		return tr?.instanceOf(HTMLTableRowElement) ? (tr.cells[column] ?? null) : null;
 	}
 
-	/** Puts the selected cell's mark on its element, as its row comes and goes, and the handles' marks for a phone. */
+	/**
+	 * Puts the selected cell's mark on its element, and a range's on the cells in it, as their rows come and go, and the
+	 * handles' marks for a phone.
+	 */
 	private paintCell(): void {
 		this.paintHandles();
-		const el = this.cell ? this.cellElement(this.cell) : null;
+		this.paintRange();
+		const el = this.cell && !this.range ? this.cellElement(this.cell) : null;
 		if (el === this.cellEl) return;
 		this.cellEl?.removeClass(CELL_CLASS);
 		el?.addClass(CELL_CLASS);
 		this.cellEl = el;
+	}
+
+	/**
+	 * Draws the range on the rows in the page, and takes it off rows it left: only rows whose part of it changed, so a key
+	 * costs the same on any table, and a row coming into view costs a lookup.
+	 */
+	private paintRange(): void {
+		if (!this.rangeDrawn) return;
+		const range = this.range;
+		const paint = (tr: Element | null | undefined, row: number) => {
+			if (!tr?.instanceOf(HTMLTableRowElement)) return;
+			const key = rangeKey(row, range);
+			if ((this.rangeShown.get(tr) ?? '') === key) return;
+			this.rangeShown.set(tr, key);
+			paintRange(tr, row, range);
+		};
+		paint(this.blocks[0]?.thead?.firstElementChild, 0);
+		for (const [row, tr] of this.rendered) paint(tr, row + 1);
 	}
 
 	/** The cells whose handles show on a phone or tablet, as marked. */
@@ -1628,6 +1688,8 @@ export class Model implements Span, DrawnTable, DragTable {
 		now.forEach((cell, column) => {
 			if (column !== this.openColumn) tr.replaceChild(cell, was[column]!);
 		});
+		// Its cells are new: a range is drawn on them again.
+		this.rangeShown.delete(tr);
 		// The row's rendered pieces are the new batch's now: the old one goes once none of its rows is left.
 		const batch = this.batchOf.get(fresh);
 		this.batchOf.delete(fresh);

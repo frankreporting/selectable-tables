@@ -3,6 +3,7 @@ import { EditorState, type Extension, Prec, RangeSet, StateEffect, StateField, t
 import { Decoration, type DecorationSet, EditorView, type PluginValue, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
 import { type App, editorEditorField, editorInfoField } from 'obsidian';
+import { cellSelection } from '../editor/cells';
 import { showsCellAfter } from '../editor/decide';
 import { canFreeze } from '../editor/freeze';
 import { inOwnCell, openCells, ownTables as ownTablesFacet } from '../editor/layout';
@@ -496,6 +497,11 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 		/** For the check script: an editor's tables, every table found from scratch, and where each parser puts tables. */
 		debug: {
 			models: (view: EditorView) => view.state.field(tables, false)?.models ?? [],
+			/** The note's selected cell, and where a range of cells started, if one is selected. */
+			cells: (view: EditorView) => {
+				const cells = view.plugin(cellSelection);
+				return cells ? { selected: cells.selected, anchor: cells.anchor } : null;
+			},
 			/** The note's open cell, its editor, and why cells open in the plain editor, if they do. */
 			openCell: (view: EditorView) => openCells.get(view) ?? null,
 			plainBecause,

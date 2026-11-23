@@ -2612,8 +2612,9 @@
 		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells (with
 		// window.__checkCornersOnly too, only its checks against Obsidian's frozen tables, Own 87 to Own 91), with
 		// window.__checkEditsOnly instead, only the section on editing its rows and columns, with
-		// window.__checkDragsOnly instead, only the section on its drag handles and + buttons, and with
-		// window.__checkShadesOnly instead, only the section on its frozen tables' shadows.
+		// window.__checkDragsOnly instead, only the section on its drag handles and + buttons, with
+		// window.__checkShadesOnly instead, only the section on its frozen tables' shadows, and with
+		// window.__checkRangesOnly instead, only the section on its ranges of cells.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3750,7 +3751,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -6991,6 +6992,430 @@
 						check('Own 109: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						hidden.remove();
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkRangesOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly) {
+					// --- A range of cells on the plugin's table (STA-14): Shift with an arrow or a jump grows it from the selected
+					// cell, it's drawn with Obsidian's classes for its own range on the rows in the page and on the pinned copies, and
+					// Copy puts it on the clipboard as Obsidian copies its own range. Real keys and presses through the window's
+					// debugger. Copy is read from a copy event carrying its own DataTransfer, so the clipboard isn't touched. Run alone
+					// with window.__checkOwnOnly, __checkCellsOnly and __checkRangesOnly all true.
+					preview.use(true);
+					await sleep(400);
+					const touched = ['Cell moves', 'Frozen tables', 'Table 2000 by 12', 'Frozen table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const codes = { Escape: 27, Enter: 13, Tab: 9, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Backspace: 8, Delete: 46, Home: 36, End: 35, PageUp: 33, PageDown: 34 };
+					const key = async (name, { alt, ctrl, meta, shift } = {}) => {
+						const modifiers = (alt ? 1 : 0) | (ctrl ? 2 : 0) | (meta ? 4 : 0) | (shift ? 8 : 0);
+						const code = codes[name] ?? name.toUpperCase().charCodeAt(0);
+						const text = name.length === 1 && !(modifiers & 6) ? name : '';
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: code, modifiers, unmodifiedText: macChar(name), text };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await settle();
+					};
+					const shift = { shift: true };
+					const pointAt = async ({ x, y }) => {
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+						await sleep(400);
+						await frames(3);
+					};
+					const middle = (el, dx = null) => {
+						const r = el.getBoundingClientRect();
+						return { x: dx === null ? r.left + r.width / 2 : r.left + dx, y: r.top + r.height / 2 };
+					};
+					const named = (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						return models(view).find((model) => model.from > at);
+					};
+					const scrollTo = async (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'start' }) });
+						await sleep(400);
+						await frames(3);
+					};
+					// Obsidian's own table with the switch off: its drawn cell by row and column, the header being row 0.
+					const obsidianCell = (view, heading, row, column) => {
+						const at = view.state.doc.toString().indexOf(`## ${heading}`);
+						const widget = Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget')).find((el) => view.posAtDOM(el) > at);
+						return widget?.querySelector('table')?.rows[row]?.cells[column] ?? null;
+					};
+					const selection = (view) => preview.cells(view) ?? { selected: null, anchor: null };
+					const where = (view) => {
+						const { selected, anchor } = selection(view);
+						return `${selected ? `${selected.row},${selected.column}` : '-'}${anchor ? ` from ${anchor.row},${anchor.column}` : ''}`;
+					};
+					// Selects a cell of the plugin's table as a hand would: a press opens it, and Escape selects it.
+					const selectCell = async (view, model, row, column) => {
+						const td = model.cellElement({ row, column });
+						if (!td) return false;
+						await pointAt(middle(td, 6));
+						await key('Escape');
+						return where(view) === `${row},${column}`;
+					};
+					const leave = async (view) => {
+						for (let i = 0; i < 3; i++) await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					// Every cell drawn for a table, its pinned copies' included, carries the range's classes exactly when it's in the
+					// range, and its edges' classes on the range's edges: Obsidian's `is-selected`, `start`, `end`, `top` and `bottom`.
+					const rangeDrawn = (view, model) => {
+						const { selected, anchor } = selection(view);
+						const range = selected && anchor ? { top: Math.min(selected.row, anchor.row), bottom: Math.max(selected.row, anchor.row), left: Math.min(selected.column, anchor.column), right: Math.max(selected.column, anchor.column) } : null;
+						const wrong = [];
+						let inRange = 0;
+						let outlined = 0;
+						for (const box of model.boxes) {
+							if (!box.isConnected) continue;
+							for (const el of box.querySelectorAll('td, th')) {
+								if (el.classList.contains('selectable-tables-filler')) continue;
+								const cell = model.cellAt(el);
+								if (!cell) continue;
+								if (el.classList.contains('selectable-tables-cell')) outlined++;
+								const inside = !!range && cell.row >= range.top && cell.row <= range.bottom && cell.column >= range.left && cell.column <= range.right;
+								if (inside) inRange++;
+								const want = inside ? [true, cell.column === range.left, cell.column === range.right, cell.row === range.top, cell.row === range.bottom] : [false, false, false, false, false];
+								const has = ['is-selected', 'start', 'end', 'top', 'bottom'].map((name) => el.classList.contains(name));
+								if (want.some((on, i) => on !== has[i]) && wrong.length < 6) wrong.push(`${cell.row},${cell.column} ${has.map(Number).join('')}`);
+							}
+						}
+						// A range shows no outline: one selected cell shows its own.
+						const outlineRight = range ? outlined === 0 : !selected || outlined >= 1;
+						return { ok: wrong.length === 0 && outlineRight, wrong, inRange, outlined };
+					};
+					// Whether the cell moved to last shows in the pane, where it's drawn on top: its copy, or the real cell.
+					const endInView = (view, model) => {
+						const { selected } = selection(view);
+						if (!selected) return false;
+						const pane = view.scrollDOM.getBoundingClientRect();
+						for (const box of model.boxes) {
+							if (!box.isConnected) continue;
+							for (const el of box.querySelectorAll('td, th')) {
+								const cell = model.cellAt(el);
+								if (!cell || cell.row !== selected.row || cell.column !== selected.column) continue;
+								const r = el.getBoundingClientRect();
+								if (r.height && r.bottom > pane.top && r.top < pane.bottom && r.right > pane.left && r.left < pane.right) return true;
+							}
+						}
+						return false;
+					};
+					// Copy, as a copy event carrying its own DataTransfer leaves it: every type, by name.
+					const copyFrom = (el) => {
+						const data = new DataTransfer();
+						el.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+						return { data, forms: Object.fromEntries(data.types.map((type) => [type, data.getData(type)])) };
+					};
+					const cellsIn = (html) => (html.match(/<t[dh][\s>]/g) ?? []).length;
+					const withoutMarks = (text) => text.replace(/%%freeze[^%]*%%\s*/g, '');
+					const tableCells = (markdown) => markdown.split('\n').filter((line, i) => i !== 1).map((line) => line.replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((cell) => cell.trim()));
+					// How many of a box's pixels are the accent color the range's frame is drawn in, from the window's own picture.
+					const accent = (() => {
+						const probe = document.body.createDiv();
+						probe.style.color = 'var(--table-selection-border-color)';
+						const [r, g, b] = getComputedStyle(probe).color.match(/\d+(\.\d+)?/g).map(Number);
+						probe.remove();
+						return { r, g, b };
+					})();
+					const framePixels = async (el) => {
+						// The frame lies over the cell's border, just outside its box.
+						const r = el.getBoundingClientRect();
+						const shot = await window.electron.remote.getCurrentWebContents().capturePage({ x: Math.round(r.left) - 3, y: Math.round(r.top) - 3, width: Math.round(r.width) + 6, height: Math.round(r.height) + 6 });
+						const bytes = shot.toBitmap();
+						let count = 0;
+						// The bitmap is BGRA.
+						for (let i = 0; i < bytes.length; i += 4) if (Math.abs(bytes[i + 2] - accent.r) + Math.abs(bytes[i + 1] - accent.g) + Math.abs(bytes[i] - accent.b) < 60) count++;
+						return { count, width: shot.getSize().width };
+					};
+					let view = await open('Cell moves');
+					try {
+						// Seed trays: grown and shrunk one cell at a time, as step 1 of the test plan.
+						await scrollTo(view, 'Seed trays');
+						let model = named(view, 'Seed trays');
+						const text = view.state.doc.toString();
+						let quiet = 0;
+						const update = view.update;
+						view.update = function (transactions) {
+							if (transactions.length) quiet++;
+							return update.call(this, transactions);
+						};
+						const picked = await selectCell(view, model, 1, 0);
+						quiet = 0;
+						await key('ArrowRight', shift);
+						await key('ArrowRight', shift);
+						const three = { at: where(view), drawn: rangeDrawn(view, model) };
+						await key('ArrowDown', shift);
+						const six = { at: where(view), drawn: rangeDrawn(view, model) };
+						await key('ArrowLeft', shift);
+						const four = { at: where(view), drawn: rangeDrawn(view, model) };
+						const moves = quiet;
+						delete view.update;
+						await key('ArrowUp', shift);
+						await key('ArrowLeft', shift);
+						const back = { at: where(view), drawn: rangeDrawn(view, model) };
+						check('Own 110: Shift with an arrow grows a range from the selected cell and shrinks it back, drawn with Obsidian\'s classes on exactly its cells, with no outline', picked && three.at === '1,2 from 1,0' && three.drawn.ok && three.drawn.inRange === 3 && six.at === '2,2 from 1,0' && six.drawn.ok && six.drawn.inRange === 6 && four.at === '2,1 from 1,0' && four.drawn.ok && four.drawn.inRange === 4 && back.at === '1,0' && back.drawn.ok && back.drawn.outlined === 1, { picked, three, six, four, back });
+						check('Own 110: moving the range dispatches nothing to the note, and changes no text', moves === 0 && view.state.doc.toString() === text, { moves });
+						// Obsidian's CSS draws the frame from the edges' classes: the range's top left cell carries its top and start
+						// edges, a cell inside none, and the tint on both (the relied-on app.css rules).
+						await key('ArrowDown', shift);
+						await key('ArrowDown', shift);
+						await key('ArrowRight', shift);
+						await key('ArrowRight', shift);
+						await frames(3);
+						const corner = model.cellElement({ row: 1, column: 0 });
+						const inner = model.cellElement({ row: 2, column: 1 });
+						const after = (el) => getComputedStyle(el, '::after');
+						const width = getComputedStyle(corner).getPropertyValue('--table-selection-border-width').trim();
+						const css = { corner: [after(corner).borderTopWidth, after(corner).borderInlineStartWidth, after(corner).borderBottomWidth], inner: [after(inner).borderTopWidth, after(inner).borderInlineStartWidth], tint: [after(corner).backgroundColor, after(inner).backgroundColor], width };
+						check('Own 111: app.css draws a range from Obsidian\'s classes: its edges framed, inside cells tinted only', where(view) === '3,2 from 1,0' && css.corner[0] === width && css.corner[1] === width && css.corner[2] === '0px' && css.inner.every((w) => w === '0px') && css.tint.every((c) => c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent'), css);
+						const ink = { corner: await framePixels(corner), inner: await framePixels(inner) };
+						check('Own 111: the window\'s picture shows the frame on the range\'s edge cell and none inside it', ink.corner.count > ink.corner.width && ink.inner.count < ink.inner.width / 4, ink);
+						check('Own 111: the selected table\'s tint stays off while a range shows', !tint({ el: model.boxes[0] }), model.boxes[0].className);
+						await leave(view);
+
+						// Copy against Obsidian's own range copied with the switch off: Seed trays A1 to Basil, then Plants' header and
+						// Plant 1 in Name and Bed, with its freeze mark.
+						preview.use(false);
+						await sleep(400);
+						view = await open('Cell moves');
+						await scrollTo(view, 'Seed trays');
+						const obsidianCopy = async (heading, from, to) => {
+							const td = obsidianCell(view, heading, from.row, from.column);
+							if (!td) return null;
+							await pointAt(middle(td, 6));
+							await key('End');
+							for (let i = from.column; i < to.column; i++) await key('ArrowRight', shift);
+							for (let i = from.row; i < to.row; i++) await key('ArrowDown', shift);
+							const editor = view.contentDOM.querySelector('.cm-table-widget .cm-editor .cm-content');
+							const copied = editor ? copyFrom(editor).forms : null;
+							await leave(view);
+							return copied;
+						};
+						const stockTrays = await obsidianCopy('Seed trays', { row: 1, column: 0 }, { row: 2, column: 1 });
+						view = await open('Frozen tables');
+						await scrollTo(view, 'Plants');
+						const stockPlants = await obsidianCopy('Plants', { row: 0, column: 0 }, { row: 1, column: 1 });
+						preview.use(true);
+						await sleep(400);
+						view = await open('Cell moves');
+						await scrollTo(view, 'Seed trays');
+						model = named(view, 'Seed trays');
+						await selectCell(view, model, 1, 0);
+						await key('ArrowRight', shift);
+						await key('ArrowDown', shift);
+						const ownTrays = copyFrom(view.contentDOM);
+						const trays = ownTrays.forms;
+						check('Own 112: Copy of a range puts Obsidian\'s four forms on the clipboard, in its order', JSON.stringify(Object.keys(trays)) === JSON.stringify(['text/plain', 'text/markdown', 'text/html', 'obsidian/table']), Object.keys(trays));
+						check('Own 112: the Markdown and Obsidian\'s table data are what Obsidian copies from the same range', !!stockTrays && trays['text/plain'] === stockTrays['text/plain'] && trays['text/markdown'] === stockTrays['text/markdown'] && trays['obsidian/table'] === stockTrays['obsidian/table'], { own: trays, stock: stockTrays });
+						check('Own 112: the formatted table starts with Obsidian\'s marker and holds the same cells, bold and links kept', !!stockTrays && trays['text/html'].startsWith('<!-- obsidian -->') && cellsIn(trays['text/html']) === cellsIn(stockTrays['text/html']) && /<a[\s>]/.test(trays['text/html']) === /<a[\s>]/.test(stockTrays['text/html']) && /<code[\s>]/.test(trays['text/html']) === /<code[\s>]/.test(stockTrays['text/html']), { own: trays['text/html'], stock: stockTrays?.['text/html'] });
+						await key('Escape');
+						const single = copyFrom(view.contentDOM).forms;
+						check('Own 112: Copy on one selected cell still copies just its text', where(view) === '2,1' && JSON.stringify(single) === JSON.stringify({ 'text/plain': '`Basil`' }), { at: where(view), single });
+						// A paste into a note takes the Markdown, as Obsidian's own paste does with its marker on the HTML.
+						await leave(view);
+						const end = view.state.doc.length;
+						view.dispatch({ changes: { from: end, insert: '\n\n' }, selection: { anchor: end + 2 } });
+						view.focus();
+						await settle();
+						const pasted = new ClipboardEvent('paste', { clipboardData: ownTrays.data, bubbles: true, cancelable: true });
+						view.contentDOM.dispatchEvent(pasted);
+						await settle();
+						const tail = view.state.doc.sliceString(end + 2);
+						check('Own 112: pasting the copy into a note gives the Markdown table', tail.trim() === trays['text/plain'], tail);
+						await restore(view, text);
+
+						view = await open('Frozen tables');
+						await scrollTo(view, 'Plants');
+						model = named(view, 'Plants');
+						await selectCell(view, model, 1, 1);
+						await key('ArrowLeft', shift);
+						await key('ArrowUp', shift);
+						const plants = copyFrom(view.contentDOM).forms;
+						const ownRows = plants['obsidian/table'] && JSON.parse(plants['obsidian/table']);
+						const stockRows = stockPlants?.['obsidian/table'] && JSON.parse(stockPlants['obsidian/table']);
+						check('Own 113: Copy leaves the freeze mark out: otherwise the same cells and data as Obsidian\'s copy', !!stockRows && where(view) === '0,0 from 1,1' && JSON.stringify(ownRows) === withoutMarks(JSON.stringify(stockRows)) && JSON.stringify(tableCells(plants['text/plain'])) === JSON.stringify(tableCells(withoutMarks(stockPlants['text/plain']))) && !plants['text/plain'].includes('%%'), { own: plants['text/plain'], stock: stockPlants?.['text/plain'] });
+						await leave(view);
+
+						// Enter, Escape, Tab and the plain arrows on a range, as steps 3 and 4 of the test plan, on Seed trays.
+						view = await open('Cell moves');
+						await scrollTo(view, 'Seed trays');
+						model = named(view, 'Seed trays');
+						const keysOn = [];
+						await selectCell(view, model, 1, 0);
+						await key('ArrowRight', shift);
+						await key('ArrowDown', shift);
+						await key('Escape');
+						keysOn.push(where(view));
+						await key('Escape');
+						keysOn.push(where(view));
+						await key('Enter');
+						keysOn.push(where(view));
+						await key('ArrowUp', shift);
+						await key('ArrowLeft', shift);
+						keysOn.push(where(view));
+						await key('Enter');
+						await sleep(200);
+						const opened = preview.openCell(view);
+						keysOn.push(opened ? `open ${opened.cell.row},${opened.cell.column}` : 'none open');
+						await leave(view);
+						await selectCell(view, model, 1, 0);
+						await key('ArrowRight', shift);
+						await key('ArrowDown', shift);
+						await key('ArrowDown');
+						keysOn.push(where(view));
+						await key('ArrowUp', shift);
+						await key('ArrowLeft', shift);
+						await key('ArrowLeft');
+						keysOn.push(where(view));
+						await key('ArrowRight', shift);
+						await key('ArrowDown', shift);
+						await key('Tab');
+						keysOn.push(where(view));
+						check('Own 114: Escape goes to the cell moved to last, Enter opens that cell, a plain arrow ends the range on its corner that way, and Tab moves on from the cell moved to last', JSON.stringify(keysOn) === JSON.stringify(['2,1', '-', '2,1', '1,0 from 2,1', 'open 1,0', '2,1', '1,0', '2,2']), keysOn);
+						await leave(view);
+
+						// Typing goes below the table; Delete, Cut, Paste and Bold change nothing, and the range stays; a click ends it.
+						await selectCell(view, model, 1, 0);
+						await key('ArrowRight', shift);
+						await key('ArrowDown', shift);
+						await key('x');
+						const tableText = text.slice(text.indexOf('| Tray'), text.indexOf('| B2'));
+						const typed = { table: view.state.doc.toString().includes(tableText), paragraph: view.state.doc.toString().includes('\nx\n') || view.state.doc.toString().endsWith('\nx') };
+						await key('z', { meta: true });
+						await sleep(200);
+						const undone = view.state.doc.toString() === text;
+						await restore(view, text);
+						await scrollTo(view, 'Seed trays');
+						await selectCell(view, model, 1, 0);
+						await key('ArrowRight', shift);
+						await key('ArrowDown', shift);
+						await key('Delete');
+						const cut = clipboard(view, 'cut');
+						const paste = clipboard(view, 'paste', 'pasted');
+						await key('b', { meta: true });
+						const still = { text: view.state.doc.toString() === text, at: where(view), drawn: rangeDrawn(view, model).ok, cut: cut.taken, paste: paste.taken };
+						check('Own 115: typing on a range starts a paragraph below the table, and Undo takes it back', typed.table && typed.paragraph && undone, { typed, undone });
+						check('Own 115: Delete, Cut, Paste and Bold change nothing on a range, and it stays', still.text && still.at === '2,1 from 1,0' && still.drawn && still.cut && still.paste, still);
+						await realClick(model.cellElement({ row: 3, column: 1 }));
+						await sleep(200);
+						const clicked = { open: preview.openCell(view)?.cell, drawn: rangeDrawn(view, model) };
+						check('Own 115: a click ends the range and opens the cell clicked', clicked.open?.row === 3 && clicked.open?.column === 1 && clicked.drawn.inRange === 0 && model.boxes[0].querySelectorAll('.is-selected').length === 0, clicked);
+						// In an open cell, Shift with an arrow selects its text, and starts no range.
+						await key('ArrowLeft', shift);
+						const inCell = preview.openCell(view);
+						const textRange = inCell ? inCell.view.state.selection.main : null;
+						check('Own 116: in an open cell, Shift with an arrow selects text there and starts no range of cells', !!textRange && !textRange.empty && model.boxes[0].querySelectorAll('.is-selected').length === 0, { textRange, open: inCell?.cell });
+						await leave(view);
+						await restore(view, text);
+
+						// Table 2000 by 12, as step 5: Shift+Cmd+↓ to the last row, Shift+Cmd+→ to the last column, every row scrolled
+						// through showing the range, then Shift+Cmd+↑ to the header.
+						view = await open('Table 2000 by 12');
+						await sleep(600);
+						model = models(view)[0];
+						await scrollTo(view, null);
+						view.scrollDOM.scrollTop = view.lineBlockAt(model.from).top;
+						await sleep(400);
+						const long = [];
+						await selectCell(view, model, 1, 2);
+						await key('ArrowDown', { shift: true, meta: true });
+						await sleep(300);
+						await frames(3);
+						long.push({ at: where(view), drawn: rangeDrawn(view, model), seen: endInView(view, model) });
+						await key('ArrowRight', { shift: true, meta: true });
+						await sleep(300);
+						await frames(3);
+						long.push({ at: where(view), drawn: rangeDrawn(view, model), seen: endInView(view, model) });
+						let scrolledRight = true;
+						for (let i = 0; i < 12; i++) {
+							view.scrollDOM.scrollTop -= view.scrollDOM.clientHeight * 1.5;
+							await sleep(120);
+							await frames(2);
+							const drawn = rangeDrawn(view, model);
+							if (!drawn.ok || drawn.inRange === 0) scrolledRight = false;
+						}
+						await key('ArrowUp', { shift: true, meta: true });
+						await sleep(300);
+						await frames(3);
+						long.push({ at: where(view), drawn: rangeDrawn(view, model), seen: endInView(view, model) });
+						const rows = model.count;
+						const columns = model.grid.columns(0);
+						check('Own 117: on Table 2000 by 12, Shift+Cmd+↓ and Shift+Cmd+→ stretch the range to the table\'s last row and column, in view, and Shift+Cmd+↑ back to the header', long[0].at === `${rows},2 from 1,2` && long[1].at === `${rows},${columns - 1} from 1,2` && long[2].at === `0,${columns - 1} from 1,2` && long.every((step) => step.drawn.ok && step.seen), long);
+						check('Own 117: scrolling up through the table, every row drawn shows the range', scrolledRight);
+						await leave(view);
+
+						// Seeded random steps on Plants (one block, rows and a column pinned) and Frozen table 2000 by 12 (blocks, pinned
+						// rows copied in each), each step's range against its drawing, its copies' included, with the text unchanged.
+						let seed = 14;
+						const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+						const steps = [
+							['ArrowDown', shift], ['ArrowUp', shift], ['ArrowLeft', shift], ['ArrowRight', shift], ['ArrowDown', shift], ['ArrowRight', shift],
+							['ArrowDown'], ['ArrowUp'], ['ArrowLeft'], ['ArrowRight'],
+							['ArrowDown', { shift: true, meta: true }], ['ArrowUp', { shift: true, meta: true }], ['ArrowRight', { shift: true, meta: true }], ['ArrowLeft', { shift: true, meta: true }],
+							['PageDown', shift], ['Home', shift], ['Escape'], ['Tab'], ['Enter'],
+						];
+						const fuzz = [];
+						for (const [note, heading, count] of [['Frozen tables', 'Plants', 30], ['Frozen table 2000 by 12', null, 30]]) {
+							view = await open(note);
+							await sleep(500);
+							await scrollTo(view, heading);
+							model = heading ? named(view, heading) : models(view)[0];
+							const before = view.state.doc.toString();
+							await selectCell(view, model, 3, 1);
+							for (let i = 0; i < count; i++) {
+								const [name, mods] = steps[Math.floor(random() * steps.length)];
+								await key(name, mods);
+								// Enter opens the cell moved to last: Escape selects it again.
+								if (name === 'Enter') {
+									await sleep(300);
+									if (preview.openCell(view)) await key('Escape');
+								}
+								// Escape twice is the table: a cell is selected again from where the keys left it.
+								if (!selection(view).selected) {
+									await key('Enter');
+									if (!selection(view).selected) await selectCell(view, model, 2, 0);
+								}
+								await sleep(100);
+								await frames(2);
+								const drawn = rangeDrawn(view, model);
+								const ok = drawn.ok && endInView(view, model) && crashed(view) === 0 && view.state.doc.toString() === before && !preview.openCell(view);
+								if (!ok) fuzz.push({ note, step: i, key: `${mods?.meta ? 'Cmd+' : ''}${mods?.shift ? 'Shift+' : ''}${name}`, at: where(view), drawn, seen: endInView(view, model) });
+								if (fuzz.length > 4) break;
+							}
+							await leave(view);
+						}
+						check('Own 118: 60 seeded random steps on Plants and Frozen table 2000 by 12: each range drawn on exactly its cells, pinned copies included, the cell moved to last in view, and the text unchanged', fuzz.length === 0, fuzz);
+
+						// With the switch off, Shift with an arrow on Obsidian's selected cell does nothing, as before.
+						preview.use(false);
+						await sleep(400);
+						view = await open('Cell moves');
+						await scrollTo(view, 'Seed trays');
+						const stockCell = obsidianCell(view, 'Seed trays', 1, 0);
+						await pointAt(middle(stockCell, 6));
+						await key('Escape');
+						const marks = () => Array.from(view.contentDOM.querySelectorAll('.selectable-tables-cell, td.is-selected, th.is-selected')).map((el) => `${el.parentElement.rowIndex},${el.cellIndex}${el.classList.contains('is-selected') ? ' range' : ''}`).join(' ');
+						const stockBefore = marks();
+						await key('ArrowRight', shift);
+						check('Own 119: with the switch off, Shift with an arrow on Obsidian\'s selected cell does nothing', stockBefore === '1,0' && marks() === '1,0' && view.state.doc.toString() === text, { before: stockBefore, after: marks() });
+						await leave(view);
+						preview.use(true);
+						await sleep(400);
+						view = await open('Frozen tables');
+						await sleep(300);
+						check('Own 120: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
 						view = await open('Watering schedule');
 						await sleep(300);
 						for (const name of touched) {

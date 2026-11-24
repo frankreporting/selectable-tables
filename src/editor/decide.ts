@@ -33,6 +33,8 @@ export type Action =
 	| { type: 'refuse' }
 	/** Opens a selected cell of the plugin's own table for editing. */
 	| { type: 'edit'; cell: Cell }
+	/** Empties a selected cell or a range of cells of the plugin's own table, or deletes the range's rows or columns: Delete is `forward`. */
+	| { type: 'clear'; forward: boolean }
 	/**
 	 * A key that types starts a new paragraph below the table: the text from `from` to `to` becomes `insert`,
 	 * which adds the line breaks the paragraph needs, and the caret goes to `pos`, in the note after that.
@@ -379,6 +381,14 @@ export function backspace(state: EditorState, layout: Layout): Action | null {
 	return { type: 'caret', pos: line.from - 1 };
 }
 
+/**
+ * Backspace and Delete on a selected cell or a range of cells of the plugin's own table empty it, or delete the range's
+ * rows or columns, as Obsidian's range does. On Obsidian's table, the edit guard keeps them doing nothing.
+ */
+export function clearCells({ cells, layout }: TableContext, forward: boolean): Action | null {
+	return cells.selected && layout.ownTables ? { type: 'clear', forward } : null;
+}
+
 /** A key that would put a line break or a tab over a selected table does nothing, so it can't change it. */
 export function stay(state: EditorState, layout: Layout): Action | null {
 	return selectedTable(state, layout) && { type: 'stay' };
@@ -586,10 +596,11 @@ export function copied({ state, layout, cells }: TableContext): Copied | null {
 }
 
 /**
- * On a command's write to a table, which the edit guard lets through: a freeze mark, or a Row or Column edit of the
- * plugin's own table (`rows`), which shows its cell itself.
+ * On a command's write to a table, which the edit guard lets through: a freeze mark, a Row or Column edit of the plugin's
+ * own table (`rows`), which shows its cell itself, or a write to its selected cells (`cells`): Backspace, Delete, Cut and
+ * Paste.
  */
-export const writesTable = Annotation.define<'freeze' | 'rows'>();
+export const writesTable = Annotation.define<'freeze' | 'rows' | 'cells'>();
 
 /**
  * Whether a change to a table's header line shows the selected cell once the new freeze is drawn: a freeze
@@ -611,7 +622,7 @@ export function showsCellAfter(tr: Transaction): boolean {
  * table is dropped, with or without a user event: Obsidian's formatting commands send none. What passes
  * doesn't come from the selection: undo and redo, a search and replace, a reload from disk, which is how
  * Sync arrives (`set`), a remote edit, which is how a second pane arrives, and the commands' own writes:
- * the freeze mark, and the plugin's table's Row and Column edits.
+ * the freeze mark, the plugin's table's Row and Column edits, and its writes to selected cells.
  */
 export function stopsEdit(tr: Transaction, table: Span, cellSelected: boolean): boolean {
 	if (!tr.changes.touchesRange(table.from, table.to) || tr.isUserEvent('input.type.compose') || tr.annotation(writesTable) !== undefined) return false;

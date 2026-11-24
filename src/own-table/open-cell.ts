@@ -1,6 +1,6 @@
 import { redo, undo } from '@codemirror/commands';
 import { Annotation, EditorSelection, type Extension, type SelectionRange, Transaction, type TransactionSpec } from '@codemirror/state';
-import { Direction, type EditorView, type KeyBinding, type ViewUpdate } from '@codemirror/view';
+import { Direction, EditorView, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { type App, editorInfoField, MarkdownView, Notice } from 'obsidian';
 import { writesCell, writesTable } from '../editor/decide';
 import { type OwnCell, openCells } from '../editor/layout';
@@ -35,6 +35,11 @@ export interface CellSetup {
 	escape: (view: EditorView) => void;
 	/** A fresh press of Tab at the table's last cell, or Enter on its last row: a row is added below, and its cell opens. */
 	addRow?: (cell: OwnCell, firstColumn: boolean) => void;
+	/**
+	 * A paste of Obsidian's table data (`obsidian/table`, its JSON) into the cell: the cells are pasted from it on, as in
+	 * Obsidian's own cell. Says whether it was cells; anything else is the editor's own paste.
+	 */
+	pasteCells?: (cell: OwnCell, json: string) => boolean;
 }
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
@@ -98,7 +103,12 @@ export class OpenCell implements OwnCell {
 		this.shown?.addClass(HIDDEN_CLASS);
 		this.holder = element.createDiv('table-cell-wrapper');
 		const owner = note.state.field(editorInfoField, false);
-		const hooks: CellHooks = { keys: this.keys(), plain: setup.plain(), onUpdate: (update) => this.onCellUpdate(update) };
+		const hooks: CellHooks = {
+			keys: this.keys(),
+			events: EditorView.domEventHandlers({ paste: (event) => this.pasteCells(event) }),
+			plain: setup.plain(),
+			onUpdate: (update) => this.onCellUpdate(update),
+		};
 		this.editor = makeCellEditor(setup.app, note, owner instanceof MarkdownView ? owner : null, this.holder, text, hooks, () => {
 			new Notice('Selectable Tables: cells open in a simpler editor for now, after an Obsidian update. Markdown shows as text until you leave the cell.');
 		});
@@ -328,6 +338,12 @@ export class OpenCell implements OwnCell {
 		else return stay ? this.addRow(false) : this.leave(true);
 		OpenCell.open(this.setup, this.model, { row, column }, at);
 		return true;
+	}
+
+	/** Cells copied from a table, pasted from this cell on; anything else on the clipboard is left to the editor. */
+	private pasteCells(event: ClipboardEvent): boolean {
+		const json = event.clipboardData?.getData('obsidian/table');
+		return !this.closed && !!json && !!this.setup.pasteCells?.(this, json);
 	}
 
 	/** A row added below the last, on a fresh press: Tab's opens at its first cell, Enter's in the same column. */

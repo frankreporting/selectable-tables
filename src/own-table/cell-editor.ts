@@ -31,6 +31,8 @@ export interface CellEditor {
 /** What the open cell gives its editor: its keys, its other extensions, and what to do with each update. */
 export interface CellHooks {
 	keys: readonly KeyBinding[];
+	/** Its own handlers for the editor's events, ahead of Obsidian's: a paste of cells copied from a table. */
+	events: Extension;
 	/** Extensions the plain editor takes besides its keys, as Obsidian loads the plugin's into the borrowed one. */
 	plain: Extension;
 	onUpdate(update: ViewUpdate): void;
@@ -147,7 +149,7 @@ function borrowedClass(Base: BaseClass) {
 			const lang = cellLanguage();
 			if (lang) extensions.push(lang);
 			extensions.push(inOwnCell.of(true));
-			if (hooks) extensions.push(Prec.high(keymap.of(hooks.keys)));
+			if (hooks) extensions.push(Prec.high(keymap.of(hooks.keys)), Prec.high(hooks.events));
 			return extensions;
 		}
 
@@ -251,6 +253,7 @@ function makePlain(note: EditorView, owner: MarkdownView | null, holder: HTMLEle
 				inOwnCell.of(true),
 				hooks.plain,
 				Prec.high(keymap.of(hooks.keys)),
+				Prec.high(hooks.events),
 				keymap.of([{ key: 'Shift-Enter', run: insertNewline }, ...defaultKeymap]),
 				EditorView.lineWrapping,
 				EditorView.contentAttributes.of({ spellcheck, autocorrect: 'on', autocapitalize: 'on' }),

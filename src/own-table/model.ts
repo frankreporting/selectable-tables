@@ -21,7 +21,7 @@ import { showDown } from './pin-sums';
 import { cellPlace } from './cell-write';
 import { ACTIVE_COLUMN_CLASS, ACTIVE_ROW_CLASS, addButtons, addGrips, BUTTONS, gripOf, GRIPS, tableControls } from './grips';
 import type { DragTable } from './drag';
-import { columnExtents, type Extent } from './drag-sums';
+import { columnExtents, type DragArea, type Extent } from './drag-sums';
 import { type Align, alignOf, cellsOf, columnAt, type LineChange, linesOf, markdownOf, rowSplices, type TableLines } from './shape';
 import { copyRange, paintRange, rangeKey } from './range';
 
@@ -577,6 +577,51 @@ export class Model implements Span, DrawnTable, DragTable {
 		return el?.instanceOf(HTMLTableCellElement) && this.blocks.some((block) => block?.dom.contains(el)) ? this.cellOf(el) : null;
 	}
 
+	/**
+	 * The cell a press on an element of the table's blocks is for, at a point on the screen: a pinned copy's real cell, and
+	 * in a gap a pinned cell's rounded corner leaves, the pinned row's own cell beneath (`pressBeneath`).
+	 */
+	private cellPressed(target: Element, x: number, y: number): Cell | null {
+		const pressed = target.closest('td, th');
+		if (!pressed?.instanceOf(HTMLTableCellElement) || !this.blocks.some((block) => block?.dom.contains(pressed))) return null;
+		return this.cellAt(this.pins.pressBeneath(pressed, x, y) ?? pressed);
+	}
+
+	/** The cell drawn at a point on the screen, a pinned copy's being its real cell, or null where none of this table's is. */
+	cellAtPoint(x: number, y: number): Cell | null {
+		const hit = this.view?.dom.ownerDocument.elementFromPoint(x, y);
+		return hit ? this.cellPressed(hit, x, y) : null;
+	}
+
+	/**
+	 * Where the table and what pins it lie on the screen, for a drag across its cells (cell-drag.ts), measured from the
+	 * block nearest `y`: the pane, above the status bar where that floats over it; the table as laid out; the box that clips
+	 * it sideways; the pinned rows, from where they pin, while the table's top has passed there; and the strip's inner edge.
+	 */
+	dragArea(y: number): DragArea | null {
+		const view = this.view;
+		const layout = this.rowLayout(y);
+		const columns = this.columnLayout();
+		const boxEl = this.boxNow();
+		if (!view || !layout || !columns || !boxEl) return null;
+		const scroller = view.scrollDOM;
+		const rect = scroller.getBoundingClientRect();
+		const box = boxEl.getBoundingClientRect();
+		const top = rect.top + scroller.clientTop;
+		const bottom = top + scroller.clientHeight - statusInset(scroller, rect, box);
+		const room = this.pins.room;
+		const tableBottom = layout.top + layout.height;
+		const rows = room.rows && layout.top < top + room.band ? { top: top + room.band, bottom: Math.min(top + room.height, tableBottom) } : null;
+		return {
+			pane: { top, bottom, left: rect.left + scroller.clientLeft, right: rect.left + scroller.clientLeft + scroller.clientWidth },
+			table: { top: layout.top, bottom: tableBottom, left: columns.left, right: columns.left + columns.width },
+			box: { left: box.left, right: box.right },
+			rows,
+			strip: this.pins.stripEdge(this.rtl),
+			rtl: this.rtl,
+		};
+	}
+
 	/** The cell a drawn cell element is, or null for a filler row's. */
 	private cellOf(el: HTMLTableCellElement): Cell | null {
 		const tr = el.parentElement;
@@ -720,6 +765,12 @@ export class Model implements Span, DrawnTable, DragTable {
 		if (toward === 'up' && pinnedRow && !this.cellElement(cell)?.isConnected) this.scrollToEstimate(-1);
 		else if ((!pinnedRow || !this.shown) && !this.cellElement(cell)?.isConnected) this.scrollToEstimate(cell.row - 1);
 		this.requestShow();
+	}
+
+	/** Forgets a cell it was about to bring into view: a drag across cells scrolls the note itself. */
+	holdStill(): void {
+		this.showing = null;
+		this.toward = null;
 	}
 
 	/** Moves the table sideways back to its start, for a key that went left into a frozen column. */
@@ -1271,8 +1322,26 @@ export class Model implements Span, DrawnTable, DragTable {
 				return;
 			}
 			if (event.pointerType === 'mouse') hold(event);
+			// A press on a cell, or in the open cell's text, becomes a drag across cells once the pointer reaches another cell.
+			const target = event.target as Element;
+			if (event.button !== 0 || event.pointerType === 'touch' || onScrollbar(event) || target.closest(`a, ${BUTTONS}`)) return;
+			const cell = this.cellPressed(target, event.clientX, event.clientY);
+			if (cell) tableControls()?.pressCell(this, event, cell, inEditor(target));
 		});
 		dom.addEventListener('mousedown', hold);
+		// Four quick clicks on a cell select every cell, as in Obsidian's table: the open cell's text included, where the
+		// second and third select a word and a line.
+		dom.addEventListener(
+			'click',
+			(event) => {
+				const target = event.target as Element;
+				if (event.detail !== 4 || event.button !== 0 || onScrollbar(event) || target.closest('a') || !this.cellPressed(target, event.clientX, event.clientY)) return;
+				event.preventDefault();
+				event.stopPropagation();
+				tableControls()?.selectEvery(this);
+			},
+			true,
+		);
 		dom.addEventListener('click', (event) => {
 			if (leftAlone(event) || (event.target as Element).closest(`${GRIPS}, ${BUTTONS}`)) return;
 			const pressed = (event.target as Element).closest('td, th');

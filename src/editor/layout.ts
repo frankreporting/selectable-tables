@@ -35,6 +35,8 @@ export interface DrawnTable {
 	 * back to its top or its start, so the rows and columns beside them show again.
 	 */
 	showCell(cell: Cell, toward?: 'up' | 'left'): void;
+	/** Forgets a cell it was about to bring into view: a drag across cells scrolls the note itself. */
+	holdStill(): void;
 	/** Opens a cell for editing, with the caret at the end of its text. */
 	openCell(cell: Cell): void;
 	/** Runs `run` once a cell's row is drawn again, after an edit that changed the table's rows, without scrolling first. */

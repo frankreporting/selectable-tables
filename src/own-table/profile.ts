@@ -3,7 +3,7 @@
  * part of `field` spent getting the syntax tree, which runs Obsidian's parser for the change when the field asks
  * first: that work is the parser's, which it does whether the plugin asks or not. `cell` is an open cell's own work:
  * what a write sends the note, and taking the note's changes, apart from the editors' updates. `drag` is a dragged
- * handle's work on each frame and pointer move, and `frames` counts the frames it ran on.
+ * handle's work, or a drag across cells', on each frame and pointer move, and `frames` counts the frames it ran on.
  */
 export const profile = { on: false, field: 0, tree: 0, editor: 0, draw: 0, measure: 0, mount: 0, cell: 0, drag: 0, frames: 0 };
 

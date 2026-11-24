@@ -1,5 +1,6 @@
 import { setIcon, setTooltip } from 'obsidian';
-import type { Span } from '../editor/table-text';
+import type { Cell, Span } from '../editor/table-text';
+import type { CellDragTable } from './cell-drag';
 import type { DragTable } from './drag';
 
 /**
@@ -75,14 +76,18 @@ export function addButtons(wrapper: HTMLElement, add: (what: 'row' | 'column') =
 }
 
 /**
- * What a press on a handle or a + button does, set by preview.ts: drag.ts and table-commands.ts reach the note's
- * editor commands, which the table's drawing has no need of.
+ * What a press on a handle, a + button or a cell does, set by preview.ts: drag.ts, cell-drag.ts and table-commands.ts
+ * reach the note's editor commands, which the table's drawing has no need of.
  */
 export interface TableControls {
 	/** A press on a handle: a drag, or a click that shows its menu. */
 	press(table: DragTable, event: PointerEvent, grip: HTMLElement, kind: 'row' | 'column'): void;
 	/** A + button: a row or a column at the table's end. */
 	add(table: DragTable & Span, what: 'row' | 'column'): void;
+	/** A press on a cell, or in the open cell's text: a drag across cells once the pointer reaches another cell. */
+	pressCell(table: CellDragTable, event: PointerEvent, cell: Cell, inOpenCell: boolean): void;
+	/** Four quick clicks on a cell: every cell of the table selected. */
+	selectEvery(table: CellDragTable): void;
 }
 
 let controls: TableControls | null = null;

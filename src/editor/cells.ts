@@ -155,7 +155,9 @@ class CellSelection implements PluginValue, Cells {
 		this.anchor = sameCell(anchor, cell) ? null : anchor;
 		this.left = null;
 		statesWithCell.add(view.state);
-		if (this.draw(own) && show) own.showCell(cell, toward);
+		if (!this.draw(own)) return;
+		if (show) own.showCell(cell, toward);
+		else own.holdStill();
 	}
 
 	/** Escape on the selected cell: back to the selected table, remembering the cell for Enter. */
@@ -232,8 +234,14 @@ class CellSelection implements PluginValue, Cells {
 	 * those: Obsidian has already changed the drawn table by then. This runs in the capture phase, since
 	 * widgets keep their events from the editor.
 	 */
-	private readonly onLeave = () => {
-		if (this.selected) this.forget();
+	private readonly onLeave = (event: Event) => {
+		if (!this.selected) return;
+		// Shift with a press on a cell of the same table extends a range from the selected cell, on the plugin's own table.
+		if (event.type === 'pointerdown' && (event as PointerEvent).shiftKey && this.drawing && this.start !== null) {
+			const at = this.view.state.facet(ownTables)?.cellAt(this.view, event.target as Element);
+			if (at?.table()?.from === this.start) return;
+		}
+		this.forget();
 	};
 
 	/**
@@ -245,7 +253,7 @@ class CellSelection implements PluginValue, Cells {
 		const target = event.target as HTMLElement;
 		if (target === this.view.contentDOM) return;
 		holdWidth(target);
-		this.onLeave();
+		this.onLeave(event);
 		const cell = frozenCell(target);
 		if (cell) showAfterScroll(this.view, cell);
 	};

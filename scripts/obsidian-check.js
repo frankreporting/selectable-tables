@@ -2613,8 +2613,9 @@
 		// window.__checkCornersOnly too, only its checks against Obsidian's frozen tables, Own 87 to Own 91), with
 		// window.__checkEditsOnly instead, only the section on editing its rows and columns, with
 		// window.__checkDragsOnly instead, only the section on its drag handles and + buttons, with
-		// window.__checkShadesOnly instead, only the section on its frozen tables' shadows, and with
-		// window.__checkRangesOnly instead, only the section on its ranges of cells.
+		// window.__checkShadesOnly instead, only the section on its frozen tables' shadows, with
+		// window.__checkRangesOnly instead, only the section on its ranges of cells, and with
+		// window.__checkCellDragsOnly instead, only the section on dragging across its cells.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3751,7 +3752,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -7432,6 +7433,482 @@
 						await sleep(300);
 						check('Own 120: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkCellDragsOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly) {
+					// --- Dragging across cells on the plugin's table (STA-35): a press that reaches another cell selects a range,
+					// through frozen rows and columns and across blocks of rows, with the note scrolling at the pane's edges and the
+					// table sliding at its sides; Shift with a press extends, and four clicks select every cell. Real presses, pointer
+					// moves and keys through the window's debugger. Run alone with window.__checkOwnOnly, __checkCellsOnly and
+					// __checkCellDragsOnly all true.
+					preview.use(true);
+					await sleep(400);
+					const touched = ['Two report tables', 'Frozen tables', 'Table 50 by 8', 'Table 2000 by 12', 'Frozen table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const round = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+					const modifiers = (o) => (o.meta ? 4 : 0) | (o.shift ? 8 : 0);
+					// The pointer held down or not, with Shift or not; `count` is the click's count, for four quick clicks.
+					const mouse = (type, p, o = {}) => cdp.sendCommand('Input.dispatchMouseEvent', { type, ...round(p), button: o.button ?? (type === 'mouseMoved' && !o.held ? 'none' : 'left'), buttons: type === 'mouseReleased' || (type === 'mouseMoved' && !o.held) ? 0 : o.button === 'right' ? 2 : 1, clickCount: type === 'mouseMoved' ? 0 : (o.count ?? 1), modifiers: modifiers(o) });
+					const press = async (p, o = {}) => {
+						await mouse('mouseMoved', p);
+						await mouse('mousePressed', p, o);
+						await frames(2);
+					};
+					const release = async (p, o = {}) => {
+						await mouse('mouseReleased', p, o);
+						await sleep(350);
+						await frames(2);
+					};
+					const click = async (p, o = {}) => {
+						await press(p, o);
+						await release(p, o);
+					};
+					const glide = async (from, to, o = {}, steps = 6) => {
+						for (let i = 1; i <= steps; i++) {
+							await mouse('mouseMoved', { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }, { ...o, held: true });
+							await frames(1);
+						}
+						await frames(2);
+					};
+					const codes = { Escape: 27, C: 67 };
+					const key = async (name, o = {}) => {
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: codes[name] ?? 0, modifiers: modifiers(o), unmodifiedText: macChar(name), text: '' };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await sleep(200);
+					};
+					const leaveAll = async (view) => {
+						for (let i = 0; i < 3; i++) await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					const tableAt = (view, heading) => {
+						const start = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						return models(view).find((model) => model.from > start);
+					};
+					// The middle of a drawn cell, read once its place holds still for two frames: the note can still be settling
+					// after a scroll, as rows above take their real heights.
+					const centreOf = async (el) => {
+						let last = null;
+						for (let i = 0; i < 20; i++) {
+							const r = el.getBoundingClientRect();
+							const p = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+							if (last && Math.abs(last.x - p.x) < 0.5 && Math.abs(last.y - p.y) < 0.5) return p;
+							last = p;
+							await frames(2);
+						}
+						return last;
+					};
+					const cellMiddle = async (model, row, column) => {
+						const el = model.cellElement({ row, column });
+						return el ? centreOf(el) : null;
+					};
+					const where = (view) => {
+						const cells = preview.cells(view) ?? {};
+						return `${cells.selected ? `${cells.selected.row},${cells.selected.column}` : '-'}${cells.anchor ? ` from ${cells.anchor.row},${cells.anchor.column}` : ''}`;
+					};
+					const opened = (view) => {
+						const open = preview.openCell(view);
+						return open ? `${open.cell.row},${open.cell.column}` : null;
+					};
+					// Every cell drawn for a table, pinned copies included, carries Obsidian's range classes exactly when it's in the
+					// range, its edges' classes on the range's edges.
+					const rangeDrawn = (view, model) => {
+						const { selected, anchor } = preview.cells(view) ?? {};
+						const range = selected && anchor ? { top: Math.min(selected.row, anchor.row), bottom: Math.max(selected.row, anchor.row), left: Math.min(selected.column, anchor.column), right: Math.max(selected.column, anchor.column) } : null;
+						const wrong = [];
+						let inRange = 0;
+						let copies = 0;
+						for (const box of model.boxes) {
+							if (!box.isConnected) continue;
+							for (const el of box.querySelectorAll('td, th')) {
+								if (el.classList.contains('selectable-tables-filler')) continue;
+								const cell = model.cellAt(el);
+								if (!cell) continue;
+								const inside = !!range && cell.row >= range.top && cell.row <= range.bottom && cell.column >= range.left && cell.column <= range.right;
+								if (inside) {
+									inRange++;
+									if (el.closest('[data-selectable-tables-row], .selectable-tables-strip')) copies++;
+								}
+								const want = inside ? [true, cell.column === range.left, cell.column === range.right, cell.row === range.top, cell.row === range.bottom] : [false, false, false, false, false];
+								const has = ['is-selected', 'start', 'end', 'top', 'bottom'].map((name) => el.classList.contains(name));
+								if (want.some((on, i) => on !== has[i]) && wrong.length < 6) wrong.push(`${cell.row},${cell.column} ${has.map(Number).join('')}`);
+							}
+						}
+						return { ok: wrong.length === 0, wrong, inRange, copies };
+					};
+					const copied = (view) => {
+						const data = new DataTransfer();
+						view.contentDOM.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+						return data.getData('text/plain');
+					};
+					// Obsidian's own table with the switch off: a drawn cell, and where its range's cells are.
+					const obsidianCell = (view, row, column, nth = 0) => view.contentDOM.querySelectorAll(':scope > .cm-table-widget table')[nth]?.rows[row]?.cells[column] ?? null;
+					const obsidianRange = (view) => Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget td.is-selected, :scope > .cm-table-widget th.is-selected')).map((el) => `${el.parentElement.rowIndex},${el.cellIndex}`).join(' ');
+					const ownRange = (view, model) => Array.from(model.boxes[0].querySelectorAll('td.is-selected, th.is-selected')).map((el) => model.cellAt(el)).map((c) => `${c.row},${c.column}`).join(' ');
+					const scrollToTable = async (view, model, offset = 0) => {
+						view.scrollDOM.scrollTop = view.lineBlockAt(model.from).top + offset;
+						await sleep(400);
+						await frames(3);
+						view.scrollDOM.scrollTop = view.lineBlockAt(model.from).top + offset;
+						await sleep(400);
+						await frames(3);
+					};
+					let view;
+					try {
+						// Own 121: Basil dragged to Leave dry: the six cells between, drawn as Obsidian draws its own range, against the
+						// same drag on Obsidian's table with the switch off; no cell opens, and only the table's selection is dispatched.
+						view = await open('Two report tables');
+						await sleep(300);
+						let model = tableAt(view, null);
+						const text = view.state.doc.toString();
+						const basil = await cellMiddle(model, 2, 0);
+						const leaveDry = await cellMiddle(model, 3, 2);
+						let dispatched = 0;
+						const update = view.update;
+						view.update = function (transactions) {
+							if (transactions.length) dispatched++;
+							return update.call(this, transactions);
+						};
+						await press(basil);
+						await glide(basil, leaveDry);
+						const during = where(view);
+						const movesDispatched = dispatched;
+						await release(leaveDry);
+						delete view.update;
+						const dragged = { at: where(view), open: opened(view), drawn: rangeDrawn(view, model), cells: ownRange(view, model), during, dispatched: movesDispatched };
+						preview.use(false);
+						await sleep(400);
+						view = await open('Two report tables');
+						await sleep(300);
+						const stockBasil = await centreOf(obsidianCell(view, 2, 0));
+						const stockLeave = await centreOf(obsidianCell(view, 3, 2));
+						await press(stockBasil);
+						await glide(stockBasil, stockLeave);
+						await release(stockLeave);
+						const stockCells = obsidianRange(view);
+						await leaveAll(view);
+						preview.use(true);
+						await sleep(400);
+						view = await open('Two report tables');
+						await sleep(300);
+						model = tableAt(view, null);
+						check('Own 121: a press on Basil dragged to Leave dry selects the six cells between, drawn with Obsidian\'s classes, the same cells Obsidian\'s own table selects, and opens no cell', dragged.at === '3,2 from 2,0' && dragged.during === '3,2 from 2,0' && dragged.drawn.ok && dragged.drawn.inRange === 6 && !dragged.open && dragged.cells === stockCells, { dragged, stockCells });
+						check('Own 121: the drag dispatches only the table\'s selection, once, and changes no text', dragged.dispatched === 1 && view.state.doc.toString() === text, { dispatched: dragged.dispatched });
+
+						// Own 122: the range is still there after the switch: a click on Kitchen ends it and opens Kitchen. Then a press
+						// on Fern that moves a little inside it opens Fern, as before.
+						await press(basil);
+						await glide(basil, leaveDry);
+						await release(leaveDry);
+						await click(await cellMiddle(model, 1, 1));
+						const kitchen = { open: opened(view), inRange: model.boxes[0].querySelectorAll('.is-selected').length };
+						const fern = await cellMiddle(model, 1, 0);
+						await press(fern);
+						await glide(fern, { x: fern.x + 5, y: fern.y + 2 }, {}, 2);
+						await release({ x: fern.x + 5, y: fern.y + 2 });
+						check('Own 122: a click ends the range and opens the cell clicked; a press that wobbles inside a cell still opens it', kitchen.open === '1,1' && kitchen.inRange === 0 && opened(view) === '1,0', { kitchen, fern: opened(view) });
+
+						// Own 123: Escape selects Fern; Shift+click on Office runs the range from Fern; Shift held while dragging back
+						// to Balcony shrinks it.
+						await key('Escape');
+						const fromFern = where(view);
+						const office = await cellMiddle(model, 3, 1);
+						await click(office, { shift: true });
+						const toOffice = { at: where(view), open: opened(view), drawn: rangeDrawn(view, model) };
+						const balcony = await cellMiddle(model, 2, 1);
+						await press(office, { shift: true });
+						await glide(office, balcony, { shift: true });
+						await release(balcony, { shift: true });
+						const toBalcony = { at: where(view), drawn: rangeDrawn(view, model) };
+						check('Own 123: Shift+click extends from the selected cell, and Shift held while dragging moves the range\'s far corner from the same first cell', fromFern === '1,0' && toOffice.at === '3,1 from 1,0' && !toOffice.open && toOffice.drawn.ok && toOffice.drawn.inRange === 6 && toBalcony.at === '2,1 from 1,0' && toBalcony.drawn.ok && toBalcony.drawn.inRange === 4, { fromFern, toOffice, toBalcony });
+
+						// Own 124: Copy gives the Markdown table of the dragged range, as Obsidian copies a range.
+						const copy = copied(view);
+						check('Own 124: Copy of a dragged range gives its Markdown table', copy === '| Fern   | Kitchen |\n| ------ | ------- |\n| Basil  | Balcony |', copy);
+
+						// Own 125: from Needs sun's open text, a drag selects text first, then carried onto Leave dry it closes the cell and
+						// selects the range. Four quick clicks on Park loop select every cell of the second table.
+						await click(await cellMiddle(model, 2, 2));
+						const needsOpen = opened(view);
+						const editor = preview.openCell(view)?.view;
+						const line = editor.contentDOM.querySelector('.cm-line').getBoundingClientRect();
+						const inText = { x: line.left + 2, y: line.top + line.height / 2 };
+						await press(inText);
+						await glide(inText, { x: line.left + 34, y: inText.y }, {}, 3);
+						const textPicked = { open: opened(view), text: editor.state.selection.main.empty ? '' : editor.state.sliceDoc(editor.state.selection.main.from, editor.state.selection.main.to) };
+						const leaveAgain = await cellMiddle(model, 3, 2);
+						await glide({ x: line.left + 34, y: inText.y }, leaveAgain);
+						await release(leaveAgain);
+						const fromOpen = { at: where(view), open: opened(view), drawn: rangeDrawn(view, model) };
+						const second = models(view)[1];
+						const park = await cellMiddle(second, 1, 1);
+						for (let count = 1; count <= 4; count++) {
+							await mouse('mouseMoved', park);
+							await mouse('mousePressed', park, { count });
+							await mouse('mouseReleased', park, { count });
+							await sleep(60);
+						}
+						await sleep(400);
+						const every = { at: where(view), open: opened(view), drawn: rangeDrawn(view, second), focused: view.hasFocus };
+						check('Own 125: a drag in an open cell\'s text selects text, and carried onto another cell closes it and selects the range from it', needsOpen === '2,2' && textPicked.open === '2,2' && textPicked.text.length > 0 && fromOpen.at === '3,2 from 2,2' && !fromOpen.open && fromOpen.drawn.ok && fromOpen.drawn.inRange === 2, { needsOpen, textPicked, fromOpen });
+						check('Own 125: four quick clicks on a cell select every cell of its table, with the keyboard in the note', every.at === '2,2 from 0,0' && !every.open && every.drawn.ok && every.drawn.inRange === 9 && every.focused, every);
+						await leaveAll(view);
+
+						// Own 126: left alone: a press on a link, a row's grip, the + below, or with the right button, moved onto
+						// other cells, starts no range.
+						const noRange = () => !(preview.cells(view)?.anchor) && model.boxes[0].querySelectorAll('.is-selected').length === 0;
+						const alone = {};
+						// A link's press goes to the link, which the browser could drag: its events are sent from the page, so no drag of
+						// the link starts.
+						const link = model.cellElement({ row: 1, column: 2 }).querySelector('a');
+						const linkAt = await centreOf(link);
+						const pointer = (type, target, p, buttons) => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons, clientX: p.x, clientY: p.y }));
+						pointer('pointerdown', link, linkAt, 1);
+						for (let i = 1; i <= 4; i++) {
+							pointer('pointermove', window, { x: linkAt.x + ((leaveDry.x - linkAt.x) * i) / 4, y: linkAt.y + ((leaveDry.y - linkAt.y) * i) / 4 }, 1);
+							await frames(2);
+						}
+						pointer('pointerup', window, leaveDry, 0);
+						await sleep(200);
+						alone.link = noRange();
+						await leaveAll(view);
+						await press(basil, { button: 'right' });
+						await glide(basil, leaveDry, { button: 'right' }, 4);
+						await release(leaveDry, { button: 'right' });
+						alone.right = noRange();
+						for (let i = 0; i < 3 && document.querySelector('.menu'); i++) {
+							document.querySelector('.menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+							await sleep(200);
+						}
+						await leaveAll(view);
+						const plus = model.boxes[0].querySelector('.table-row-btn');
+						const plusAt = await centreOf(plus);
+						await press(plusAt);
+						await glide(plusAt, leaveDry, {}, 4);
+						await release(leaveDry);
+						alone.plus = noRange();
+						await leaveAll(view);
+						const grip = model.cellElement({ row: 3, column: 0 }).querySelector('.table-row-drag-handle');
+						const gripAt = await centreOf(grip);
+						await press(gripAt);
+						await glide(gripAt, { x: gripAt.x, y: basil.y }, {}, 4);
+						await release({ x: gripAt.x, y: basil.y });
+						alone.grip = noRange();
+						const moved = view.state.doc.toString() !== text;
+						await restore(view, text);
+						await leaveAll(view);
+						check('Own 126: a press on a link, with the right button, on the + below or on a row\'s grip starts no range of cells', Object.values(alone).every(Boolean) && view.state.doc.toString() === text, { alone, gripMoved: moved });
+
+						// Own 127: in Table 2000 by 12, a press on row 3 held at the pane's bottom scrolls the note and grows the range
+						// as rows pass; let go past row 200 and Copy gives every row from 3 to there. Held just under the pane's top, it
+						// scrolls back up and shrinks. Then column 2 held at the table's right side slides it, and the range reaches the
+						// last column; held at its left side, it slides back. The plugin's work per frame while scrolling, timed.
+						view = await open('Table 2000 by 12');
+						await sleep(1500);
+						let big = models(view)[0];
+						await scrollToTable(view, big, -20);
+						const pane = view.scrollDOM.getBoundingClientRect();
+						const row3 = await cellMiddle(big, 3, 1);
+						await press(row3);
+						await glide(row3, { x: row3.x, y: row3.y + 60 }, {}, 3);
+						const scrollBefore = view.scrollDOM.scrollTop;
+						preview.profile.on = true;
+						preview.profile.drag = 0;
+						preview.profile.frames = 0;
+						await mouse('mouseMoved', { x: row3.x, y: pane.bottom - 8 }, { held: true });
+						const grew = [];
+						for (let i = 0; i < 40; i++) {
+							await sleep(250);
+							grew.push(preview.cells(view)?.selected?.row ?? -1);
+							if (grew[grew.length - 1] > 215) break;
+						}
+						preview.profile.on = false;
+						const scrollMs = preview.profile.frames ? preview.profile.drag / preview.profile.frames : null;
+						const scrolledDown = view.scrollDOM.scrollTop - scrollBefore;
+						const paneMiddle = { x: row3.x, y: (pane.top + pane.bottom) / 2 };
+						await glide({ x: row3.x, y: pane.bottom - 8 }, paneMiddle, {}, 3);
+						const atMiddle = preview.cells(view)?.selected?.row ?? -1;
+						await release(paneMiddle);
+						const lastRow = preview.cells(view)?.selected?.row ?? -1;
+						const copiedRows = copied(view).split('\n');
+						const bigLines = view.state.doc.sliceString(big.from, big.to).split('\n');
+						// Row r of the table is line r + 1, past the delimiter line; the copy holds column 1 alone.
+						const copyRight = copiedRows.length === lastRow - 3 + 2 && copiedRows[0].split('|')[1]?.trim() === bigLines[4].split('|')[2]?.trim() && copiedRows[copiedRows.length - 1].split('|')[1]?.trim() === bigLines[lastRow + 1].split('|')[2]?.trim();
+						const growing = grew.every((row, i) => i === 0 || row >= grew[i - 1]);
+						// Back up: pressed again with Shift from the range's first cell, held under the pane's top.
+						const nearTop = { x: row3.x, y: pane.top + 4 };
+						const nowAt = await cellMiddle(big, lastRow, 1);
+						await press(nowAt, { shift: true });
+						await glide(nowAt, nearTop, { shift: true }, 3);
+						const upBefore = view.scrollDOM.scrollTop;
+						await sleep(1500);
+						const scrolledUp = upBefore - view.scrollDOM.scrollTop;
+						const shrunk = preview.cells(view)?.selected?.row ?? -1;
+						await release(nearTop, { shift: true });
+						check('Own 127: in Table 2000 by 12, a press on row 3 held at the pane\'s bottom scrolls the note, the range growing as rows pass, past row 200', scrolledDown > 3000 && grew[grew.length - 1] > 200 && growing && atMiddle > 150 && !opened(view), { scrolledDown, grew, atMiddle });
+						check('Own 127: let go, Copy gives every row from row 3 to the one let go on', lastRow > 150 && copyRight, { lastRow, rows: copiedRows.length, first: copiedRows[0]?.slice(0, 60), last: copiedRows[copiedRows.length - 1]?.slice(0, 60) });
+						check('Own 127: held just under the pane\'s top, the note scrolls back up and the range shrinks with it', scrolledUp > 500 && shrunk < lastRow - 10 && preview.cells(view)?.anchor?.row === 3, { scrolledUp, shrunk, lastRow });
+						results.push({ name: 'Own 127 a drag\'s own work per frame while the note scrolls (ms)', ok: true, detail: scrollMs });
+						check('Own 127: a drag\'s own work stays within 1 ms a frame while the note scrolls', scrollMs !== null && scrollMs <= 1, { scrollMs, frames: preview.profile.frames });
+						await leaveAll(view);
+						await scrollToTable(view, big, -20);
+						big = models(view)[0];
+						const box = big.sidewaysBox();
+						const column2 = await cellMiddle(big, 2, 2);
+						await press(column2);
+						await glide(column2, { x: column2.x + 150, y: column2.y }, {}, 3);
+						await mouse('mouseMoved', { x: box.right - 4, y: column2.y }, { held: true });
+						await sleep(2500);
+						const right = { at: where(view), ...big.sideways() };
+						await mouse('mouseMoved', { x: box.left + 4, y: column2.y }, { held: true });
+						await sleep(2500);
+						const left = { at: where(view), ...big.sideways() };
+						await release({ x: box.left + 4, y: column2.y });
+						check('Own 127: column 2 held at the table\'s right side slides the table to its end and the range to the last column; held at its left side, it slides back', right.slide > 0 && right.scroll >= right.slide - 1 && right.at === `2,${big.grid.columns(0) - 1} from 2,2` && left.scroll <= 1 && left.at === '2,0 from 2,2', { right, left });
+						await leaveAll(view);
+
+						// Own 128: Frozen tables' Plants, its header rows pinned and the table slid so cells pass under Name: a drag from a
+						// body cell held just under the pinned rows scrolls the note up; onto the pinned rows the range reaches them, every
+						// row between included, and their copies show it; onto Name, it takes the frozen column in.
+						view = await open('Frozen tables');
+						await sleep(500);
+						let plants = tableAt(view, 'Plants');
+						await scrollToTable(view, plants, 300);
+						plants.scrollSideways(150);
+						await sleep(300);
+						await frames(3);
+						let area = plants.dragArea(400);
+						const startY = area.rows ? (area.rows.bottom + area.pane.bottom) / 2 : 400;
+						const columns = plants.columnLayout();
+						const startX = columns.left + (columns.columns[3].start + columns.columns[3].end) / 2;
+						const pressed = plants.cellAtPoint(startX, startY);
+						await press({ x: startX, y: startY });
+						await glide({ x: startX, y: startY }, { x: startX, y: startY - 50 }, {}, 3);
+						const upFrom = view.scrollDOM.scrollTop;
+						await mouse('mouseMoved', { x: startX, y: area.rows.bottom + 3 }, { held: true });
+						await sleep(250);
+						const underRows = { scrolled: upFrom - view.scrollDOM.scrollTop };
+						await mouse('mouseMoved', { x: startX, y: (area.pane.top + area.pane.bottom) / 2 }, { held: true });
+						await frames(3);
+						// Pinned again, a little lower, then onto the pinned rows.
+						await scrollToTable(view, plants, 300);
+						area = plants.dragArea(400);
+						await mouse('mouseMoved', { x: startX, y: area.rows.bottom - 6 }, { held: true });
+						await frames(4);
+						const scrollOnRows = view.scrollDOM.scrollTop;
+						await sleep(300);
+						const onRows = { at: where(view), still: view.scrollDOM.scrollTop === scrollOnRows };
+						await mouse('mouseMoved', { x: startX, y: area.rows.top + 4 }, { held: true });
+						await frames(4);
+						const onHeader = { at: where(view), drawn: rangeDrawn(view, plants) };
+						await mouse('mouseMoved', { x: area.strip - 20, y: area.rows.top + 4 }, { held: true });
+						await frames(4);
+						const onName = { at: where(view), drawn: rangeDrawn(view, plants), pinned: plants.dragArea(400)?.rows !== null };
+						await release({ x: area.strip - 20, y: area.rows.top + 4 });
+						check('Own 128: in Plants with its header rows pinned, a drag held just under them scrolls the note up', !!area.rows && area.strip !== null && pressed?.row > 2 && underRows.scrolled > 30, { pressed, underRows, rows: area.rows, strip: area.strip });
+						check('Own 128: onto the pinned rows, the range reaches the row under the pointer at once, every row between included, without scrolling, and the pinned rows show it', onRows.at.startsWith('1,3 from ') && onRows.still && onHeader.at.startsWith('0,3 from ') && onHeader.drawn.ok, { onRows, onHeader });
+						check('Own 128: onto the frozen Name column, the range takes it in, its copies in the strip included, and the rows stay pinned', onName.at.startsWith('0,0 from ') && onName.drawn.ok && onName.drawn.copies > 0 && onName.pinned, onName);
+						await leaveAll(view);
+
+						// Own 129: deep in Frozen table 2000 by 12, a drag from a body cell onto the pinned header, across a seam
+						// between blocks of rows; then a drag held at the pane's bottom, past two more seams.
+						view = await open('Frozen table 2000 by 12');
+						await sleep(1500);
+						let deep = models(view)[0];
+						await scrollToTable(view, deep, 16000);
+						area = deep.dragArea(400);
+						const deepY = area.rows ? area.rows.bottom + 120 : 400;
+						const deepX = (area.box.left + area.box.right) / 2;
+						const deepStart = deep.cellAtPoint(deepX, deepY);
+						await press({ x: deepX, y: deepY });
+						await glide({ x: deepX, y: deepY }, { x: deepX, y: area.rows ? area.rows.top + 4 : 100 }, {}, 5);
+						const deepHeader = { at: where(view), drawn: rangeDrawn(view, deep) };
+						await glide({ x: deepX, y: area.rows ? area.rows.top + 4 : 100 }, { x: deepX, y: deepY + 60 }, {}, 4);
+						await mouse('mouseMoved', { x: deepX, y: area.pane.bottom - 6 }, { held: true });
+						for (let i = 0; i < 40 && (preview.cells(view)?.selected?.row ?? 0) < (deepStart?.row ?? 0) + 230; i++) await sleep(250);
+						await glide({ x: deepX, y: area.pane.bottom - 6 }, { x: deepX, y: (area.pane.top + area.pane.bottom) / 2 }, {}, 3);
+						const deepDown = { at: where(view), drawn: rangeDrawn(view, deep) };
+						await release({ x: deepX, y: (area.pane.top + area.pane.bottom) / 2 });
+						const blockOf = (row) => Math.floor(Math.max(0, row - 1) / 100);
+						const deepEnd = preview.cells(view)?.selected?.row ?? 0;
+						check('Own 129: deep in Frozen table 2000 by 12, a drag from a body cell onto the pinned header, across a seam, takes the header and every row between', !!deepStart && blockOf(deepStart.row) >= 2 && deepHeader.at === `0,${deepStart.column} from ${deepStart.row},${deepStart.column}` && deepHeader.drawn.ok && deepHeader.drawn.copies > 0, { deepStart, deepHeader });
+						check('Own 129: held at the pane\'s bottom, the range grows past two more seams, drawn on exactly its cells', !!deepStart && blockOf(deepEnd) >= blockOf(deepStart.row) + 2 && deepDown.drawn.ok && !opened(view), { deepStart, deepEnd, deepDown });
+						await leaveAll(view);
+
+						// Own 130: a change from a second pane during a drag ends it: the range stays as it was, later moves don't change it,
+						// and letting go opens no cell.
+						view = await open('Two report tables');
+						await sleep(300);
+						model = tableAt(view, null);
+						const fern2 = await cellMiddle(model, 1, 0);
+						const balcony2 = await cellMiddle(model, 2, 1);
+						const office2 = await cellMiddle(model, 3, 1);
+						await press(fern2);
+						await glide(fern2, balcony2);
+						const layoutBefore = app.workspace.getLayout();
+						const secondPane = app.workspace.getLeaf('split');
+						await secondPane.openFile(app.vault.getAbstractFileByPath('Two report tables.md'), { state: { mode: 'source', source: false } });
+						await sleep(400);
+						const other = secondPane.view.editor.cm;
+						other.dispatch({ changes: { from: other.state.doc.length, insert: '\nFrom the second pane.' } });
+						await sleep(300);
+						const afterChange = where(view);
+						await glide(balcony2, office2, {}, 3);
+						const afterMove = where(view);
+						await release(office2);
+						const remote = { afterChange, afterMove, released: where(view), open: opened(view), drawn: rangeDrawn(view, model) };
+						secondPane.detach();
+						await sleep(300);
+						if (app.workspace.rootSplit.children.length > 1) {
+							await app.workspace.changeLayout(layoutBefore);
+							await sleep(800);
+						}
+						view = await open('Two report tables');
+						await sleep(300);
+						check('Own 130: a change from a second pane during a drag ends it: the range stays, later moves leave it, and letting go opens no cell', remote.afterChange === '2,1 from 1,0' && remote.afterMove === '2,1 from 1,0' && remote.released === '2,1 from 1,0' && !remote.open && remote.drawn.ok, remote);
+						await restore(view, text);
+						await leaveAll(view);
+
+						// Own 131: a pointer move's work during a drag across cells, without scrolling, on Table 50 by 8 and Table 2000 by 12.
+						const perMove = {};
+						for (const name of ['Table 50 by 8', 'Table 2000 by 12']) {
+							view = await open(name);
+							await sleep(name === 'Table 50 by 8' ? 500 : 1500);
+							const table = models(view)[0];
+							await scrollToTable(view, table, -20);
+							const from = await cellMiddle(table, 2, 1);
+							const to = await cellMiddle(table, 9, 4);
+							await press(from);
+							preview.profile.on = true;
+							preview.profile.drag = 0;
+							preview.profile.frames = 0;
+							for (let i = 0; i < 3; i++) {
+								await glide(from, to, {}, 20);
+								await glide(to, from, {}, 20);
+							}
+							preview.profile.on = false;
+							perMove[name] = preview.profile.frames ? preview.profile.drag / preview.profile.frames : null;
+							await release(from);
+							await leaveAll(view);
+						}
+						results.push({ name: 'Own 131 a drag\'s own work per pointer move (ms)', ok: true, detail: perMove });
+						check('Own 131: a pointer move during a drag across cells costs at most 1 ms of the plugin\'s work, on Table 50 by 8 and Table 2000 by 12', Object.values(perMove).every((ms) => ms !== null && ms <= 1), perMove);
+
+						view = await open('Frozen tables');
+						await sleep(300);
+						check('Own 132: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						delete view?.update;
 						view = await open('Watering schedule');
 						await sleep(300);
 						for (const name of touched) {

@@ -81,3 +81,63 @@ export function columnExtents(widths: readonly number[], border: number, spacing
 	});
 	return rtl ? out.reverse() : out;
 }
+
+/**
+ * Where a table and what pins it lie on the screen, for a drag across its cells (cell-drag.ts). `pane` is the note's pane,
+ * its bottom above the status bar where that floats over it; `table` the table as laid out, its top and bottom where its
+ * rows run without pinning, its sides where its slide puts them; `box` the box that clips it sideways. `rows` is where the
+ * pinned rows cover the pane, from where rows pin to their bottom, only while they're pinned, and `strip` the frozen
+ * columns' inner edge, only while they pin.
+ */
+export interface DragArea {
+	pane: Box;
+	table: Box;
+	box: { left: number; right: number };
+	rows: { top: number; bottom: number } | null;
+	strip: number | null;
+	rtl: boolean;
+}
+
+/**
+ * Where to look for the cell under the pointer: the pointer kept a pixel inside the part of the table on the screen, so a
+ * pointer past the table's edge takes the nearest cell in its row or column, and one above the pinned rows, in the band
+ * left for their grips, takes the pinned header.
+ */
+export function lookAt(area: DragArea, x: number, y: number): { x: number; y: number } {
+	const { pane, table, box, rows } = area;
+	const top = Math.max(table.top, pane.top, rows?.top ?? -Infinity) + 1;
+	const bottom = Math.min(table.bottom, pane.bottom) - 1;
+	const left = Math.max(table.left, box.left, pane.left) + 1;
+	const right = Math.min(table.right, box.right, pane.right) - 1;
+	return { x: Math.max(left, Math.min(right, x)), y: top > bottom ? top : Math.max(top, Math.min(bottom, y)) };
+}
+
+/** Whether a place is on what pins: the pinned rows, or the frozen columns' strip. */
+export function overPinned(area: DragArea, x: number, y: number): boolean {
+	const { rows, strip, rtl } = area;
+	if (rows && y >= rows.top && y < rows.bottom) return true;
+	return strip !== null && (rtl ? x > strip : x < strip);
+}
+
+/**
+ * How far a drag across cells scrolls this frame: the note near the pane's bottom, or just under the pinned rows (the pane's
+ * top with none pinned), and the table near its box's sides, or just beside the frozen columns, at the speeds a dragged
+ * handle scrolls at (`edgeScroll`), the fastest once the pointer is past the edge. A pointer on what pins scrolls nothing
+ * that way, and the note scrolls only while there are rows of the table beyond the pane that way.
+ */
+export function zoneScroll(area: DragArea, x: number, y: number, dt: number, ratio: number): { dx: number; dy: number } {
+	const { pane, table, box, rows, strip, rtl } = area;
+	const top = rows ? rows.bottom : pane.top;
+	let dy = 0;
+	if (!(rows && y < rows.bottom)) {
+		const at = Math.max(top, Math.min(pane.bottom, y));
+		dy = edgeScroll({ top, bottom: pane.bottom, left: 0, right: 0 }, 0, at, dt, ratio).dy;
+		if (dy > 0 && table.bottom <= pane.bottom) dy = 0;
+		if (dy < 0 && !rows && table.top >= pane.top) dy = 0;
+	}
+	const left = !rtl && strip !== null ? strip : box.left;
+	const right = rtl && strip !== null ? strip : box.right;
+	const onStrip = strip !== null && (rtl ? x > strip : x < strip);
+	const dx = onStrip ? 0 : edgeScroll({ top: 0, bottom: 0, left, right }, Math.max(left, Math.min(right, x)), 0, dt, ratio).dx;
+	return { dx, dy };
+}

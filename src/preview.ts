@@ -6,6 +6,7 @@ import { forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-edit
 import { ownTables } from './own-table';
 import { addAtEnd, addRowFrom, tableCommands, tableItems } from './own-table/table-commands';
 import { startDrag } from './own-table/drag';
+import { pressCell, selectEvery } from './own-table/cell-drag';
 import { setTableControls } from './own-table/grips';
 
 /** Set on the body by the preview's stylesheet, src/own-table/styles.css. */
@@ -42,8 +43,8 @@ interface Saved {
  * restart. Only a preview build has it (esbuild.config.mjs); a release build puts preview-off.ts here. With the
  * switch on, the plugin's own table takes the place of Obsidian's, and the keys run on it. Its frozen rows and columns
  * pin on a computer (pins.ts), and the freeze commands and the freeze items in the right-click menu act on it too, as
- * do Obsidian's Row, Column and Sort items and its table commands, rebuilt for it (table-commands.ts), and its drag
- * handles and + buttons (grips.ts, drag.ts).
+ * do Obsidian's Row, Column and Sort items and its table commands, rebuilt for it (table-commands.ts), its drag
+ * handles and + buttons (grips.ts, drag.ts), and its range of cells, dragged across (cell-drag.ts).
  * The setting is saved with the plugin's data, which Sync can carry to other devices.
  */
 export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {
@@ -70,12 +71,14 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	// right-click menu, and its table commands, which act only on the plugin's table.
 	setTableItems(tableItems);
 	plugin.register(() => setTableItems(null));
-	// The drag handles and the + buttons, on the plugin's table.
+	// The drag handles and the + buttons, and drags across cells, on the plugin's table.
 	setTableControls({
 		press: startDrag,
 		add: (table, what) => {
 			if (table.view) addAtEnd(table.view, table, what);
 		},
+		pressCell,
+		selectEvery,
 	});
 	plugin.register(() => setTableControls(null));
 	for (const command of tableCommands()) plugin.addCommand(command);

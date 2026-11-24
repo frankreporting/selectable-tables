@@ -64,10 +64,12 @@ export interface Stand {
  * quote. A header cell's freeze mark is left out, so nothing formatting does can reach it.
  */
 export function documentOf(lines: readonly string[], targets: readonly Target[]): Stand {
-	const left = Math.min(...targets.map(({ cell }) => cell.column));
-	const right = Math.max(...targets.map(({ cell }) => cell.column));
-	const bottom = Math.max(...targets.map(({ cell }) => cell.row));
-	const top = Math.max(1, Math.min(...targets.map(({ cell }) => cell.row)));
+	// Folded rather than spread: a range can hold more cells than a call takes arguments.
+	const edge = (pick: (cell: Cell) => number, most: (a: number, b: number) => number) => targets.reduce((at, { cell }) => most(at, pick(cell)), pick(targets[0]!.cell));
+	const left = edge(({ column }) => column, Math.min);
+	const right = edge(({ column }) => column, Math.max);
+	const bottom = edge(({ row }) => row, Math.max);
+	const top = Math.max(1, edge(({ row }) => row, Math.min));
 	const picked = [0, 1];
 	for (let row = top; row <= bottom; row++) picked.push(row + 1);
 	// Each picked line cut to the columns, and where each of its cells is in the cut line.
@@ -108,7 +110,8 @@ export function documentOf(lines: readonly string[], targets: readonly Target[])
 			const after = doc.split('\n').slice(1);
 			if (after.length !== cut.length) return null;
 			const segments = after.map((line) => segmentsIn(line));
-			if (segments.some((each, k) => each.length !== cut[k]!.parts.length)) return null;
+			// A short row cut to no cells reads as one empty cell: compared as it read before formatting.
+			if (segments.some((each, k) => each.length !== segmentsIn(cut[k]!.text).length)) return null;
 			return targets.map(({ cell }) => {
 				const { k, part } = placeOf(cell);
 				const { from, to } = segments[k]![part]!;

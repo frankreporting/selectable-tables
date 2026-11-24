@@ -66,6 +66,13 @@ test('the cells are read from the table cut down to their rows and columns, the 
 	assert.equal(stand.textsAfter('\n| Name | Bed |\n| --- | :-: |\n| Fern | # shade |'), null);
 });
 
+test('a short row inside a range doesn\'t stop the others being read back', () => {
+	const lines = ['| A | B | C |', '|---|---|---|', '| 1 | 2 | 3 |', '| 4 |', '| 5 | 6 | 7 |'];
+	const stand = documentOf(lines, targetsIn(lines, cellsIn({ top: 1, bottom: 3, left: 1, right: 2 })));
+	assert.deepEqual(stand.textsAfter(stand.doc), ['2', '3', '6', '7']);
+	assert.deepEqual(stand.textsAfter(stand.doc.replace('| 2 |', '| **2** |')), ['**2**', '3', '6', '7']);
+});
+
 test('a range below the header still takes the header and delimiter, and only its own rows', () => {
 	const lines = ['| A | B |', '| - | - |', '| 1 | 2 |', '| 3 | 4 |', '| 5 | 6 |'];
 	const stand = documentOf(lines, targetsIn(lines, cellsIn({ top: 2, bottom: 3, left: 1, right: 1 })));

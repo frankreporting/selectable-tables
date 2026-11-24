@@ -8970,7 +8970,16 @@
 						const bigText = view.state.doc.toString();
 						const big = () => models(view)[0];
 						const last = big()?.count ?? 0;
-						const long = { selected: await selectCell(view, big(), 1, 1) };
+						// Shown first, back at its start sideways, and pressed in its first column, whose text holds no link.
+						big().scrollSideways(-big().sideways().scroll);
+						big().showCell({ row: 1, column: 0 });
+						await sleep(500);
+						await frames(3);
+						const long = { selected: await selectCell(view, big(), 1, 0) };
+						await key('ArrowRight');
+						long.selected = long.selected && where(view) === '1,1';
+						// Nothing more runs on a cell not selected: Cmd+B would format the note's text.
+						if (!long.selected) throw new Error(`Own 154: the second column's first cell wasn't selected (${where(view)})`);
 						await key('ArrowDown', { meta: true, shift: true, wait: 600 });
 						long.made = where(view);
 						timed['Bold on 1,999 cells'] = await changedAfter(view, () => key('b', { meta: true, wait: 400 }));

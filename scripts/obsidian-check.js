@@ -2614,8 +2614,9 @@
 		// window.__checkEditsOnly instead, only the section on editing its rows and columns, with
 		// window.__checkDragsOnly instead, only the section on its drag handles and + buttons, with
 		// window.__checkShadesOnly instead, only the section on its frozen tables' shadows, with
-		// window.__checkRangesOnly instead, only the section on its ranges of cells, and with
-		// window.__checkCellDragsOnly instead, only the section on dragging across its cells.
+		// window.__checkRangesOnly instead, only the section on its ranges of cells, with
+		// window.__checkCellDragsOnly instead, only the section on dragging across its cells, and with
+		// window.__checkCellEditsOnly instead, only the section on clearing, cutting and pasting its cells.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3517,7 +3518,8 @@
 					await press(view, 'Escape');
 					check('Own 38: Enter on a selected cell opens it, Escape selects it again, Escape goes back to the table, Enter to the same cell, and Escape twice to the line above', enterOpens && backToCell && backToTable && sameCell && sel(view).line === aboveSeed, { enterOpens, backToCell, backToTable, sameCell, line: sel(view).line });
 
-					// Copy gives the cell's Markdown; Cut and Paste do nothing; Toggle checkbox and Toggle comment change nothing; typing goes below.
+					// Copy gives the cell's Markdown; Toggle checkbox and Toggle comment change nothing; typing goes below. Cut and Paste
+					// act on the cell: Own 134 on.
 					await caretOnLine(view, aboveSeed);
 					await press(view, 'ArrowDown');
 					await press(view, 'Enter');
@@ -3525,11 +3527,9 @@
 					await press(view, 'ArrowRight');
 					await press(view, 'ArrowRight');
 					const copied = clipboard(view, 'copy');
-					const cut = clipboard(view, 'cut');
-					const pasted = clipboard(view, 'paste', 'pasted');
 					for (const id of ['editor:toggle-checklist-status', 'editor:toggle-comments']) app.commands.executeCommandById(id);
 					await settle();
-					check('Own 39: on a selected cell, Copy gives its Markdown, and Cut, Paste, Toggle checkbox and Toggle comment change nothing', copied.text === '**Keep damp**' && cut.taken && pasted.taken && view.state.doc.toString() === cellsText && cellOf(view) === '1,2', { copied, cut: cut.taken, pasted: pasted.taken, cell: cellOf(view) });
+					check('Own 39: on a selected cell, Copy gives its Markdown, and Toggle checkbox and Toggle comment change nothing', copied.text === '**Keep damp**' && view.state.doc.toString() === cellsText && cellOf(view) === '1,2', { copied, cell: cellOf(view) });
 					await realType('q');
 					const below = view.state.doc.toString();
 					const belowOk = below.slice(0, seed.to) === cellsText.slice(0, seed.to) && /^\n\nq\n/.test(below.slice(seed.to));
@@ -3752,7 +3752,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -7292,7 +7292,8 @@
 						check('Own 114: Escape goes to the cell moved to last, Enter opens that cell, a plain arrow ends the range on its corner that way, and Tab moves on from the cell moved to last', JSON.stringify(keysOn) === JSON.stringify(['2,1', '-', '2,1', '1,0 from 2,1', 'open 1,0', '2,1', '1,0', '2,2']), keysOn);
 						await leave(view);
 
-						// Typing goes below the table; Delete, Cut, Paste and Bold change nothing, and the range stays; a click ends it.
+						// Typing goes below the table; Bold changes nothing, and the range stays; a click ends it. Delete, Cut and Paste act
+						// on a range: Own 136 on.
 						await selectCell(view, model, 1, 0);
 						await key('ArrowRight', shift);
 						await key('ArrowDown', shift);
@@ -7307,13 +7308,10 @@
 						await selectCell(view, model, 1, 0);
 						await key('ArrowRight', shift);
 						await key('ArrowDown', shift);
-						await key('Delete');
-						const cut = clipboard(view, 'cut');
-						const paste = clipboard(view, 'paste', 'pasted');
 						await key('b', { meta: true });
-						const still = { text: view.state.doc.toString() === text, at: where(view), drawn: rangeDrawn(view, model).ok, cut: cut.taken, paste: paste.taken };
+						const still = { text: view.state.doc.toString() === text, at: where(view), drawn: rangeDrawn(view, model).ok };
 						check('Own 115: typing on a range starts a paragraph below the table, and Undo takes it back', typed.table && typed.paragraph && undone, { typed, undone });
-						check('Own 115: Delete, Cut, Paste and Bold change nothing on a range, and it stays', still.text && still.at === '2,1 from 1,0' && still.drawn && still.cut && still.paste, still);
+						check('Own 115: Bold changes nothing on a range, and it stays', still.text && still.at === '2,1 from 1,0' && still.drawn, still);
 						await realClick(model.cellElement({ row: 3, column: 1 }));
 						await sleep(200);
 						const clicked = { open: preview.openCell(view)?.cell, drawn: rangeDrawn(view, model) };
@@ -7964,6 +7962,669 @@
 						view = await open('Frozen tables');
 						await sleep(300);
 						check('Own 132: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						delete view?.update;
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkCellEditsOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly) {
+					// --- Clearing, cutting and pasting a selected cell or a range of cells on the plugin's table (STA-117): Backspace
+					// and Delete empty it, or delete a range's rows or columns, Cut copies then does the same, and Paste writes text into
+					// a cell or cells copied from a table over the cells there, each against Obsidian's own range doing the same with
+					// the switch off. Real keys, presses and drags through the window's debugger; the clipboard is read and written
+					// through copy, cut and paste events carrying their own DataTransfer, so it isn't touched. Run alone with
+					// window.__checkOwnOnly, __checkCellsOnly and __checkCellEditsOnly all true.
+					preview.use(true);
+					await sleep(400);
+					const touched = ['Cell moves', 'Two report tables', 'Frozen tables', 'Table controls', 'Table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const codes = { Escape: 27, Enter: 13, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Backspace: 8, Delete: 46 };
+					const modifiers = (o) => (o.meta ? 4 : 0) | (o.shift ? 8 : 0);
+					const key = async (name, o = {}) => {
+						const text = name.length === 1 && !o.meta ? name : '';
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: codes[name] ?? name.toUpperCase().charCodeAt(0), modifiers: modifiers(o), unmodifiedText: macChar(name), text };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await sleep(o.wait ?? 160);
+					};
+					const shift = { shift: true };
+					const meta = { meta: true };
+					const round = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+					const mouse = (type, p, o = {}) => cdp.sendCommand('Input.dispatchMouseEvent', { type, ...round(p), button: type === 'mouseMoved' && !o.held ? 'none' : 'left', buttons: type === 'mouseReleased' || (type === 'mouseMoved' && !o.held) ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1, modifiers: 0 });
+					const press = async (p) => {
+						await mouse('mouseMoved', p);
+						await mouse('mousePressed', p);
+						await frames(2);
+					};
+					const release = async (p) => {
+						await mouse('mouseReleased', p);
+						await sleep(350);
+						await frames(2);
+					};
+					const glide = async (from, to) => {
+						for (let i = 1; i <= 6; i++) {
+							await mouse('mouseMoved', { x: from.x + ((to.x - from.x) * i) / 6, y: from.y + ((to.y - from.y) * i) / 6 }, { held: true });
+							await frames(1);
+						}
+						await frames(2);
+					};
+					const click = async (p) => {
+						await press(p);
+						await release(p);
+					};
+					// A point in a cell clear of its text, so a link there isn't followed: its padding, at its left.
+					const inCell = (el) => {
+						const r = el.getBoundingClientRect();
+						return { x: r.left + 5, y: r.top + r.height / 2 };
+					};
+					const where = (view) => {
+						const cells = preview.cells(view) ?? {};
+						return `${cells.selected ? `${cells.selected.row},${cells.selected.column}` : '-'}${cells.anchor ? ` from ${cells.anchor.row},${cells.anchor.column}` : ''}`;
+					};
+					const opened = (view) => {
+						const open = preview.openCell(view);
+						return open ? `${open.cell.row},${open.cell.column}` : null;
+					};
+					// The plugin's table under a heading, and none past the next heading: a table taken away leaves none.
+					const under = (view, heading, nth = 0) => {
+						const text = view.state.doc.toString();
+						const start = heading ? text.indexOf(`## ${heading}`) : 0;
+						const next = heading ? text.indexOf('\n## ', start + 1) : -1;
+						return models(view).filter((model) => model.from > start && (next < 0 || model.from < next))[nth] ?? null;
+					};
+					// A table's cells as its text reads, the header first, the delimiter left out.
+					const cellsOf = (markdown) => markdown.split('\n').filter((line, i) => i !== 1).map((line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((cell) => cell.trim()));
+					const tableText = (view, heading, nth = 0) => {
+						const model = under(view, heading, nth);
+						return model ? view.state.doc.sliceString(model.from, model.to) : null;
+					};
+					const scrollTo = async (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'start' }) });
+						await sleep(400);
+						await frames(3);
+					};
+					// Selects a cell of the plugin's table as a hand would: a press opens it, and Escape selects it.
+					const selectCell = async (view, model, row, column) => {
+						const td = model.cellElement({ row, column });
+						if (!td) return false;
+						await click(inCell(td));
+						await key('Escape');
+						return where(view) === `${row},${column}`;
+					};
+					const leave = async (view) => {
+						for (let i = 0; i < 3; i++) await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					const undo = () => key('z', meta);
+					// A clipboard event on the element with the keys, carrying its own DataTransfer, filled with `data` for a paste.
+					const clip = (type, data = {}) => {
+						const transfer = new DataTransfer();
+						for (const [kind, value] of Object.entries(data)) transfer.setData(kind, value);
+						const target = document.activeElement;
+						const event = new ClipboardEvent(type, { clipboardData: transfer, bubbles: true, cancelable: true });
+						target.dispatchEvent(event);
+						return { taken: event.defaultPrevented, data: Object.fromEntries(transfer.types.map((kind) => [kind, transfer.getData(kind)])) };
+					};
+					// Obsidian's own table with the switch off: a drawn cell of the nth table after a heading.
+					const obsidianCell = (view, heading, row, column, nth = 0) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						const widgets = Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget')).filter((el) => view.posAtDOM(el) > at);
+						return widgets[nth]?.querySelector('table')?.rows[row]?.cells[column] ?? null;
+					};
+					// A range on Obsidian's table, dragged from one cell to another, as a hand makes one there.
+					const obsidianRange = async (view, heading, from, to, nth = 0) => {
+						const a = obsidianCell(view, heading, from[0], from[1], nth);
+						const b = obsidianCell(view, heading, to[0], to[1], nth);
+						if (!a || !b) return false;
+						const p = inCell(a);
+						const q = inCell(b);
+						await press(p);
+						await glide(p, q);
+						await release(q);
+						return view.contentDOM.querySelectorAll('.cm-table-widget .is-selected').length > 0;
+					};
+					let view;
+					try {
+						// Own 134: one cell. Backspace empties Tomato, which stays selected, and Undo brings it back; Delete the same.
+						view = await open('Cell moves');
+						await scrollTo(view, 'Seed trays');
+						const text = view.state.doc.toString();
+						const trays = tableText(view, 'Seed trays');
+						const one = {};
+						for (const name of ['Backspace', 'Delete']) {
+							await selectCell(view, under(view, 'Seed trays'), 3, 1);
+							await key(name);
+							const after = cellsOf(tableText(view, 'Seed trays'));
+							const others = after.every((row, r) => row.every((cell, c) => (r === 3 && c === 1 ? cell === '' : cell === cellsOf(trays)[r][c])));
+							const at = where(view);
+							await undo();
+							one[name] = { others, at, undone: view.state.doc.toString() === text, still: where(view) };
+						}
+						check('Own 134: Backspace and Delete empty a selected cell, which stays selected, leave the rest of the table as it was, and Undo brings it back', Object.values(one).every((step) => step.others && step.at === '3,1' && step.undone && step.still === '3,1'), one);
+
+						// Own 135: Cut on Tomato copies it and empties it; Paste on the cell beside Basil writes it there. A pipe pasted stays
+						// in its cell, and two lines show one above the other. Undo takes each back.
+						await leave(view);
+						await scrollTo(view, 'Seed trays');
+						await selectCell(view, under(view, 'Seed trays'), 3, 1);
+						const cut = clip('cut');
+						const cutEmpty = cellsOf(tableText(view, 'Seed trays'))[3][1] === '';
+						await selectCell(view, under(view, 'Seed trays'), 2, 2);
+						const pasted = clip('paste', { 'text/plain': cut.data['text/plain'] ?? '' });
+						const pastedCell = cellsOf(tableText(view, 'Seed trays'))[2][2];
+						const pasteAt = where(view);
+						await undo();
+						await undo();
+						const cutUndone = view.state.doc.toString() === text;
+						await selectCell(view, under(view, 'Seed trays'), 3, 2);
+						const pipe = clip('copy').data['text/plain'];
+						await selectCell(view, under(view, 'Seed trays'), 4, 2);
+						clip('paste', { 'text/plain': pipe });
+						const piped = { cell: cellsOf(tableText(view, 'Seed trays'))[4][2], lines: tableText(view, 'Seed trays').split('\n').length };
+						clip('paste', { 'text/plain': 'Water once\nWater twice' });
+						const twoLines = cellsOf(tableText(view, 'Seed trays'))[4][2];
+						await sleep(200);
+						await frames(3);
+						const drawnLines = under(view, 'Seed trays').cellElement({ row: 4, column: 2 })?.querySelectorAll('br').length ?? 0;
+						await undo();
+						await undo();
+						const pipeUndone = view.state.doc.toString() === text;
+						check('Own 135: Cut on a selected cell copies its text and empties it, and Paste on another writes the text there', cut.taken && cut.data['text/plain'] === 'Tomato' && cutEmpty && pasted.taken && pastedCell === 'Tomato' && pasteAt === '2,2' && cutUndone, { cut, cutEmpty, pastedCell, pasteAt, cutUndone });
+						check('Own 135: a pipe pasted stays in its cell, two lines pasted show one above the other, and Undo takes each back', pipe === 'a | b' && piped.cell === 'a \\| b' && piped.lines === trays.split('\n').length && twoLines === 'Water once<br>Water twice' && drawnLines >= 1 && pipeUndone, { pipe, piped, twoLines, drawnLines, pipeUndone });
+
+						// Own 136 and 137: ranges. Each one's text afterwards is kept, to compare with Obsidian's own range below.
+						const ours = {};
+						const ranges = {};
+						const rangeOn = async (heading, start, moves) => {
+							await leave(view);
+							await scrollTo(view, heading);
+							await selectCell(view, under(view, heading), start[0], start[1]);
+							for (const [name, o] of moves) await key(name, o);
+							return where(view);
+						};
+						for (const [name, keyName] of [['clear back', 'Backspace'], ['clear forward', 'Delete']]) {
+							const made = await rangeOn('Seed trays', [1, 1], [['ArrowRight', shift], ['ArrowDown', shift]]);
+							await key(keyName);
+							ours[name] = view.state.doc.toString();
+							ranges[name] = { made, at: where(view), cells: cellsOf(tableText(view, 'Seed trays')), drawn: under(view, 'Seed trays').boxes[0].querySelectorAll('.is-selected').length };
+							await undo();
+							ranges[name].undone = view.state.doc.toString() === text;
+						}
+						const cleared = (step) => [step.cells[1][1], step.cells[1][2], step.cells[2][1], step.cells[2][2]].every((cell) => cell === '') && step.cells[3][1] === 'Tomato';
+						check('Own 136: Backspace on a range empties its cells, ends the range and selects its first cell; Delete selects its last; Undo brings all of them back at once', ranges['clear back'].made === '2,2 from 1,1' && cleared(ranges['clear back']) && ranges['clear back'].at === '1,1' && ranges['clear back'].drawn === 0 && ranges['clear back'].undone && cleared(ranges['clear forward']) && ranges['clear forward'].at === '2,2' && ranges['clear forward'].undone, ranges);
+						const deletes = {};
+						for (const [name, start, moves, keyName] of [
+							['row', [2, 0], [['ArrowRight', shift], ['ArrowRight', shift]], 'Backspace'],
+							['column', [0, 1], [['ArrowDown', shift], ['ArrowDown', shift], ['ArrowDown', shift], ['ArrowDown', shift]], 'Delete'],
+							['table', [0, 0], [['ArrowRight', { shift: true, meta: true }], ['ArrowDown', { shift: true, meta: true }]], 'Backspace'],
+						]) {
+							const made = await rangeOn('Seed trays', start, moves);
+							await key(keyName);
+							ours[name] = view.state.doc.toString();
+							const after = tableText(view, 'Seed trays');
+							deletes[name] = { made, at: where(view), cells: after && cellsOf(after) };
+							await undo();
+							deletes[name].undone = view.state.doc.toString() === text;
+						}
+						check('Own 137: a range across every column deletes its rows, across every row its columns, and across both the table; the cell beside them is selected; Undo brings each back', deletes.row.made === '2,2 from 2,0' && deletes.row.cells.length === 4 && deletes.row.cells[2][0] === 'B1' && deletes.row.at === '1,2' && deletes.column.made === '4,1 from 0,1' && deletes.column.cells[0].length === 2 && deletes.column.cells[4][1] === 'Water twice' && deletes.column.at === '4,1' && deletes.table.made === '4,2 from 0,0' && deletes.table.cells === null && Object.values(deletes).every((step) => step.undone), deletes);
+
+						// Own 138: in Two report tables, Cut of Fern to Balcony, pasted on 7400: the second table grows a column and a row.
+						await leave(view);
+						view = await open('Two report tables');
+						await sleep(300);
+						const reports = view.state.doc.toString();
+						const made = await rangeOn(null, [1, 0], [['ArrowRight', shift], ['ArrowDown', shift]]);
+						const cutRange = clip('cut');
+						await sleep(200);
+						await frames(2);
+						const emptied = cellsOf(tableText(view, null, 0));
+						const afterCut = where(view);
+						await selectCell(view, under(view, null, 1), 2, 2);
+						clip('paste', cutRange.data);
+						await sleep(200);
+						await frames(2);
+						ours['cut and paste'] = view.state.doc.toString();
+						const grown = cellsOf(tableText(view, null, 1));
+						const grownAt = where(view);
+						await undo();
+						await undo();
+						const reportsUndone = view.state.doc.toString() === reports;
+						check('Own 138: Cut of a range gives Copy\'s four forms and empties its cells; pasted on 7400, the cells write over the second table, which grows a column and a row, and the last one pasted is selected; Undo twice brings both tables back', made === '2,1 from 1,0' && JSON.stringify(Object.keys(cutRange.data)) === JSON.stringify(['text/plain', 'text/markdown', 'text/html', 'obsidian/table']) && emptied[1][0] === '' && emptied[2][1] === '' && emptied[3][0] === 'Cactus' && afterCut === '1,0' && JSON.stringify(grown[2]) === JSON.stringify(['Tue', 'River path', 'Fern', 'Kitchen']) && JSON.stringify(grown[3]) === JSON.stringify(['', '', 'Basil', 'Balcony']) && grown[0].length === 4 && grownAt === '3,3' && reportsUndone, { made, cut: Object.keys(cutRange.data), emptied, afterCut, grown, grownAt, reportsUndone });
+
+						// Own 139: cells both ways between Obsidian's table and the plugin's. Obsidian's range copied with the switch off
+						// pastes on Park loop with it on; the plugin's copy pastes into Obsidian's open Park loop the same way.
+						await leave(view);
+						preview.use(false);
+						await sleep(400);
+						view = await open('Two report tables');
+						await sleep(300);
+						const stockRange = await obsidianRange(view, null, [1, 0], [2, 1]);
+						const stockCopy = clip('copy').data;
+						await leave(view);
+						preview.use(true);
+						await sleep(400);
+						view = await open('Two report tables');
+						await sleep(300);
+						await selectCell(view, under(view, null, 1), 1, 1);
+						clip('paste', stockCopy);
+						const fromStock = view.state.doc.toString();
+						await undo();
+						const ownRange = await rangeOn(null, [1, 0], [['ArrowRight', shift], ['ArrowDown', shift]]);
+						const ownCopy = clip('copy').data;
+						await leave(view);
+						preview.use(false);
+						await sleep(400);
+						view = await open('Two report tables');
+						await sleep(300);
+						const park = obsidianCell(view, null, 1, 1, 1);
+						if (park) await click(inCell(park));
+						clip('paste', ownCopy);
+						await sleep(300);
+						const intoStock = view.state.doc.toString();
+						await leave(view);
+						await undo();
+						const stockUndone = view.state.doc.toString() === reports;
+						preview.use(true);
+						await sleep(400);
+						view = await open('Two report tables');
+						await sleep(300);
+						const parkCells = cellsOf(fromStock.slice(fromStock.indexOf('| Day'), fromStock.indexOf('\n\nA short line after')));
+						check('Own 139: cells copied from Obsidian\'s range paste as cells on the plugin\'s table, and the plugin\'s copy pastes into Obsidian\'s open cell, the same cells either way', stockRange && ownRange === '2,1 from 1,0' && JSON.stringify(parkCells[1].slice(1)) === JSON.stringify(['Fern', 'Kitchen']) && JSON.stringify(parkCells[2].slice(1)) === JSON.stringify(['Basil', 'Balcony']) && fromStock === intoStock && stockUndone && view.state.doc.toString() === reports, { stockRange, ownRange, parkCells, same: fromStock === intoStock, stockUndone });
+
+						// Own 140: Plants, its rows and a column pinned: Plant 1 to CloverFernOrchard copied, pasted into the open Name.
+						await leave(view);
+						view = await open('Frozen tables');
+						await sleep(300);
+						const plantsText = view.state.doc.toString();
+						const plantsMade = await rangeOn('Plants', [1, 0], [['ArrowRight', shift], ['ArrowDown', shift]]);
+						const plantsCopy = clip('copy').data;
+						await leave(view);
+						await scrollTo(view, 'Plants');
+						const name = under(view, 'Plants').cellElement({ row: 0, column: 0 });
+						if (name) await click(inCell(name));
+						const nameOpen = opened(view);
+						const pasteInto = clip('paste', plantsCopy);
+						await sleep(300);
+						const plants = cellsOf(tableText(view, 'Plants'));
+						const plantsOpen = opened(view);
+						const header = view.state.doc.lineAt(under(view, 'Plants').from).text;
+						await key('Escape');
+						await undo();
+						const plantsUndone = view.state.doc.toString() === plantsText;
+						check('Own 140: cells pasted into an open header cell of a frozen table write over the header and the row below, keep the freeze mark, and leave the last cell pasted open', plantsMade === '2,1 from 1,0' && nameOpen === '0,0' && pasteInto.taken && plants[0][0] === '%%freeze 2 1%% Plant 1' && plants[0][1] === '**OrchardCloverMoss**' && plants[1][0] === 'Plant 2' && plants[1][1] === '**CloverFernOrchard**' && plantsOpen === '1,1' && /%%freeze 2 1%%/.test(header) && plantsUndone, { plantsMade, nameOpen, plants: plants.slice(0, 2).map((row) => row.slice(0, 2)), plantsOpen, plantsUndone });
+
+						// Own 141: plain text pasted on a range does nothing, and the range stays.
+						await leave(view);
+						view = await open('Cell moves');
+						await sleep(300);
+						const rangeKept = await rangeOn('Seed trays', [1, 1], [['ArrowRight', shift], ['ArrowDown', shift]]);
+						const textOnRange = clip('paste', { 'text/plain': 'pasted' });
+						check('Own 141: plain text pasted on a range changes nothing, and the range stays', rangeKept === '2,2 from 1,1' && textOnRange.taken && view.state.doc.toString() === text && where(view) === '2,2 from 1,1', { rangeKept, after: where(view) });
+
+						// A table spaced by hand: a range cleared comes out tidied.
+						await leave(view);
+						view = await open('Table controls');
+						await sleep(300);
+						const controls = view.state.doc.toString();
+						await rangeOn('Spaced by hand', [1, 0], [['ArrowDown', shift]]);
+						await key('Backspace');
+						ours['spaced by hand'] = view.state.doc.toString();
+						await undo();
+						const controlsUndone = view.state.doc.toString() === controls;
+
+						// Own 142: each of those against Obsidian's own range doing the same with the switch off: the same text.
+						await leave(view);
+						preview.use(false);
+						await sleep(400);
+						const stock = {};
+						const onStock = async (note, heading, from, to, act, nth = 0) => {
+							view = await open(note);
+							await sleep(300);
+							if (heading) {
+								const at = view.state.doc.toString().indexOf(`## ${heading}`);
+								view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'start' }) });
+								await sleep(400);
+							}
+							const before = view.state.doc.toString();
+							const ranged = await obsidianRange(view, heading, from, to, nth);
+							await act();
+							await sleep(300);
+							const after = view.state.doc.toString();
+							await leave(view);
+							await undo();
+							return { ranged, after, undone: view.state.doc.toString() === before };
+						};
+						stock['clear back'] = await onStock('Cell moves', 'Seed trays', [1, 1], [2, 2], () => key('Backspace'));
+						stock['clear forward'] = await onStock('Cell moves', 'Seed trays', [1, 1], [2, 2], () => key('Delete'));
+						stock.row = await onStock('Cell moves', 'Seed trays', [2, 0], [2, 2], () => key('Backspace'));
+						stock.column = await onStock('Cell moves', 'Seed trays', [0, 1], [4, 1], () => key('Delete'));
+						stock.table = await onStock('Cell moves', 'Seed trays', [0, 0], [4, 2], () => key('Backspace'));
+						stock['cut and paste'] = await onStock('Two report tables', null, [1, 0], [2, 1], async () => {
+							const data = clip('cut').data;
+							await sleep(300);
+							const target = obsidianCell(view, null, 2, 2, 1);
+							if (target) await click(inCell(target));
+							clip('paste', data);
+						});
+						// The cut and the paste are two steps in Obsidian too.
+						await undo();
+						stock['spaced by hand'] = await onStock('Table controls', 'Spaced by hand', [1, 0], [2, 0], () => key('Backspace'));
+						preview.use(true);
+						await sleep(400);
+						const differ = Object.keys(ours).filter((name) => ours[name] !== stock[name]?.after);
+						check('Own 142: Backspace, Delete and Cut on a range, and Paste of cells, leave the same text as Obsidian\'s own range doing the same, a table spaced by hand tidied the same way', differ.length === 0 && Object.values(stock).every((step) => step.ranged) && controlsUndone, { differ, first: differ[0] && { ours: ours[differ[0]].slice(0, 600), stock: stock[differ[0]]?.after.slice(0, 600) }, ranged: Object.fromEntries(Object.entries(stock).map(([k, v]) => [k, v.ranged])) });
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+
+						// Own 143: 60 seeded random steps on Seed trays (moves, Shift+arrows, Backspace, Delete, Cut, Paste of cells or
+						// text, Undo), each against a model of Obsidian's range: the table reads back to the cells expected, the cell
+						// expected is selected, the drawing matches the text, and Undo takes back exactly one step.
+						view = await open('Cell moves');
+						await sleep(300);
+						await scrollTo(view, 'Seed trays');
+						let seed = 117;
+						const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+						const pick = (list) => list[Math.floor(random() * list.length)];
+						const fuzz = [];
+						let model = { cells: cellsOf(tableText(view, 'Seed trays')), selected: { row: 1, column: 0 }, anchor: null };
+						await selectCell(view, under(view, 'Seed trays'), 1, 0);
+						let clipboard = { 'text/plain': 'Seed' };
+						const history = [];
+						const escape = (text) => text.replace(/\r?\n/g, '<br>').replace(/(\\*)\|/g, (all, slashes) => (slashes.length % 2 ? all : `${slashes}\\|`));
+						const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+						const bounds = () => {
+							const { selected: s, anchor: a } = model;
+							const b = a ?? s;
+							return { top: Math.min(s.row, b.row), bottom: Math.max(s.row, b.row), left: Math.min(s.column, b.column), right: Math.max(s.column, b.column) };
+						};
+						const step = {
+							move(direction) {
+								const { selected: s } = model;
+								if (model.anchor) {
+									const b = bounds();
+									model.selected = direction === 'ArrowUp' || direction === 'ArrowLeft' ? { row: b.top, column: b.left } : { row: b.bottom, column: b.right };
+								} else {
+									const rows = model.cells.length;
+									const columns = model.cells[0].length;
+									model.selected = { row: clamp(s.row + (direction === 'ArrowDown') - (direction === 'ArrowUp'), 0, rows - 1), column: clamp(s.column + (direction === 'ArrowRight') - (direction === 'ArrowLeft'), 0, columns - 1) };
+								}
+								model.anchor = null;
+							},
+							extend(direction) {
+								const anchor = model.anchor ?? model.selected;
+								const s = model.selected;
+								const head = { row: clamp(s.row + (direction === 'ArrowDown') - (direction === 'ArrowUp'), 0, model.cells.length - 1), column: clamp(s.column + (direction === 'ArrowRight') - (direction === 'ArrowLeft'), 0, model.cells[0].length - 1) };
+								model.selected = head;
+								model.anchor = anchor.row === head.row && anchor.column === head.column ? null : anchor;
+							},
+							clear(forward) {
+								const { cells } = model;
+								if (!model.anchor) {
+									cells[model.selected.row][model.selected.column] = '';
+									return;
+								}
+								const b = bounds();
+								const head = model.selected;
+								const columns = cells[0].length;
+								const rows = cells.length;
+								model.anchor = null;
+								if (b.left === 0 && b.right === columns - 1) {
+									if (b.top === 0 && b.bottom === rows - 1) {
+										model.cells = null;
+										model.selected = null;
+										return;
+									}
+									cells.splice(b.top, b.bottom - b.top + 1);
+									const row = b.top === 0 ? 0 : b.bottom === rows - 1 ? b.top - 1 : forward ? b.top : b.top - 1;
+									model.selected = { row, column: head.column };
+								} else if (b.top === 0 && b.bottom === rows - 1) {
+									for (const row of cells) row.splice(b.left, b.right - b.left + 1);
+									model.selected = { row: head.row, column: clamp(forward ? b.left : b.left - 1, 0, cells[0].length - 1) };
+								} else {
+									for (let r = b.top; r <= b.bottom; r++) for (let c = b.left; c <= b.right; c++) cells[r][c] = '';
+									model.selected = forward ? { row: b.bottom, column: b.right } : { row: b.top, column: b.left };
+								}
+							},
+							paste(data) {
+								const table = data['obsidian/table'] && JSON.parse(data['obsidian/table']);
+								if (!table) {
+									if (!model.anchor) model.cells[model.selected.row][model.selected.column] = escape(data['text/plain'].trim());
+									return;
+								}
+								const b = bounds();
+								const { cells } = model;
+								const right = b.left + table.alignment.length - 1;
+								const bottom = b.top + table.rows.length - 1;
+								const width = Math.max(cells[0].length, right + 1);
+								for (let r = 0; r < Math.max(bottom + 1, cells.length); r++) {
+									cells[r] ??= [];
+									while (cells[r].length < width) cells[r].push('');
+									if (r < b.top || r > bottom) continue;
+									for (let c = b.left; c <= right; c++) cells[r][c] = escape(table.rows[r - b.top][c - b.left] ?? '');
+								}
+								model.selected = { row: bottom, column: right };
+								model.anchor = null;
+							},
+						};
+						const arrows = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+						const texts = ['Mint', 'x | y', 'one\ntwo', '**Sage**'];
+						const kinds = {};
+						for (let i = 0; i < 60; i++) {
+							if (!model.cells) {
+								// The table went: Undo brings it back, selected whole, and Enter selects a cell.
+								kinds['Undo of the table'] = (kinds['Undo of the table'] ?? 0) + 1;
+								await undo();
+								const back = history.pop();
+								model = back.model;
+								if (view.state.doc.toString() !== back.text) fuzz.push({ step: i, what: 'undo of the table', text: false });
+								await key('Enter');
+								model.selected = model.selected ?? { row: 0, column: 0 };
+								model.anchor = null;
+								if (where(view) === '-' || !where(view).length) fuzz.push({ step: i, what: 'enter after undo', at: where(view) });
+								// Enter selects the cell Escape left, or the first.
+								const now = preview.cells(view)?.selected;
+								if (now) model.selected = { row: now.row, column: now.column };
+								continue;
+							}
+							const roll = random();
+							let what;
+							const tally = (kind) => (kinds[kind] = (kinds[kind] ?? 0) + 1);
+							const before = { text: view.state.doc.toString(), model: JSON.parse(JSON.stringify(model)) };
+							let edits = false;
+							if (roll < 0.15) {
+								what = pick(arrows);
+								step.move(what);
+								await key(what);
+							} else if (roll < 0.4) {
+								what = `shift ${pick(arrows)}`;
+								step.extend(what.slice(6));
+								await key(what.slice(6), shift);
+							} else if (roll < 0.52) {
+								what = 'Backspace';
+								step.clear(false);
+								await key('Backspace');
+								edits = true;
+							} else if (roll < 0.62) {
+								what = 'Delete';
+								step.clear(true);
+								await key('Delete');
+								edits = true;
+							} else if (roll < 0.72) {
+								what = 'Cut';
+								const { data } = clip('cut');
+								clipboard = data;
+								step.clear(false);
+								edits = true;
+							} else if (roll < 0.82) {
+								what = 'Copy';
+								clipboard = clip('copy').data;
+							} else if (roll < 0.92) {
+								const text = random() < 0.5 ? null : pick(texts);
+								const data = text === null ? clipboard : { 'text/plain': text };
+								what = `Paste ${text === null ? (data['obsidian/table'] ? 'cells' : 'copied text') : JSON.stringify(text)}`;
+								step.paste(data);
+								clip('paste', data);
+								await sleep(160);
+								edits = true;
+							} else {
+								what = 'Undo';
+								tally(what);
+								const back = history.pop();
+								await undo();
+								if (back) {
+									const kept = model.selected;
+									model = back.model;
+									// The cell selected stays where the step put it, if it's still in the table.
+									model.selected = kept && model.cells && kept.row < model.cells.length && kept.column < model.cells[0].length ? kept : null;
+									model.anchor = null;
+									if (view.state.doc.toString() !== back.text) fuzz.push({ step: i, what, undo: 'not one step' });
+									if (!model.selected) {
+										await key('Enter');
+										const now = preview.cells(view)?.selected;
+										model.selected = now ? { row: now.row, column: now.column } : { row: 0, column: 0 };
+									}
+								}
+								continue;
+							}
+							tally(what.split(' ')[0]);
+							if (edits && view.state.doc.toString() !== before.text) history.push(before);
+							await frames(2);
+							const read = tableText(view, 'Seed trays');
+							const cellsNow = read && cellsOf(read);
+							const expect = model.cells && JSON.stringify(model.cells);
+							const at = where(view);
+							const want = model.selected ? `${model.selected.row},${model.selected.column}${model.anchor ? ` from ${model.anchor.row},${model.anchor.column}` : ''}` : '-';
+							const drawnOk = crashed(view) === 0 && rowsRight(view).length === 0;
+							if ((cellsNow ? JSON.stringify(cellsNow) : null) !== expect || (model.cells && at !== want) || !drawnOk) {
+								fuzz.push({ step: i, what, cells: cellsNow, expect: model.cells, at, want, drawnOk });
+								break;
+							}
+						}
+						results.push({ name: 'Own 143 the random steps taken, by kind', ok: true, detail: kinds });
+						check('Own 143: 60 seeded random steps: after each, the table reads back to the cells expected, the cell expected is selected, the drawing matches the text, and one Undo takes back one step', fuzz.length === 0, fuzz.slice(0, 3));
+						await leave(view);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+
+						// Own 144: on Table 2000 by 12, Backspace on 1,000 whole rows, Cut over the whole table, and Paste of 2,000 rows'
+						// cells, timed from the key or the event to the note's new text; and Backspace on a cell 1,500 rows down keeps the
+						// row at the pane's top where it was.
+						view = await open('Table 2000 by 12');
+						await sleep(1500);
+						const big = () => models(view)[0];
+						const bigText = view.state.doc.toString();
+						const changedAfter = async (act) => {
+							let at = null;
+							const update = view.update;
+							view.update = function (transactions) {
+								const result = update.call(this, transactions);
+								if (at === null && transactions.some((tr) => tr.docChanged)) at = performance.now();
+								return result;
+							};
+							const start = performance.now();
+							await act();
+							for (let i = 0; i < 50 && at === null; i++) await sleep(20);
+							delete view.update;
+							await frames(2);
+							return at === null ? null : Math.round(at - start);
+						};
+						const timed = {};
+						// A cell down the table: shown first, then pressed in its first column, whose text holds no link.
+						const selectFar = async (row) => {
+							// Back to the table's start sideways: earlier checks may have slid it.
+							big().scrollSideways(-big().sideways().scroll);
+							big().showCell({ row, column: 0 });
+							await sleep(500);
+							await frames(3);
+							return selectCell(view, big(), row, 0);
+						};
+						// The table's last row: the note's table may not end at row 2,000.
+						const last = big().count;
+						await selectFar(last - 999);
+						await key('ArrowRight', { shift: true, meta: true });
+						await key('ArrowDown', { shift: true, meta: true });
+						const thousand = where(view);
+						timed.backspace = await changedAfter(() => key('Backspace', { wait: 0 }));
+						const rowsLeft = big().count;
+						await undo();
+						const thousandBack = view.state.doc.toString() === bigText;
+						await leave(view);
+						await selectFar(1);
+						await key('ArrowUp', meta);
+						await key('ArrowRight', { shift: true, meta: true });
+						await key('ArrowDown', { shift: true, meta: true });
+						const whole = where(view);
+						let cutAll = null;
+						timed.cut = await changedAfter(async () => {
+							cutAll = clip('cut');
+						});
+						const gone = !view.state.doc.toString().includes('| Row 1 ');
+						await undo();
+						const allBack = view.state.doc.toString() === bigText;
+						await leave(view);
+						// The same without the copy: Backspace over the whole table.
+						await selectFar(1);
+						await key('ArrowUp', meta);
+						await key('ArrowRight', { shift: true, meta: true });
+						await key('ArrowDown', { shift: true, meta: true });
+						timed['backspace on the whole table'] = await changedAfter(() => key('Backspace', { wait: 0 }));
+						await undo();
+						const allBackAgain = view.state.doc.toString() === bigText;
+						await leave(view);
+						// 2,000 rows' first six columns, pasted over their last six: every line changes.
+						await selectFar(1);
+						await key('ArrowDown', { shift: true, meta: true });
+						for (let i = 0; i < 5; i++) await key('ArrowRight', shift);
+						const six = clip('copy').data;
+						await leave(view);
+						await selectFar(1);
+						for (let i = 0; i < 6; i++) await key('ArrowRight');
+						timed.paste = await changedAfter(async () => {
+							clip('paste', six);
+						});
+						const pastedRows = JSON.parse(six['obsidian/table'] ?? '{"rows":[]}').rows.length;
+						const lastLine = view.state.doc.lineAt(big().to).text;
+						await undo();
+						const pasteBack = view.state.doc.toString() === bigText;
+						await leave(view);
+						// Backspace on row 1,500: the row at the pane's top stays put.
+						await selectFar(1500);
+						const pane = view.scrollDOM.getBoundingClientRect();
+						let topRow = null;
+						for (let r = 1400; r <= 1600 && !topRow; r++) {
+							const el = big().cellElement({ row: r, column: 0 });
+							if (el?.isConnected && el.getBoundingClientRect().top >= pane.top && r !== 1500) topRow = { r, el };
+						}
+						const topBefore = topRow?.el.getBoundingClientRect().top;
+						await key('Backspace');
+						await frames(4);
+						const topAfter = topRow && big().cellElement({ row: topRow.r, column: 0 })?.getBoundingClientRect().top;
+						const emptied1500 = cellsOf(view.state.doc.sliceString(big().from, big().to))[1500][0] === '';
+						await undo();
+						const back1500 = view.state.doc.toString() === bigText;
+						results.push({ name: 'Own 144 Table 2000 by 12: key or event to new text (ms)', ok: true, detail: timed });
+						check('Own 144: on Table 2000 by 12, Backspace on 1,000 whole rows, Cut over the whole table and Paste of every row\'s cells each write the right text, and Undo takes each back', thousand === `${last},11 from ${last - 999},0` && rowsLeft === last - 1000 && thousandBack && whole === `${last},11 from 0,0` && gone && !!cutAll?.data['obsidian/table'] && allBack && allBackAgain && pastedRows === last && cellsOf(lastLine)[0][6] === `Row ${last}` && pasteBack, { last, thousand, rowsLeft, thousandBack, whole, gone, allBack, allBackAgain, pastedRows, lastLine: lastLine.slice(0, 120), pasteBack });
+						check('Own 144: each of those takes at most 1 s', Object.values(timed).every((ms) => ms !== null && ms <= 1000), timed);
+						check('Own 144: Backspace on a cell 1,500 rows down empties it and leaves the row at the pane\'s top where it was', emptied1500 && !!topRow && Math.abs(topAfter - topBefore) <= 1 && back1500, { emptied1500, topRow: topRow?.r, topBefore, topAfter, back1500 });
+						await leave(view);
+
+						view = await open('Frozen tables');
+						await sleep(300);
+						check('Own 145: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						delete view?.update;
 						view = await open('Watering schedule');

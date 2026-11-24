@@ -1,10 +1,10 @@
 import type { Extension } from '@codemirror/state';
 import { Notice, type Plugin } from 'obsidian';
-import { escapeCell, selectableTables } from './editor/extension';
+import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
 import { forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
-import { addAtEnd, addRowFrom, tableCommands, tableItems } from './own-table/table-commands';
+import { addAtEnd, addRowFrom, clearCells, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
 import { startDrag } from './own-table/drag';
 import { pressCell, selectEvery } from './own-table/cell-drag';
 import { setTableControls } from './own-table/grips';
@@ -44,7 +44,8 @@ interface Saved {
  * switch on, the plugin's own table takes the place of Obsidian's, and the keys run on it. Its frozen rows and columns
  * pin on a computer (pins.ts), and the freeze commands and the freeze items in the right-click menu act on it too, as
  * do Obsidian's Row, Column and Sort items and its table commands, rebuilt for it (table-commands.ts), its drag
- * handles and + buttons (grips.ts, drag.ts), and its range of cells, dragged across (cell-drag.ts).
+ * handles and + buttons (grips.ts, drag.ts), its range of cells, dragged across (cell-drag.ts), and Backspace, Delete,
+ * Cut and Paste on a selected cell or a range (table-commands.ts).
  * The setting is saved with the plugin's data, which Sync can carry to other devices.
  */
 export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {
@@ -65,8 +66,11 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 			queueMicrotask(() => use(false));
 		},
 		// The plain cell editor gets the plugin's keys, as Obsidian gives its own editor every plugin's extensions.
-		{ plain: () => keys, escape: (view) => void escapeCell(view), addRow: addRowFrom },
+		{ plain: () => keys, escape: (view) => void escapeCell(view), addRow: addRowFrom, pasteCells: pasteIntoCell },
 	);
+	// Backspace, Delete, Cut and Paste on a selected cell or a range of cells of the plugin's table.
+	setCellEdits({ clear: clearCells, paste: pasteCells });
+	plugin.register(() => setCellEdits(null));
 	// Obsidian's table controls on the plugin's table: its Row, Column and Sort items, before the freeze items in a cell's
 	// right-click menu, and its table commands, which act only on the plugin's table.
 	setTableItems(tableItems);

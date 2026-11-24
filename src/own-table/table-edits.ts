@@ -1,6 +1,7 @@
 import type { Text } from '@codemirror/state';
+import type { Bounds } from '../editor/decide';
 import { hasMark, markText, readFreeze, withoutMark } from '../editor/freeze-mark';
-import { type Alignment, alignmentOf, CELL_PADDING, type Cell, delimiter, MIN_COLUMN_WIDTH, padded, segmentsIn, type Span } from '../editor/table-text';
+import { type Alignment, alignmentOf, CELL_PADDING, type Cell, delimiter, MIN_COLUMN_WIDTH, padded, segmentsIn, type Span, toCellSource } from '../editor/table-text';
 
 /**
  * The edits Obsidian's table controls make to a table, worked out from its text alone, as Obsidian's own table writes
@@ -262,6 +263,16 @@ export function editTable(lines: readonly string[], edit: TableEdit, { row, colu
 			break;
 		}
 	}
+	return finish(grid, origins, to, mark, copiedCell);
+}
+
+/**
+ * An edit's lines from the cells it left: the freeze mark kept in the header, each column at least as wide as its
+ * longest text, the cell it goes to kept within the table, and which line each new line was. `origins` says which of
+ * the rows read each row was, or -1 for a new one.
+ */
+function finish(grid: Grid, origins: number[], to: Cell, mark: string | null, copiedCell: number | null = null): Edited {
+	const { rows, alignments, widths } = grid;
 	if (mark !== null) keepMark(rows, origins, mark, copiedCell);
 	// A cell that took the mark is wider: its column grows to fit, as typing it would have it.
 	widths.forEach((width, index) => (widths[index] = Math.max(width, ...rows.map((cells) => cells[index]!.length + CELL_PADDING))));
@@ -278,6 +289,123 @@ export function editTable(lines: readonly string[], edit: TableEdit, { row, colu
 	const from = origins.map(lineFrom);
 	from.splice(1, 0, origins[0] === 0 ? 1 : -1);
 	return { lines: writeTable(grid), cell, from };
+}
+
+// A range of cells ----------------------------------------------------------------------------------------------------
+
+/**
+ * What Backspace, Delete, Cut and Paste do to a range of cells, or Paste to one cell, as Obsidian's range does (read from
+ * 1.15.1's `deleteSelection` and `pasteSelection`). Rows are as the plugin's table draws them, the header being 0.
+ *
+ * - `delete`: across every column, the range's rows go, and across every row too, the whole table; across every row
+ *   alone, its columns go; else its cells are emptied. Backspace goes on from the range's start, Delete (`forward`) from
+ *   its end: the cell selected afterwards is its first cell or its last, or the one beside the rows or columns that went.
+ *   `head` is the cell moved to last, whose column or row is kept when rows or columns go.
+ * - `paste`: cells copied from a table, written over the cells from `at` on, the table growing rows and columns to fit.
+ *   Onto the header, they bring their columns' alignments; elsewhere only new columns take any. The cell afterwards is
+ *   the last one pasted.
+ */
+export type CellsEdit = { kind: 'delete'; bounds: Bounds; head: Cell; forward: boolean } | { kind: 'paste'; at: Cell } & TableData;
+
+/** Obsidian's table data on the clipboard: each cell's Markdown, row by row, and each column's alignment. */
+export interface TableData {
+	rows: string[][];
+	alignment: Alignment[];
+}
+
+const ALIGNMENTS: readonly unknown[] = ['left', 'center', 'right', null];
+
+/**
+ * Obsidian's table data from the clipboard (`obsidian/table`, JSON of `{rows, alignment}`), or null when it isn't that
+ * shape: an array of rows, each an array of strings, and an alignment per column, `left`, `center`, `right` or null.
+ * Obsidian's paste takes every column the alignments name, so there's at least one, and at least one row.
+ */
+export function readTableData(json: string): TableData | null {
+	let data: unknown;
+	try {
+		data = JSON.parse(json);
+	} catch {
+		return null;
+	}
+	if (!data || typeof data !== 'object') return null;
+	const { rows, alignment } = data as { rows?: unknown; alignment?: unknown };
+	if (!Array.isArray(rows) || !rows.length || !rows.every((row) => Array.isArray(row) && row.every((text) => typeof text === 'string'))) return null;
+	if (!Array.isArray(alignment) || !alignment.length || !alignment.every((each) => ALIGNMENTS.includes(each))) return null;
+	return { rows, alignment: alignment as Alignment[] };
+}
+
+/** The longest text in a column and two spaces, as Obsidian works a column's width out after a cell in it changes. */
+function widthOf(rows: readonly string[][], column: number): number {
+	return Math.max(MIN_COLUMN_WIDTH, ...rows.map((cells) => (cells[column] ?? '').length + CELL_PADDING));
+}
+
+export function editCells(lines: readonly string[], edit: CellsEdit): Edited | null {
+	const grid = readTable(lines);
+	const { rows, alignments, widths } = grid;
+	const header = lines[0] ?? '';
+	const mark = hasMark(header) ? markText(readFreeze(header)) : null;
+	// The header cell holding the mark: written over, it keeps the mark, before what's written.
+	const markColumn = mark === null ? -1 : rows[0]!.findIndex(hasMark);
+	const set = (row: number, column: number, text: string) => {
+		rows[row]![column] = row === 0 && column === markColumn ? (text ? `${mark} ${text}` : mark!) : text;
+	};
+	const origins = rows.map((_, index) => index);
+	// A row as the plugin draws it, among the rows Obsidian reads: a row of dashes, which Obsidian drops, is the row before.
+	const rowOf = (drawn: number) => clamp(grid.drawn[clamp(drawn, 0, grid.drawn.length - 1)] ?? 0, 0, rows.length - 1);
+	const columns = alignments.length;
+	if (edit.kind === 'paste') {
+		const column = clamp(edit.at.column, 0, columns - 1);
+		const row = rowOf(edit.at.row);
+		const right = column + edit.alignment.length - 1;
+		const bottom = row + edit.rows.length - 1;
+		// As 1.15.1 has it: onto the header the pasted columns take the clipboard's alignments, and elsewhere a new column
+		// takes the clipboard's from its first, whichever column it lands under.
+		if (row === 0) for (let at = column; at <= right; at++) alignments[at] = edit.alignment[at - column] ?? null;
+		else for (let at = columns; at <= right; at++) alignments[at] = edit.alignment[at - columns] ?? null;
+		const width = alignments.length;
+		for (let at = 0; at < Math.max(bottom + 1, rows.length); at++) {
+			if (!rows[at]) {
+				rows[at] = [];
+				origins[at] = -1;
+			}
+			const cells = rows[at]!;
+			while (cells.length < width) cells.push('');
+			if (at < row || at > bottom) continue;
+			// A cell's text can't hold a raw pipe or line break, and a freeze mark belongs to the table it came from.
+			for (let each = column; each <= right; each++) set(at, each, toCellSource(withoutMark(edit.rows[at - row]![each - column] ?? '')).text);
+		}
+		for (let at = column; at <= right; at++) widths[at] = widthOf(rows, at);
+		return finish(grid, origins, { row: bottom, column: right }, mark);
+	}
+	const { bounds, head, forward } = edit;
+	// The range among Obsidian's rows: a row of dashes at its top isn't in it.
+	const top = grid.dropped.has(clamp(bounds.top, 0, grid.drawn.length - 1)) ? rowOf(bounds.top) + 1 : rowOf(bounds.top);
+	const bottom = rowOf(bounds.bottom);
+	const left = clamp(bounds.left, 0, columns - 1);
+	const right = clamp(bounds.right, 0, columns - 1);
+	const headRow = rowOf(head.row);
+	const last = rows.length - 1;
+	if (top > bottom) return null;
+	let to: Cell;
+	if (left === 0 && right === columns - 1) {
+		if (top === 0 && bottom === last) return { lines: null, cell: { row: 0, column: 0 } };
+		rows.splice(top, bottom - top + 1);
+		origins.splice(top, bottom - top + 1);
+		// Beside the rows that went: the new header, the row above the table's new end, or the row before or after them.
+		const row = top === 0 ? 0 : bottom === last ? top - 1 : forward ? top : top - 1;
+		to = { row, column: head.column };
+	} else if (top === 0 && bottom === last) {
+		const count = right - left + 1;
+		alignments.splice(left, count);
+		widths.splice(left, count);
+		for (const cells of rows) cells.splice(left, count);
+		to = { row: headRow, column: forward ? left : left - 1 };
+	} else {
+		for (let row = top; row <= bottom; row++) for (let column = left; column <= right; column++) set(row, column, '');
+		for (let column = left; column <= right; column++) widths[column] = widthOf(rows, column);
+		to = forward ? { row: bottom, column: right } : { row: top, column: left };
+	}
+	return finish(grid, origins, to, mark);
 }
 
 /**

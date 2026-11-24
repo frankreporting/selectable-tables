@@ -2,7 +2,7 @@ import { EditorSelection, EditorState, Extension, Prec, SelectionRange, Transact
 import { EditorView, KeyBinding, keymap, ViewPlugin } from '@codemirror/view';
 import { type Editor, editorEditorField, editorInfoField, editorLivePreviewField, Notice, Platform } from 'obsidian';
 import { cellFollowsCaret, cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, backspace, blankLinesAbove, caretInTable, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText, writesCell } from './decide';
+import { Action, arrow, backspace, blankLinesAbove, caretInTable, clearCells, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText, writesCell } from './decide';
 import { frozenTables } from './freeze';
 import { openCells, type OwnCell, ownSpans, ownTables, viewLayout } from './layout';
 import type { Span } from './table-text';
@@ -102,6 +102,23 @@ function selecting(table: Span, fromAbove: boolean, goal?: number): TransactionS
 	return { selection: EditorSelection.create([wholeTable(table, fromAbove, goal)]), effects: EditorView.scrollIntoView(fromAbove ? table.from : table.to), userEvent: 'select' };
 }
 
+/**
+ * What Backspace, Delete, Cut and Paste do to a selected cell or a range of cells of the plugin's own table, set by a
+ * preview build (src/own-table/table-commands.ts), so a release carries none of it.
+ */
+export interface CellEdits {
+	/** Empties the selected cell or the range's cells, or deletes the range's rows or columns: Delete is `forward`. */
+	clear(view: EditorView, forward: boolean): void;
+	/** Pastes cells copied from a table at the selected cell or the range's first, or text into the selected cell. */
+	paste(view: EditorView, data: DataTransfer): void;
+}
+
+let cellEdits: CellEdits | null = null;
+
+export function setCellEdits(edits: CellEdits | null): void {
+	cellEdits = edits;
+}
+
 function run(view: EditorView, action: Action | null): boolean {
 	if (!action) return false;
 	const { main } = view.state.selection;
@@ -155,6 +172,9 @@ function run(view: EditorView, action: Action | null): boolean {
 			own.openCell(action.cell);
 			return true;
 		}
+		case 'clear':
+			cellEdits?.clear(view, action.forward);
+			return true;
 		case 'refuse':
 			view.plugin(cellSelection)?.refuse();
 			new Notice('This table can\'t open from the keyboard. Click a cell to edit it.');
@@ -309,8 +329,8 @@ const bindings: KeyBinding[] = [
 		// Shift+Enter would type a line break over the table: it does nothing.
 		shift: (view) => active(view) && run(view, stay(view.state, viewLayout(view))),
 	},
-	{ key: 'Delete', run: (view) => active(view) && run(view, deleteForward(view.state, viewLayout(view))) },
-	{ key: 'Backspace', run: (view) => active(view) && run(view, backspace(view.state, viewLayout(view))) },
+	{ key: 'Delete', run: (view) => active(view) && run(view, clearCells(context(view), true) ?? deleteForward(view.state, viewLayout(view))) },
+	{ key: 'Backspace', run: (view) => active(view) && run(view, clearCells(context(view), false) ?? backspace(view.state, viewLayout(view))) },
 	{
 		key: 'Escape',
 		run: (view) => (active(view) ? run(view, escape(context(view))) : view.hasFocus && escapeCell(view) !== null),
@@ -377,7 +397,8 @@ function typesBelow(view: EditorView): boolean {
  * Text the keydown didn't see, such as from the emoji picker or dictation, goes below the table too, and
  * other text input on a selected table stays stopped, since the browser's caret can't sit across the
  * table. On a selected cell, no other input goes through. Copy gives the cell, not the table underneath
- * it, and Cut and Paste do nothing.
+ * it. On the plugin's own table, Cut copies, then empties the cell or deletes the range as Backspace does,
+ * and Paste writes over them (`cellEdits`); on Obsidian's table they do nothing.
  */
 const selectedEvents = EditorView.domEventHandlers({
 	keydown(event, view) {
@@ -393,17 +414,27 @@ const selectedEvents = EditorView.domEventHandlers({
 		if (cellSelected(view.state)) return event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo';
 		return typed && selectedTables.has(view.state);
 	},
-	copy(event, view) {
-		const what = copied(context(view));
-		if (!what) return false;
-		const data = event.clipboardData;
-		if ('text' in what) data?.setData('text/plain', what.text);
-		else for (const [type, value] of view.state.facet(ownTables)?.table(view, what.table.from)?.copy(what.anchor, what.head) ?? []) data?.setData(type, value);
+	copy: (event, view) => copyCells(view, event.clipboardData),
+	cut(event, view) {
+		if (!cellSelected(view.state)) return false;
+		if (viewLayout(view).ownTables && cellEdits && copyCells(view, event.clipboardData)) cellEdits.clear(view, false);
 		return true;
 	},
-	cut: (_, view) => cellSelected(view.state),
-	paste: (_, view) => cellSelected(view.state),
+	paste(event, view) {
+		if (!cellSelected(view.state)) return false;
+		if (viewLayout(view).ownTables && event.clipboardData) cellEdits?.paste(view, event.clipboardData);
+		return true;
+	},
 });
+
+/** Copies a selected cell's text, or a range of the plugin's own table as a table, to `data`. Says whether there was one. */
+function copyCells(view: EditorView, data: DataTransfer | null): boolean {
+	const what = copied(context(view));
+	if (!what) return false;
+	if ('text' in what) data?.setData('text/plain', what.text);
+	else for (const [type, value] of view.state.facet(ownTables)?.table(view, what.table.from)?.copy(what.anchor, what.head) ?? []) data?.setData(type, value);
+	return true;
+}
 
 const keepSelectedTable = EditorState.transactionFilter.of((tr) => {
 	const table = tr.docChanged ? selectedTables.get(tr.startState) : undefined;

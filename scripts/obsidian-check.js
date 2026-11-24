@@ -7194,7 +7194,13 @@
 							const td = obsidianCell(view, heading, from.row, from.column);
 							if (!td) return null;
 							await pointAt(middle(td, 6));
-							await key('End');
+							// The caret goes to the end of the cell's text, where Shift with an arrow starts Obsidian's range: End would stop
+							// at the end of a wrapped line, as in Plants' header cell with its mark.
+							const editorEl = view.contentDOM.querySelector('.cm-table-widget .cm-editor');
+							const cellEditorView = editorEl && view.constructor.findFromDOM(editorEl);
+							if (!cellEditorView) return null;
+							cellEditorView.dispatch({ selection: { anchor: cellEditorView.state.doc.length } });
+							await settle();
 							for (let i = from.column; i < to.column; i++) await key('ArrowRight', shift);
 							for (let i = from.row; i < to.row; i++) await key('ArrowDown', shift);
 							const editor = view.contentDOM.querySelector('.cm-table-widget .cm-editor .cm-content');
@@ -7371,8 +7377,16 @@
 							await sleep(500);
 							await scrollTo(view, heading);
 							model = heading ? named(view, heading) : models(view)[0];
+							if (!heading) {
+								view.scrollDOM.scrollTop = view.lineBlockAt(model.from).top;
+								await sleep(400);
+								await frames(3);
+							}
 							const before = view.state.doc.toString();
-							await selectCell(view, model, 3, 1);
+							if (!(await selectCell(view, model, 3, 1))) {
+								fuzz.push({ note, step: -1, at: where(view), why: 'the first cell could not be selected' });
+								continue;
+							}
 							for (let i = 0; i < count; i++) {
 								const [name, mods] = steps[Math.floor(random() * steps.length)];
 								await key(name, mods);
@@ -7381,10 +7395,12 @@
 									await sleep(300);
 									if (preview.openCell(view)) await key('Escape');
 								}
-								// Escape twice is the table: a cell is selected again from where the keys left it.
+								// Escape twice is the table: Enter selects the cell it left again.
+								const { main } = view.state.selection;
+								if (!selection(view).selected && main.from === model.from && main.to === model.to) await key('Enter');
 								if (!selection(view).selected) {
-									await key('Enter');
-									if (!selection(view).selected) await selectCell(view, model, 2, 0);
+									fuzz.push({ note, step: i, at: where(view), why: 'no cell or table selected' });
+									break;
 								}
 								await sleep(100);
 								await frames(2);

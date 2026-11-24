@@ -19,8 +19,16 @@ export interface Layout {
 /** One of the plugin's own tables, for its selected cell: the plugin's table draws it, whenever its row is drawn. */
 export interface DrawnTable {
 	readonly grid: Grid;
-	/** Draws `cell` as the selected one, or takes the selected cell off with null. */
-	markCell(cell: Cell | null): void;
+	/**
+	 * Draws `cell` as the selected one, or takes the selected cell off with null. With an `anchor`, the cells from there to
+	 * `cell` are drawn as a range, as Obsidian draws its own range of cells.
+	 */
+	markCell(cell: Cell | null, anchor?: Cell | null): void;
+	/**
+	 * What Copy puts on the clipboard for a range of cells, as Obsidian copies its own range: the Markdown table, as plain
+	 * text and Markdown, the table as HTML, and Obsidian's table data, by type, in that order.
+	 */
+	copy(anchor: Cell, head: Cell): [type: string, data: string][];
 	/**
 	 * Brings a cell into view, down the note and sideways, drawing its row first if it isn't drawn, clear of the rows and
 	 * columns that pin. A key that went up into a frozen row, or left into a frozen column (`toward`), takes the table

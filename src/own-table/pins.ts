@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view';
 import { CELL_CLASS, HOLDS_CELL_CLASS } from '../editor/cells';
+import type { Bounds } from '../editor/decide';
 import { canFreeze } from '../editor/freeze';
 import { type Freeze, readFreeze } from '../editor/freeze-mark';
 import type { Cell } from '../editor/table-text';
@@ -9,6 +10,7 @@ import { type LineMatch, paintMatches } from './matches';
 import { carryRange, frozenIn, pinsFit, railOf, stickyTops, stripWidth } from './pin-sums';
 import { timed } from './profile';
 import { cellsOf } from './shape';
+import { paintRange, RANGE_CLASSES } from './range';
 
 /**
  * Frozen rows and columns in the plugin's table, on a computer (STA-91). On a computer no box scrolls the table
@@ -269,7 +271,7 @@ function filler(): HTMLTableCellElement {
 /** A cell as drawn, for a copy: no open editor in it, and none of the marks the table draws on a cell. */
 function cellCopy(cell: HTMLTableCellElement): HTMLTableCellElement {
 	const copy = cell.cloneNode(true) as HTMLTableCellElement;
-	copy.classList.remove(CELL_CLASS, LIFTED_CLASS, ...MATCH_CLASSES);
+	copy.classList.remove(CELL_CLASS, LIFTED_CLASS, ...MATCH_CLASSES, ...RANGE_CLASSES);
 	for (const box of Array.from(copy.querySelectorAll('.table-cell-wrapper'))) {
 		if (box.querySelector('.cm-editor')) box.remove();
 		else box.classList.remove(OPEN_TEXT_CLASS);
@@ -468,6 +470,52 @@ export class Pins {
 		this.marks();
 	}
 
+	/** A range of cells, or none: the copies of its cells show it too, wherever they're drawn. Set before `markCell`. */
+	markRange(range: Bounds | null): void {
+		this.range = range;
+	}
+
+	private range: Bounds | null = null;
+	/** The copied rows a range is drawn on now, to take it off again. */
+	private rangeCopies: HTMLTableRowElement[] = [];
+
+	/**
+	 * Draws the range on the copies of its cells: each block's copy of the frozen rows and its corner, and its strip's copies
+	 * of the frozen columns. Only copies holding the range's cells are touched, a few rows a block.
+	 */
+	private markRangeCopies(): void {
+		for (const tr of this.rangeCopies) paintRange(tr, 0, null);
+		this.rangeCopies = [];
+		const range = this.range;
+		if (!range) return;
+		const { rows, columns } = this.freeze;
+		const paint = (tr: HTMLTableRowElement | null | undefined, row: number, limit: number) => {
+			if (!tr || row < range.top || row > range.bottom) return;
+			paintRange(tr, row, range, limit);
+			this.rangeCopies.push(tr);
+		};
+		const pinnedRows = this.fit.rows && range.top < rows;
+		const pinnedColumns = this.fit.columns && range.left < columns;
+		for (const block of this.host.pinBlocks) {
+			const parts = block ? this.parts.get(block) : null;
+			if (!parts) continue;
+			if (pinnedRows && parts.rail) {
+				for (let row = range.top; row < rows && row <= range.bottom; row++) {
+					paint(parts.rail.table.table.rows[row], row, this.host.columns);
+					if (pinnedColumns) paint(parts.rail.corner?.table.rows[row], row, columns);
+				}
+			}
+			const strip = parts.strip;
+			if (!pinnedColumns || !strip) continue;
+			paint(strip.thead.rows[0], 0, columns);
+			for (const tr of Array.from(strip.tbody.rows)) {
+				// A copy of a drawn row: the row it copies says where it sits in the table, the header being 1.
+				const index = strip.real.get(tr)?.getAttribute('aria-rowindex');
+				if (index) paint(tr, Number(index) - 1, columns);
+			}
+		}
+	}
+
 	/**
 	 * The open cell, or none. In a frozen column, while the table moves sideways, its row's frozen cells take the
 	 * opposite move, so the cell stays where the strip is, with the editor in the real cell, and its row's copy in the
@@ -595,11 +643,12 @@ export class Pins {
 		setStyle(strip.box, 'inset-inline-start', px(place.start));
 	}
 
-	/** Puts the selected cell's outline on its copies, and lifts the open cell out from under them. A few lookups. */
+	/** Puts the selected cell's outline on its copies, and a range, and lifts the open cell out from under them. A few lookups. */
 	private marks(): void {
 		for (const el of this.chosenCopies) el.removeClass(CELL_CLASS);
 		this.chosenCopies = this.chosen ? this.copiesOf(this.chosen) : [];
 		for (const el of this.chosenCopies) el.addClass(CELL_CLASS);
+		this.markRangeCopies();
 		for (const el of this.liftedCells) el.removeClass(LIFTED_CLASS, LIFTED_ROW_CLASS);
 		for (const el of this.hiddenCopies) el.removeClass(HIDDEN_CLASS);
 		this.liftedCells = [];

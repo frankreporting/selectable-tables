@@ -23,6 +23,8 @@ export type Action =
 	| { type: 'stay' }
 	/** Selects a cell of the selected table. `toward` says when the key moved up or left, toward the table's start. */
 	| { type: 'cell'; cell: Cell; toward?: 'up' | 'left' }
+	/** Selects a range of cells of the plugin's own table, from `anchor`, where it started, to `cell`, the one moved to last. */
+	| { type: 'range'; anchor: Cell; cell: Cell; toward?: 'up' | 'left' }
 	/** Back from a selected cell to the selected table. */
 	| { type: 'table' }
 	/** A caret at `pos`, in a selected cell's text, so that Obsidian opens the cell. */
@@ -43,15 +45,35 @@ export interface Grid {
 	columns(row: number): number;
 }
 
-/** The selected cell of the selected table, held on the editor, not in its state. */
+/**
+ * The selected cell of the selected table, held on the editor, not in its state. On the plugin's own table it can be one
+ * end of a range of cells: the one moved to last, which the note keeps in view, and Enter, Escape, Tab and the commands
+ * start from.
+ */
 export interface Cells {
 	selected: Cell | null;
+	/** The cell a range of cells started from, its other end; none while one cell is selected. */
+	anchor?: Cell | null;
 	/** The cell Escape left, while its table stays selected: Enter goes back to it. */
 	left: Cell | null;
 	grid: Grid;
 }
 
-export const noCells: Cells = { selected: null, left: null, grid: { rows: 0, columns: () => 0 } };
+export const noCells: Cells = { selected: null, anchor: null, left: null, grid: { rows: 0, columns: () => 0 } };
+
+/** A range of cells by its edges: its first and last rows, the header being 0, and its first and last columns. */
+export interface Bounds {
+	top: number;
+	bottom: number;
+	left: number;
+	right: number;
+}
+
+export function boundsOf(a: Cell, b: Cell): Bounds {
+	return { top: Math.min(a.row, b.row), bottom: Math.max(a.row, b.row), left: Math.min(a.column, b.column), right: Math.max(a.column, b.column) };
+}
+
+export const sameCell = (a: Cell, b: Cell) => a.row === b.row && a.column === b.column;
 
 /** What the keys on a selected table or cell need to know. */
 export interface TableContext {
@@ -127,13 +149,34 @@ function beyond(state: EditorState, layout: Layout, table: Span, forward: boolea
 
 export function arrow(context: Context, direction: Direction, shift: boolean): Action | null {
 	const { cells } = context;
-	if (cells.selected) return shift ? { type: 'stay' } : selectCell(moveCell(cells.grid, cells.selected, direction), direction);
+	if (cells.selected) {
+		// Shift grows or shrinks a range of cells, on the plugin's own table only: Obsidian's has its own, from an open cell.
+		if (shift) return context.layout.ownTables ? extendCells(cells, moveCell(cells.grid, cells.selected, direction), direction) : { type: 'stay' };
+		const from = cells.anchor ? rangeCorner(cells.anchor, cells.selected, direction) : moveCell(cells.grid, cells.selected, direction);
+		return selectCell(from, direction);
+	}
 	if (context.state.selection.ranges.length !== 1) return null;
 	return shift ? extend(context, direction) : move(context, direction);
 }
 
 function selectCell(cell: Cell, direction: Direction): Action {
 	return direction === 'up' || direction === 'left' ? { type: 'cell', cell, toward: direction } : { type: 'cell', cell };
+}
+
+/**
+ * A range's moving end goes to `cell`, and the range runs from where it started to there. Back on that start, it's the
+ * one cell selected again.
+ */
+function extendCells(cells: Cells, cell: Cell, direction: Direction): Action {
+	const anchor = cells.anchor ?? cells.selected!;
+	if (sameCell(anchor, cell)) return selectCell(cell, direction);
+	return direction === 'up' || direction === 'left' ? { type: 'range', anchor, cell, toward: direction } : { type: 'range', anchor, cell };
+}
+
+/** A plain arrow on a range of cells ends it on its corner that way, as Obsidian's range does: its top left, or its bottom right. */
+function rangeCorner(anchor: Cell, head: Cell, direction: Direction): Cell {
+	const { top, bottom, left, right } = boundsOf(anchor, head);
+	return direction === 'up' || direction === 'left' ? { row: top, column: left } : { row: bottom, column: right };
 }
 
 /** An arrow on a selected cell: one cell along, stopping at the table's outer edge. */
@@ -281,7 +324,8 @@ export function enter({ state, layout, cells }: TableContext): Action | null {
  * it was selected from, the line above or the line below, or to the other side when that one doesn't exist.
  */
 export function escape({ state, layout, cells }: TableContext): Action | null {
-	if (cells.selected) return { type: 'table' };
+	// A range of cells goes back to the cell moved to last, on its own.
+	if (cells.selected) return cells.anchor ? { type: 'cell', cell: cells.selected } : { type: 'table' };
 	const table = selectedTable(state, layout);
 	if (!table) return escapeOntoTable(state, layout);
 	const { anchor, head } = state.selection.main;
@@ -442,17 +486,21 @@ export function option(context: TableContext, forward: boolean): Action | null {
 	return context.cells.selected ? { type: 'stay' } : leave(context, forward);
 }
 
-/** Shift with a jump does nothing on a selected cell, as it does with an arrow. */
-export function shifted({ cells }: TableContext): Action | null {
-	return cells.selected && { type: 'stay' };
+/**
+ * Shift with a jump stretches a range of cells to the table's edge that way, along its row or column, as a spreadsheet
+ * does, on the plugin's own table. On Obsidian's table it does nothing on a selected cell, as it does with an arrow.
+ */
+export function shifted({ cells, layout }: TableContext, direction: Direction): Action | null {
+	if (!cells.selected) return null;
+	return layout.ownTables ? extendCells(cells, edgeCell(cells.grid, cells.selected, direction), direction) : { type: 'stay' };
 }
 
 /**
- * The same for Home, End, Cmd+← and Cmd+→, which also do nothing on a selected table. There Obsidian
- * would move the head to the table's far end, shrink the selection to a caret, and open a cell.
+ * The same for Home, End, Cmd+← and Cmd+→, which do nothing on a selected table. There Obsidian would move the head to
+ * the table's far end, shrink the selection to a caret, and open a cell.
  */
-export function shiftedRowEnd(context: TableContext): Action | null {
-	return shifted(context) ?? stay(context.state, context.layout);
+export function shiftedRowEnd(context: TableContext, forward: boolean): Action | null {
+	return shifted(context, forward ? 'right' : 'left') ?? stay(context.state, context.layout);
 }
 
 /** On Enter's caret: the one key move that means to open a cell. */
@@ -523,12 +571,18 @@ export function tab({ state, layout, cells }: TableContext, forward: boolean): A
 	return selectCell(cell, cell.row < row ? 'up' : 'left');
 }
 
-/** What Copy gives for a selected cell: its Markdown. A header cell's freeze mark belongs to the table, and stays out. */
-export function copied({ state, layout, cells }: TableContext): string | null {
+/**
+ * What Copy takes: a selected cell's Markdown, a header cell's freeze mark left out, since it belongs to the table; or a
+ * range of cells, which the plugin's own table copies as a table, in the forms Obsidian copies its own range in.
+ */
+export type Copied = { text: string } | { table: Span; anchor: Cell; head: Cell };
+
+export function copied({ state, layout, cells }: TableContext): Copied | null {
 	const table = selectedTable(state, layout);
 	if (!table || !cells.selected) return null;
+	if (cells.anchor && layout.ownTables) return { table, anchor: cells.anchor, head: cells.selected };
 	const source = cellSource(state.doc, table, cells.selected);
-	return cells.selected.row === 0 ? withoutMark(source) : source;
+	return { text: cells.selected.row === 0 ? withoutMark(source) : source };
 }
 
 /**

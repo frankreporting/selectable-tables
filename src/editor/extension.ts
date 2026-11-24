@@ -14,6 +14,9 @@ const ACTIVE_CLASS = 'selectable-tables';
 /** On the scroller while Vim is driving: in its normal and visual modes, and off in insert mode. */
 const VIM_CLASS = 'cm-vimMode';
 
+/** Where Ctrl+Option types nothing, so Ctrl+Alt isn't AltGr; and where Cmd, not Ctrl, goes with Shift to the table's edge. */
+const APPLE = Platform.isMacOS || Platform.isIosApp;
+
 /** The editor Obsidian opens inside a table cell. */
 function cellWidget(view: EditorView): HTMLElement | null {
 	return view.dom.parentElement?.closest<HTMLElement>(`.${TABLE_CLASS}`) ?? null;
@@ -133,6 +136,9 @@ function run(view: EditorView, action: Action | null): boolean {
 			view.plugin(cellSelection)?.select(action.cell, action.toward);
 			if (action.toward) view.plugin(frozenTables)?.backToStart(action.toward);
 			return true;
+		case 'range':
+			view.plugin(cellSelection)?.selectRange(action.anchor, action.cell, action.toward);
+			return true;
 		case 'table':
 			view.plugin(cellSelection)?.climb();
 			return true;
@@ -251,8 +257,11 @@ function escapeOwnCell(own: OwnCell): EditorView {
 type Keys = Pick<KeyBinding, 'key' | 'mac'>;
 type Jump = (context: Context) => Action | null;
 
-/** A key that jumps in the note's editor. With Shift, it does nothing on a selected cell. */
-function jumpKey(keys: Keys, jump: Jump, shift: Jump = shifted): KeyBinding {
+/** Shift with a key that does nothing on a selected cell or a range of cells, as with Option and an arrow on a Mac. */
+const shiftStays: Jump = ({ cells }) => cells.selected && { type: 'stay' };
+
+/** A key that jumps in the note's editor. With Shift, it stretches a range of cells, or does nothing, as `shift` says. */
+function jumpKey(keys: Keys, jump: Jump, shift: Jump): KeyBinding {
 	return {
 		...keys,
 		run: (view) => active(view) && run(view, jump(context(view))),
@@ -269,7 +278,7 @@ function jumpKey(keys: Keys, jump: Jump, shift: Jump = shifted): KeyBinding {
 function cellJumpKey(keys: Keys, jump: (context: Context, forward: boolean) => Action | null, forward: boolean): KeyBinding {
 	const go: Jump = (c) => jump(c, forward);
 	return {
-		...jumpKey(keys, go),
+		...jumpKey(keys, go, (c) => shifted(c, forward ? 'down' : 'up')),
 		run(view) {
 			if (active(view)) return run(view, go(context(view))) || leaveToObsidian(view, forward ? 'jump down' : 'jump up');
 			const main = view.hasFocus && !view.compositionStarted ? escapeCell(view) : null;
@@ -311,10 +320,10 @@ const bindings: KeyBinding[] = [
 		run: (view) => active(view) && run(view, tab(context(view), true)),
 		shift: (view) => active(view) && run(view, tab(context(view), false)),
 	},
-	jumpKey({ key: 'Home' }, (c) => rowEnd(c, false), shiftedRowEnd),
-	jumpKey({ mac: 'Cmd-ArrowLeft' }, (c) => rowEnd(c, false), shiftedRowEnd),
-	jumpKey({ key: 'End' }, (c) => rowEnd(c, true), shiftedRowEnd),
-	jumpKey({ mac: 'Cmd-ArrowRight' }, (c) => rowEnd(c, true), shiftedRowEnd),
+	jumpKey({ key: 'Home' }, (c) => rowEnd(c, false), (c) => shiftedRowEnd(c, false)),
+	jumpKey({ mac: 'Cmd-ArrowLeft' }, (c) => rowEnd(c, false), (c) => shiftedRowEnd(c, false)),
+	jumpKey({ key: 'End' }, (c) => rowEnd(c, true), (c) => shiftedRowEnd(c, true)),
+	jumpKey({ mac: 'Cmd-ArrowRight' }, (c) => rowEnd(c, true), (c) => shiftedRowEnd(c, true)),
 	cellJumpKey({ key: 'PageUp' }, page, false),
 	cellJumpKey({ mac: 'Ctrl-ArrowUp' }, page, false),
 	cellJumpKey({ key: 'PageDown' }, page, true),
@@ -323,10 +332,14 @@ const bindings: KeyBinding[] = [
 	cellJumpKey({ mac: 'Cmd-ArrowUp' }, noteEnd, false),
 	cellJumpKey({ key: 'Mod-End' }, noteEnd, true),
 	cellJumpKey({ mac: 'Cmd-ArrowDown' }, noteEnd, true),
-	jumpKey({ key: 'Mod-ArrowLeft', mac: 'Alt-ArrowLeft' }, (c) => option(c, false)),
-	jumpKey({ key: 'Mod-ArrowRight', mac: 'Alt-ArrowRight' }, (c) => option(c, true)),
-	jumpKey({ mac: 'Alt-ArrowUp' }, (c) => option(c, false)),
-	jumpKey({ mac: 'Alt-ArrowDown' }, (c) => option(c, true)),
+	// On Windows and Linux, Ctrl+Shift with an arrow stretches a range of cells to the table's edge, as in a spreadsheet, as
+	// Shift+Cmd does on a Mac. Option+Shift with an arrow does nothing on a Mac.
+	jumpKey({ key: 'Mod-ArrowLeft', mac: 'Alt-ArrowLeft' }, (c) => option(c, false), APPLE ? shiftStays : (c) => shifted(c, 'left')),
+	jumpKey({ key: 'Mod-ArrowRight', mac: 'Alt-ArrowRight' }, (c) => option(c, true), APPLE ? shiftStays : (c) => shifted(c, 'right')),
+	jumpKey({ mac: 'Alt-ArrowUp' }, (c) => option(c, false), shiftStays),
+	jumpKey({ mac: 'Alt-ArrowDown' }, (c) => option(c, true), shiftStays),
+	{ win: 'Shift-Ctrl-ArrowUp', linux: 'Shift-Ctrl-ArrowUp', run: (view) => active(view) && run(view, shifted(context(view), 'up')) },
+	{ win: 'Shift-Ctrl-ArrowDown', linux: 'Shift-Ctrl-ArrowDown', run: (view) => active(view) && run(view, shifted(context(view), 'down')) },
 ];
 
 /**
@@ -343,9 +356,6 @@ const markSelectedTable = EditorView.editorAttributes.of((view) => {
 	selectedTables.set(view.state, table);
 	return { class: SELECTED_CLASS };
 });
-
-/** Where Ctrl+Option types nothing, so Ctrl+Alt isn't AltGr. */
-const APPLE = Platform.isMacOS || Platform.isIosApp;
 
 /**
  * Whether typing on a selected table or cell can start a paragraph below it now. Vim's normal mode has its
@@ -384,9 +394,11 @@ const selectedEvents = EditorView.domEventHandlers({
 		return typed && selectedTables.has(view.state);
 	},
 	copy(event, view) {
-		const text = copied(context(view));
-		if (text === null) return false;
-		event.clipboardData?.setData('text/plain', text);
+		const what = copied(context(view));
+		if (!what) return false;
+		const data = event.clipboardData;
+		if ('text' in what) data?.setData('text/plain', what.text);
+		else for (const [type, value] of view.state.facet(ownTables)?.table(view, what.table.from)?.copy(what.anchor, what.head) ?? []) data?.setData(type, value);
 		return true;
 	},
 	cut: (_, view) => cellSelected(view.state),

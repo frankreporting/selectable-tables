@@ -28,6 +28,8 @@ export default defineConfig(
 			parserOptions: {
 				projectService: {
 					allowDefaultProject: ['eslint.config.mts', 'stylelint.config.mjs', 'manifest.json', 'scripts/*.mjs'],
+					// The repo's scripts and configs, which tsconfig.json leaves out: more than the default eight.
+					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 16,
 				},
 				tsconfigRootDir: import.meta.dirname,
 				extraFileExtensions: ['.json'],

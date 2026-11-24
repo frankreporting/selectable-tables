@@ -1,13 +1,14 @@
-import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, type Language, syntaxTree } from '@codemirror/language';
 import { EditorSelection, EditorState, type TransactionSpec } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import { editorInfoField, MarkdownView, Notice } from 'obsidian';
 import { boundsOf } from '../editor/decide';
 import { openCells } from '../editor/layout';
 import { writtenByObsidian } from '../editor/table-text';
-import { cellFormatter, cellLanguage } from './cell-editor';
+import { cellFormatter } from './cell-editor';
 import { writeCells } from './cell-write';
-import { cellsIn, documentOf, type Target, targetsIn, textsIn, withMark } from './format-cells';
+import { cellsIn, documentOf, type Stand, targetsIn, withMark } from './format-cells';
+import { knownLanguages } from './language';
 import { linesOf, selectedCells, writeLines } from './table-commands';
 
 /**
@@ -24,11 +25,12 @@ import { linesOf, selectedCells, writeLines } from './table-commands';
  *
  * So each note's `Editor` gets the four as instance methods, while the plugin's table is drawn, which hand over:
  *
- * - **On a selected cell or a range,** Obsidian's own method runs on a stand-in for the editor, whose document holds
- *   the cells' text alone, parsed by the Markdown language of Obsidian's own cells, and whose formatting ranges are
- *   the cells: so its rules are Obsidian's (the first cell decides on a range, a highlight's colors, Comment only coming
- *   off when every cell has one). Its changes are read back cell by cell and written to the note as an open cell writes,
- *   in one step Undo takes back alone, with the cell or range still selected.
+ * - **On a selected cell or a range,** Obsidian's own method runs on a stand-in for the editor, whose document is the
+ *   table cut down to the cells' rows and columns, parsed by Obsidian's own Markdown language for notes, as it parses
+ *   its own table, and whose formatting ranges are the cells' text: so its rules are Obsidian's (the first cell decides
+ *   on a range, a highlight's colors, Comment only coming off when every cell has one). Its changes are read back cell
+ *   by cell and written to the note as an open cell writes, in one step Undo takes back alone, with the cell or range
+ *   still selected.
  * - **In an open cell,** the cell's own `Editor`, which Obsidian's base editor made over the cell's view, with the
  *   cell's Markdown language, runs it: it reads the cell's formatting, and its change reaches the note as typing does.
  * - **Anywhere else,** Obsidian's method runs as it would: Obsidian's table, text, a table selected whole.
@@ -62,13 +64,11 @@ function cantFormat(why: unknown): void {
 }
 
 /**
- * The cells' new text after Obsidian's `method` acts on them all at once, as on its own range: null when it can't run.
- * Unchanged texts come back as they were.
+ * The cells' new text after Obsidian's `method` acts on them all at once, as on its own range, or the texts as they
+ * were when it changes nothing: null when it can't run, and 'unread' when its change can't be read back cell by cell.
  */
-function formatted(texts: readonly string[], proto: object, method: Method, args: readonly unknown[]): string[] | null {
-	const language = cellLanguage();
-	if (!language) return null;
-	const { doc, ranges } = documentOf(texts);
+function formatted(stand: Stand, language: Language, proto: object, method: Method, args: readonly unknown[]): string[] | 'same' | 'unread' | null {
+	const { doc, ranges } = stand;
 	let state = EditorState.create({ doc, extensions: language });
 	// Parsed to the end before Obsidian reads it: a new state parses only its start, and a transaction then takes in the
 	// rest that `ensureSyntaxTree` parsed.
@@ -89,8 +89,8 @@ function formatted(texts: readonly string[], proto: object, method: Method, args
 		focus: () => undefined,
 	});
 	Reflect.apply(method, standIn, [...args]);
-	if (!spec.sent?.changes) return [...texts];
-	return textsIn(state.changes(spec.sent.changes).apply(state.doc).toString(), texts.length);
+	if (!spec.sent?.changes) return 'same';
+	return stand.textsAfter(state.changes(spec.sent.changes).apply(state.doc).toString()) ?? 'unread';
 }
 
 /** Formatting on the note's selected cell or range of the plugin's table: whether there was one to act on. */
@@ -99,14 +99,22 @@ function formatCells(view: EditorView, editor: object, name: Formatting, args: r
 	if (!found) return false;
 	const { table, own, cell, anchor } = found;
 	const lines = linesOf(view, table);
-	const targets: Target[] = targetsIn(lines, anchor ? cellsIn(boundsOf(anchor, cell)) : [cell]);
+	const targets = targetsIn(lines, anchor ? cellsIn(boundsOf(anchor, cell)) : [cell]);
 	if (!targets.length) return true;
 	const method = methodOf(editor, name);
-	let texts: string[] | null = null;
+	// Obsidian's language for notes, which the plugin's copy is made from: it reads a table's cells as Obsidian's range does.
+	const language = knownLanguages(view).obsidian;
+	let texts: string[] | 'same' | 'unread' | null = null;
 	try {
-		texts = method && formatted(targets.map(({ text }) => text), Object.getPrototypeOf(editor) as object, method, args);
+		texts = method && language && formatted(documentOf(lines, targets), language, Object.getPrototypeOf(editor) as object, method, args);
 	} catch (error) {
 		cantFormat(error);
+		return true;
+	}
+	if (texts === 'same') return true;
+	if (texts === 'unread') {
+		// A cell's text ran on into another's: nothing is written rather than a cell put in the wrong place.
+		console.warn('Selectable Tables: formatting changed the cells in a way that could not be read back');
 		return true;
 	}
 	if (!texts) {
@@ -143,14 +151,15 @@ function takeOver(editor: object): boolean {
 	if (taken.has(editor)) return true;
 	if (!FORMATTING.every((name) => methodOf(editor, name))) return false;
 	for (const name of FORMATTING) {
-		const original = methodOf(editor, name)!;
 		Object.defineProperty(editor, name, {
 			configurable: true,
 			writable: true,
 			value(this: { cm?: unknown }, ...args: unknown[]) {
 				const view = this.cm;
 				if (view instanceof EditorView && handOver(this, view, name, args)) return;
-				return Reflect.apply(original, this, args);
+				// Looked up as it runs, so a change another plugin makes to Obsidian's method later still runs here.
+				const original = methodOf(this, name);
+				return original ? Reflect.apply(original, this, args) : undefined;
 			},
 		});
 	}

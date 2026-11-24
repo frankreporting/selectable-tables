@@ -4,7 +4,7 @@ import { type Cell, onlyDashes, segmentsIn } from '../editor/table-text';
 
 /**
  * The text side of formatting on a selected cell or a range of cells of the plugin's table: which cells Obsidian's
- * formatting acts on, the document it reads their formatting from, and their new text afterwards. Obsidian's own code
+ * formatting acts on, the table it reads their formatting from, and their new text afterwards. Obsidian's own code
  * works the formatting out (formatting.ts); this module only takes the cells out of the table and puts them back.
  */
 
@@ -49,28 +49,73 @@ export interface Range {
 	to: number;
 }
 
-/**
- * The document Obsidian's formatting reads the cells from: each cell's text on a line of its own, with a blank line
- * between, so nothing one cell opens runs on into the next. Also where each cell's text is in it.
- */
-export function documentOf(texts: readonly string[]): { doc: string; ranges: Range[] } {
-	const ranges: Range[] = [];
-	let at = 0;
-	for (const text of texts) {
-		ranges.push({ from: at, to: at + text.length });
-		at += text.length + 2;
-	}
-	return { doc: texts.join('\n\n'), ranges };
+/** The document Obsidian's formatting reads the cells from, where each cell's text is in it, and how to read them back. */
+export interface Stand {
+	doc: string;
+	ranges: Range[];
+	/** The cells' new text, trimmed, from the document after formatting, or null when a row's cells no longer read the same. */
+	textsAfter(doc: string): string[] | null;
 }
 
 /**
- * The cells' new text from that document after formatting, trimmed, or null when the lines between cells didn't stay
- * blank and single: formatting puts in and takes out only its marks, so anything else means a cell's text ran on.
+ * The document Obsidian's formatting reads the cells from: the table cut down to the targets' rows and columns, the
+ * header and delimiter kept, after a blank line, so Obsidian's own Markdown language reads it as a table, as it reads
+ * the cells of its own range. A cell's text at a line's start is then text, as in the note, not a heading, a list or a
+ * quote. A header cell's freeze mark is left out, so nothing formatting does can reach it.
  */
-export function textsIn(doc: string, count: number): string[] | null {
-	const lines = doc.split('\n');
-	if (lines.length !== count * 2 - 1 || lines.some((line, index) => index % 2 === 1 && line !== '')) return null;
-	return lines.filter((_, index) => index % 2 === 0).map((line) => line.trim());
+export function documentOf(lines: readonly string[], targets: readonly Target[]): Stand {
+	const left = Math.min(...targets.map(({ cell }) => cell.column));
+	const right = Math.max(...targets.map(({ cell }) => cell.column));
+	const bottom = Math.max(...targets.map(({ cell }) => cell.row));
+	const top = Math.max(1, Math.min(...targets.map(({ cell }) => cell.row)));
+	const picked = [0, 1];
+	for (let row = top; row <= bottom; row++) picked.push(row + 1);
+	// Each picked line cut to the columns, and where each of its cells is in the cut line.
+	const cut = picked.map((index) => {
+		const line = lines[index] ?? '';
+		const parts = segmentsIn(line)
+			.slice(left, right + 1)
+			.map(({ from, to }) => {
+				const raw = line.slice(from, to);
+				return index === 0 && hasMark(raw) ? ` ${withoutMark(raw)} ` : raw;
+			});
+		const starts: number[] = [];
+		let at = 1;
+		for (const part of parts) {
+			starts.push(at);
+			at += part.length + 1;
+		}
+		return { text: `|${parts.join('|')}|`, parts, starts };
+	});
+	const lineStarts: number[] = [];
+	let at = 1;
+	for (const { text } of cut) {
+		lineStarts.push(at);
+		at += text.length + 1;
+	}
+	// The header is the first line picked, and the rows from `top` come after the delimiter.
+	const placeOf = ({ row, column }: Cell) => ({ k: row === 0 ? 0 : row - top + 2, part: column - left });
+	const ranges = targets.map(({ cell }) => {
+		const { k, part } = placeOf(cell);
+		const raw = cut[k]!.parts[part]!;
+		const from = lineStarts[k]! + cut[k]!.starts[part]! + raw.length - raw.trimStart().length;
+		return { from, to: from + raw.trim().length };
+	});
+	return {
+		doc: `\n${cut.map(({ text }) => text).join('\n')}`,
+		ranges,
+		textsAfter(doc) {
+			const after = doc.split('\n').slice(1);
+			if (after.length !== cut.length) return null;
+			const segments = after.map((line) => segmentsIn(line));
+			if (segments.some((each, k) => each.length !== cut[k]!.parts.length)) return null;
+			return targets.map(({ cell }) => {
+				const { k, part } = placeOf(cell);
+				const { from, to } = segments[k]![part]!;
+				return after[k]!.slice(from, to).trim();
+			});
+		},
+	};
 }
 
 /** A cell's new Markdown, its freeze mark put back before the text. */

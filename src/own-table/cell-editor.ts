@@ -114,7 +114,7 @@ let language: Language | null | undefined;
  * from the global CodeMirror's modes, once, in the main window: piece 5. Without it nothing in the cell is parsed,
  * and Live Preview shows nothing.
  */
-export function cellLanguage(): Language | null {
+function cellLanguage(): Language | null {
 	if (language !== undefined) return language;
 	const modes = (window as unknown as { CodeMirror?: Modes }).CodeMirror;
 	try {

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { Text } from '@codemirror/state';
 import { writtenByObsidian } from '../src/editor/table-text';
 import { writeCells } from '../src/own-table/cell-write';
-import { cellsIn, documentOf, targetsIn, textsIn, withMark } from '../src/own-table/format-cells';
+import { cellsIn, documentOf, targetsIn, withMark } from '../src/own-table/format-cells';
 
 const cell = (row: number, column: number) => ({ row, column });
 
@@ -50,16 +50,27 @@ test('a header cell holding only a freeze mark has nothing to format', () => {
 	assert.deepEqual(targetsIn(['| %%freeze 1 0%% | B |', '| - | - |'], [cell(0, 0)]), []);
 });
 
-test('the cells go on lines of their own with blank lines between, and come back only while those stay blank', () => {
-	const { doc, ranges } = documentOf(['Apricot', '**Pear**', 'a \\| b']);
-	assert.equal(doc, 'Apricot\n\n**Pear**\n\na \\| b');
+test('the cells are read from the table cut down to their rows and columns, the header and delimiter kept', () => {
+	const lines = ['| %%freeze 1 1%% Name | Bed | Notes |', '| --- | :-: | --- |', '| Fern | # shade | - none |', '| Ivy | a \\| b | <br>x |', '| Moss | dry | wet |'];
+	const targets = targetsIn(lines, cellsIn({ top: 0, bottom: 2, left: 0, right: 1 }));
+	const stand = documentOf(lines, targets);
+	// After a blank line, so it reads as a table; the mark is left out of the header, and the third column cut away.
+	assert.equal(stand.doc, '\n| Name | Bed |\n| --- | :-: |\n| Fern | # shade |\n| Ivy | a \\| b |');
 	assert.deepEqual(
-		ranges.map(({ from, to }) => doc.slice(from, to)),
-		['Apricot', '**Pear**', 'a \\| b'],
+		stand.ranges.map(({ from, to }) => stand.doc.slice(from, to)),
+		['Name', 'Bed', 'Fern', '# shade', 'Ivy', 'a \\| b'],
 	);
-	assert.deepEqual(textsIn('**Apricot**\n\nPear\n\n**a \\| b**', 3), ['**Apricot**', 'Pear', '**a \\| b**']);
-	assert.equal(textsIn('**Apricot\n\nPear**', 3), null);
-	assert.equal(textsIn('Apricot\n%%\nPear\n\nx', 3), null);
+	assert.deepEqual(stand.textsAfter('\n| **Name** | Bed |\n| --- | :-: |\n| Fern | **# shade** |\n| *Ivy* | a \\| b |'), ['**Name**', 'Bed', 'Fern', '**# shade**', '*Ivy*', 'a \\| b']);
+	// A row whose cells no longer read the same, or a line more or less, can't be read back.
+	assert.equal(stand.textsAfter('\n| Name | Bed |\n| --- | :-: |\n| Fern | # | shade |\n| Ivy | a \\| b |'), null);
+	assert.equal(stand.textsAfter('\n| Name | Bed |\n| --- | :-: |\n| Fern | # shade |'), null);
+});
+
+test('a range below the header still takes the header and delimiter, and only its own rows', () => {
+	const lines = ['| A | B |', '| - | - |', '| 1 | 2 |', '| 3 | 4 |', '| 5 | 6 |'];
+	const stand = documentOf(lines, targetsIn(lines, cellsIn({ top: 2, bottom: 3, left: 1, right: 1 })));
+	assert.equal(stand.doc, '\n| B |\n| - |\n| 4 |\n| 6 |');
+	assert.deepEqual(stand.textsAfter('\n| B |\n| - |\n| **4** |\n| 6 |'), ['**4**', '6']);
 });
 
 test('in a table Obsidian wrote, a column holding new text is as wide as its longest text and two spaces, its delimiter too', () => {

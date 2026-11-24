@@ -118,9 +118,15 @@ test('the freeze mark stays in its header cell, before what\'s pasted or with no
 	assert.equal(paste(plants, cell(0, 1), [['%%freeze 1 0%% Bed']]).lines?.[0], '| %%freeze 2 1%% Name | Bed   |');
 });
 
-test('pasted text that holds a raw pipe or line break stays inside its cell', () => {
+test('pasted text that holds a raw pipe or line break stays inside its cell, a carriage return alone included', () => {
 	const table = ['| A   | B   |', '| --- | --- |', '| 1   | 2   |'];
 	assert.equal(paste(table, cell(1, 0), [['x | y\nz']]).lines?.[2], '| x \\| y<br>z | 2   |');
+	assert.equal(paste(table, cell(1, 1), [['north\rsouth\r\nwest']]).lines?.[2], '| 1   | north<br>south<br>west |');
+});
+
+test('cells pasted on a row of only dashes, which Obsidian drops, land on the row after it', () => {
+	const dashed = ['| A   | B   |', '| --- | --- |', '| 1   | 2   |', '| --- | --- |', '| 3   | 4   |'];
+	assert.deepEqual(paste(dashed, cell(2, 0), [['x']]).lines, ['| A   | B   |', '| --- | --- |', '| 1   | 2   |', '| x   | 4   |']);
 });
 
 test('a table spaced by hand comes out tidied, as Obsidian writes it', () => {

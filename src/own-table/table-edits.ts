@@ -355,7 +355,9 @@ export function editCells(lines: readonly string[], edit: CellsEdit): Edited | n
 	const columns = alignments.length;
 	if (edit.kind === 'paste') {
 		const column = clamp(edit.at.column, 0, columns - 1);
-		const row = rowOf(edit.at.row);
+		// Onto a row of dashes, the row after it: the row before it isn't the one pasted on.
+		const drawn = clamp(edit.at.row, 0, grid.drawn.length - 1);
+		const row = grid.dropped.has(drawn) ? Math.min(rowOf(drawn) + 1, rows.length) : rowOf(drawn);
 		const right = column + edit.alignment.length - 1;
 		const bottom = row + edit.rows.length - 1;
 		// As 1.15.1 has it: onto the header the pasted columns take the clipboard's alignments, and elsewhere a new column

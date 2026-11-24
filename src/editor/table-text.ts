@@ -235,9 +235,12 @@ export function toCellEditor(source: string): Rewritten {
 	});
 }
 
-/** The reverse, for writing what a cell's editor holds to the note: a pipe not already escaped is `\|`, and a line break `<br>`. */
+/**
+ * The reverse, for writing what a cell's editor holds to the note: a pipe not already escaped is `\|`, and a line break
+ * `<br>`, a carriage return alone included, which CodeMirror takes for a line break too.
+ */
 export function toCellSource(text: string): Rewritten {
-	return rewrite(text, /\r?\n|(\\*)\|/g, (match) => {
+	return rewrite(text, /\r\n?|\n|(\\*)\|/g, (match) => {
 		const at = match.index;
 		if (match[0].endsWith('|')) {
 			const slashes = match[1] ?? '';

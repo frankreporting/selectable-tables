@@ -6,7 +6,7 @@ import { cellSelection } from '../editor/cells';
 import { boundsOf, writesTable } from '../editor/decide';
 import { escapeCell, noteView, wholeTable } from '../editor/extension';
 import { type Place, selectAt, targetIn } from '../editor/freeze-commands';
-import { hasMark, markText, readFreeze } from '../editor/freeze-mark';
+import { hasMark, markText, readFreeze, withoutMark } from '../editor/freeze-mark';
 import { type DrawnTable, openCells, type OwnCell, ownTables } from '../editor/layout';
 import { type Cell, type Span, toCellSource } from '../editor/table-text';
 import { cellPlace, paddingFor, writeCell } from './cell-write';
@@ -189,7 +189,8 @@ function writeOne(view: EditorView, table: Span, own: DrawnTable, cell: Cell, te
 	const { doc } = view.state;
 	const place = cellPlace(doc, table, cell);
 	if (!place) return;
-	let source = toCellSource(text).text;
+	// A freeze mark belongs to its table: one in the text is left out, and the header cell's own stays before it.
+	let source = toCellSource(cell.row === 0 ? withoutMark(text) : text).text;
 	if (cell.row === 0 && hasMark(place.source)) {
 		const mark = markText(readFreeze(place.source));
 		source = source ? `${mark} ${source}` : mark;

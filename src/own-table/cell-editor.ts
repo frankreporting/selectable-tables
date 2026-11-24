@@ -19,6 +19,8 @@ import { inOwnCell } from '../editor/layout';
  * 3. The `activeCM` getter of `editMode` and the `inTableCell` getter of the note's `Editor`, answered for the open cell.
  * 4. `app.workspace.editorSuggest.isShowingSuggestion()`.
  * 5. `window.CodeMirror.getMode`, with the `hypermd` mode and the options of Obsidian's own cell's language.
+ * 6. The base editor's own `editor`, Obsidian's `Editor` over the cell's view, whose formatting methods the note's
+ *    editor hands an open cell's formatting to (formatting.ts). Without it, formatting in a cell acts as before.
  */
 
 /** What the cell needs from its editor. */
@@ -46,6 +48,7 @@ interface Owner {
 /** The base editor's instance, as the cell uses it. */
 interface BaseEditor {
 	cm: EditorView;
+	editor?: object;
 	editorEl: HTMLElement;
 	sourceMode: boolean;
 	set(text: string, clear?: boolean): void;
@@ -111,7 +114,7 @@ let language: Language | null | undefined;
  * from the global CodeMirror's modes, once, in the main window: piece 5. Without it nothing in the cell is parsed,
  * and Live Preview shows nothing.
  */
-function cellLanguage(): Language | null {
+export function cellLanguage(): Language | null {
 	if (language !== undefined) return language;
 	const modes = (window as unknown as { CodeMirror?: Modes }).CodeMirror;
 	try {
@@ -160,6 +163,14 @@ function borrowedClass(Base: BaseClass) {
 	};
 	borrowedClasses.set(Base, Borrowed);
 	return Borrowed;
+}
+
+/** Obsidian's `Editor` of each borrowed cell editor, by its view: piece 6. */
+const formatters = new WeakMap<EditorView, object>();
+
+/** The `Editor` Obsidian's own base editor made for a borrowed cell's editor, or null for a plain one. */
+export function cellFormatter(view: EditorView): object | null {
+	return formatters.get(view) ?? null;
 }
 
 /** The open cell's editor, by the edit mode it answers for: commands that ask the note's editor get it. */
@@ -231,10 +242,12 @@ function makeBorrowed(app: App, owner: MarkdownView, holder: HTMLElement, text: 
 	}
 	const view = editor.cm;
 	answerFor(editMode, view);
+	if (editor.editor) formatters.set(view, editor.editor);
 	return {
 		view,
 		borrowed: true,
 		destroy() {
+			formatters.delete(view);
 			stopAnswering(editMode, view);
 			editor.unload();
 			editor.destroy();

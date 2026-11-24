@@ -99,7 +99,7 @@ export interface Change {
 }
 
 /** Only the characters that differ between `before` and `after`, at `at` in the note, or null for none. */
-function difference(before: string, after: string, at: number): Change | null {
+export function difference(before: string, after: string, at: number): Change | null {
 	if (before === after) return null;
 	let start = 0;
 	while (start < before.length && start < after.length && before[start] === after[start]) start++;
@@ -118,6 +118,24 @@ export interface Written {
 const leadOf = (text: string) => text.length - text.trimStart().length;
 
 /**
+ * A cell's new text between its pipes, in a table spaced by hand: the spaces before it kept, and those after it taking up
+ * what the text gained or lost, so the pipes stay where they were while it fits; at the start instead, aligned right.
+ * Also how many spaces come before it.
+ */
+function respaced(old: string, text: string, align: Alignment): { next: string; before: number } {
+	const trimmed = old.trim();
+	const lead = trimmed ? leadOf(old) : Math.min(1, old.length);
+	const trail = old.length - lead - trimmed.length;
+	const right = align === 'right';
+	const room = old.length - text.length;
+	// A backslash at the text's end would escape the pipe after it, and the row would lose a cell: a space keeps it apart.
+	const apart = /(^|[^\\])(\\\\)*\\$/.test(text) ? 1 : 0;
+	const before = right ? Math.max(lead ? 1 : 0, room - trail) : lead;
+	const after = Math.max(apart, right ? trail : Math.max(trail ? 1 : 0, room - lead));
+	return { next: ' '.repeat(before) + text + ' '.repeat(after), before };
+}
+
+/**
  * The changes that make a cell's Markdown `text`, as typed, untrimmed. A table Obsidian wrote is padded as Obsidian
  * pads it: the column is as wide as its longest text and two spaces, and when that changes, every row's cell in it and
  * the delimiter row are padded again. Otherwise only the cell changes, keeping its pipes where they were while the
@@ -130,16 +148,7 @@ export function writeCell(doc: Text, table: Span, cell: Cell, text: string, padd
 	if (!segment) return appendCell(doc, table, cell, text, padding, place);
 	const old = line.text.slice(segment.from, segment.to);
 	if (!padding.obsidian) {
-		const trimmed = old.trim();
-		const lead = trimmed ? leadOf(old) : Math.min(1, old.length);
-		const trail = old.length - lead - trimmed.length;
-		const right = padding.align === 'right';
-		const room = old.length - text.length;
-		// A backslash at the text's end would escape the pipe after it, and the row would lose a cell: a space keeps it apart.
-		const apart = /(^|[^\\])(\\\\)*\\$/.test(text) ? 1 : 0;
-		const before = right ? Math.max(lead ? 1 : 0, room - trail) : lead;
-		const after = Math.max(apart, right ? trail : Math.max(trail ? 1 : 0, room - lead));
-		const next = ' '.repeat(before) + text + ' '.repeat(after);
+		const { next, before } = respaced(old, text, padding.align);
 		const change = difference(old, next, line.from + segment.from);
 		return { changes: change ? [change] : [], from: line.from + segment.from + before, padding };
 	}
@@ -222,4 +231,80 @@ function appendCell(doc: Text, table: Span, { column }: Cell, text: string, padd
 		if (closed) insert += '|';
 	}
 	return { changes: [{ from: line.from + row.length, to: line.from + row.length, insert }], from, padding };
+}
+
+/** A cell's new Markdown, trimmed. */
+export interface CellText {
+	cell: Cell;
+	text: string;
+}
+
+/**
+ * A table's lines with several cells' new Markdown, written as an open cell writes each (`writeCell`), all at once: a
+ * table Obsidian wrote (`obsidian`) has each column holding a new text as wide as its longest text and two spaces, and
+ * when that changes, every row's cell in it and the delimiter row padded again; any other table keeps its spacing,
+ * and only the cells change. Rows are as the plugin's table draws them, the header being 0. A cell a row lacks is
+ * left out: only empty cells are missing, and no write here empties one.
+ */
+export function writeCells(lines: readonly string[], texts: readonly CellText[], obsidian: boolean): string[] {
+	const next = [...lines];
+	const lineOf = (row: number) => (row === 0 ? 0 : row + 1);
+	const byLine = new Map<number, Map<number, string>>();
+	for (const { cell, text } of texts) {
+		const index = lineOf(cell.row);
+		if (index >= lines.length || index === 1) continue;
+		let cells = byLine.get(index);
+		if (!cells) byLine.set(index, (cells = new Map<number, string>()));
+		cells.set(cell.column, text);
+	}
+	const aligns = segmentsIn(lines[1] ?? '').map(({ from, to }) => alignmentOf(lines[1]!.slice(from, to)));
+	/** A line with some of its cells' padded text replaced, last first, so the places of those before stay. */
+	const replaced = (line: string, cells: Map<number, (old: string) => string>) => {
+		const segments = segmentsIn(line);
+		let out = line;
+		for (let column = segments.length - 1; column >= 0; column--) {
+			const write = cells.get(column);
+			const { from, to } = segments[column]!;
+			if (write) out = out.slice(0, from) + write(out.slice(from, to)) + out.slice(to);
+		}
+		return out;
+	};
+	if (!obsidian) {
+		for (const [index, cells] of byLine) {
+			const writes = new Map([...cells].map(([column, text]) => [column, (old: string) => respaced(old, text, aligns[column] ?? null).next] as const));
+			next[index] = replaced(lines[index]!, writes);
+		}
+		return next;
+	}
+	// Each column holding a new text: its width from every row's text, the new ones included.
+	const header = segmentsIn(lines[0] ?? '');
+	const widths = new Map<number, number>();
+	for (const cells of byLine.values()) for (const column of cells.keys()) widths.set(column, MIN_COLUMN_WIDTH);
+	lines.forEach((line, index) => {
+		if (index === 1) return;
+		const segments = segmentsIn(line);
+		for (const [column, width] of widths) {
+			const segment = segments[column];
+			const text = byLine.get(index)?.get(column) ?? (segment ? line.slice(segment.from, segment.to).trim() : '');
+			widths.set(column, Math.max(width, text.length + CELL_PADDING));
+		}
+	});
+	const widened = [...widths].filter(([column, width]) => width !== (header[column] ? header[column].to - header[column].from : width));
+	lines.forEach((line, index) => {
+		const writes = new Map<number, (old: string) => string>();
+		if (index === 1) {
+			if (!widened.length) return;
+			// The delimiter row written again, as Obsidian writes it once a column's width changes: from the header's widths.
+			const all = header.map(({ from, to }, column) => widths.get(column) ?? to - from);
+			next[1] = `|${all.map((width, column) => delimiter(width, aligns[column] ?? null)).join('|')}|`;
+			return;
+		}
+		for (const [column, width] of widths) {
+			const text = byLine.get(index)?.get(column);
+			const changed = widened.some(([each]) => each === column);
+			if (text !== undefined || changed) writes.set(column, (old) => padded(text ?? old.trim(), width, aligns[column] ?? null));
+		}
+		if (writes.size) next[index] = replaced(line, writes);
+	});
+	return next;
 }

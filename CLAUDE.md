@@ -14,7 +14,7 @@ An Obsidian plugin (`selectable-tables`) that makes a Live Preview table one blo
 
 ## What the plugin relies on in Obsidian
 
-These are Obsidian behaviors, not calls, so any Obsidian update can change them. `scripts/obsidian-check.js` tests them first; run it after each Obsidian update (its header says how).
+These are Obsidian behaviors, not calls, so any Obsidian update can change them. `scripts/obsidian-check.js` tests them first; run it after each Obsidian update. Run it through `node scripts/run-check.mjs` (`--only <section>` for one section, `--install` to build and copy a preview in first): it sets the test vault up as the checks expect and says what it fixed, watches the run, stops with the last check's name if the run stalls, always ends with the results or why there are none, and puts back what it changed. Its header lists what it fixes. Wait on it, not on the results file.
 
 1. A rendered table is one block widget in the editor, carrying the class `cm-table-widget`.
 2. A caret inside a table's text opens a cell; a selection over the whole table opens none.

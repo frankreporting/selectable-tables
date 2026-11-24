@@ -11,11 +11,23 @@
 (async () => {
 	const app = window.app;
 	const results = [];
+	// Progress for scripts/run-check.mjs, which watches the run: how many results, the last one, and when.
+	const progress = (last) => {
+		window.__checkProgress = { running: true, count: results.length, last, at: Date.now() };
+	};
+	const record = results.push.bind(results);
+	results.push = (...items) => {
+		const count = record(...items);
+		progress(items[items.length - 1]?.name);
+		return count;
+	};
+	progress('started');
 	const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 	const settle = () => sleep(120);
 	const check = (name, ok, detail) => results.push({ name, ok: !!ok, detail: ok ? undefined : detail });
 
 	async function open(name) {
+		progress(`opening ${name}`);
 		const file = app.vault.getAbstractFileByPath(`${name}.md`);
 		const leaf = app.workspace.getLeaf(false);
 		await leaf.openFile(file, { state: { mode: 'source', source: false } });
@@ -9129,6 +9141,7 @@
 	const summary = { obsidian: version, passed: results.length - failed.length, failed: failed.length, results };
 	const path = window.require('path').join(app.vault.adapter.basePath, '..', 'check-results.json');
 	window.require('fs').writeFileSync(path, JSON.stringify(summary, null, '\t'));
+	window.__checkProgress = { running: false, count: results.length, last: 'done', at: Date.now() };
 	console.log(`Selectable Tables check: ${summary.passed} passed, ${summary.failed} failed. Results in ${path}`);
 	return `${summary.passed} passed, ${summary.failed} failed`;
 })();

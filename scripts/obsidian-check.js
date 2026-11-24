@@ -3519,8 +3519,8 @@
 					await press(view, 'Escape');
 					check('Own 38: Enter on a selected cell opens it, Escape selects it again, Escape goes back to the table, Enter to the same cell, and Escape twice to the line above', enterOpens && backToCell && backToTable && sameCell && sel(view).line === aboveSeed, { enterOpens, backToCell, backToTable, sameCell, line: sel(view).line });
 
-					// Copy gives the cell's Markdown; Toggle checkbox and Toggle comment change nothing; typing goes below. Cut and Paste
-					// act on the cell: Own 134 on.
+					// Copy gives the cell's Markdown; Toggle checkbox changes nothing; typing goes below. Cut and Paste act on the cell
+					// (Own 134 on), and so do Toggle comment and the other formatting commands (Own 146 on).
 					await caretOnLine(view, aboveSeed);
 					await press(view, 'ArrowDown');
 					await press(view, 'Enter');
@@ -3528,9 +3528,15 @@
 					await press(view, 'ArrowRight');
 					await press(view, 'ArrowRight');
 					const copied = clipboard(view, 'copy');
-					for (const id of ['editor:toggle-checklist-status', 'editor:toggle-comments']) app.commands.executeCommandById(id);
+					app.commands.executeCommandById('editor:toggle-checklist-status');
 					await settle();
-					check('Own 39: on a selected cell, Copy gives its Markdown, and Toggle checkbox and Toggle comment change nothing', copied.text === '**Keep damp**' && view.state.doc.toString() === cellsText && cellOf(view) === '1,2', { copied, cell: cellOf(view) });
+					const checkboxQuiet = view.state.doc.toString() === cellsText;
+					app.commands.executeCommandById('editor:toggle-comments');
+					await settle();
+					const commented = view.state.doc.toString().includes('%%**Keep damp**%%');
+					await press(view, 'z', { metaKey: true, code: 'KeyZ' });
+					await settle();
+					check('Own 39: on a selected cell, Copy gives its Markdown, Toggle checkbox changes nothing, and Toggle comment comments the cell, which Undo takes back', copied.text === '**Keep damp**' && checkboxQuiet && commented && view.state.doc.toString() === cellsText && cellOf(view) === '1,2', { copied, checkboxQuiet, commented, cell: cellOf(view) });
 					await realType('q');
 					const below = view.state.doc.toString();
 					const belowOk = below.slice(0, seed.to) === cellsText.slice(0, seed.to) && /^\n\nq\n/.test(below.slice(seed.to));
@@ -7310,9 +7316,13 @@
 						await key('ArrowRight', shift);
 						await key('ArrowDown', shift);
 						await key('b', { meta: true });
-						const still = { text: view.state.doc.toString() === text, at: where(view), drawn: rangeDrawn(view, model).ok };
+						const bolded = view.state.doc.toString();
+						const still = { bolded: bolded !== text && bolded.split('**').length > text.split('**').length, at: where(view), drawn: rangeDrawn(view, model).ok };
+						await key('z', { meta: true });
+						await sleep(200);
+						still.undone = view.state.doc.toString() === text;
 						check('Own 115: typing on a range starts a paragraph below the table, and Undo takes it back', typed.table && typed.paragraph && undone, { typed, undone });
-						check('Own 115: Bold changes nothing on a range, and it stays', still.text && still.at === '2,1 from 1,0' && still.drawn, still);
+						check('Own 115: Bold acts on a range\'s cells (checked in full from Own 146 on), Undo takes it back, and the range stays', still.bolded && still.at === '2,1 from 1,0' && still.drawn && still.undone && where(view) === '2,1 from 1,0', still);
 						await realClick(model.cellElement({ row: 3, column: 1 }));
 						await sleep(200);
 						const clicked = { open: preview.openCell(view)?.cell, drawn: rangeDrawn(view, model) };

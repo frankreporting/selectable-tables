@@ -7904,6 +7904,63 @@
 						results.push({ name: 'Own 131 a drag\'s own work per pointer move (ms)', ok: true, detail: perMove });
 						check('Own 131: a pointer move during a drag across cells costs at most 1 ms of the plugin\'s work, on Table 50 by 8 and Table 2000 by 12', Object.values(perMove).every((ms) => ms !== null && ms <= 1), perMove);
 
+						// Own 133: a click on a cell cut off at the pane's bottom, beside a status bar floating over the bottom of the
+						// table's box: the cell clicked opens, and no range starts. The point a drag looks at is kept above the bar, a row
+						// higher here. The bar is narrowed for the check, so it covers only the table's right end.
+						view = await open('Table 2000 by 12');
+						await sleep(1500);
+						const low = models(view)[0];
+						await scrollToTable(view, low, 200);
+						// Back to the table's start sideways: the drags before may have slid it.
+						low.scrollSideways(-low.sideways().scroll);
+						await sleep(300);
+						await frames(3);
+						const statusBar = document.querySelector('.status-bar');
+						const statusStyle = statusBar?.getAttribute('style') ?? null;
+						let beside = null;
+						try {
+							const lowBox = low.sidewaysBox();
+							if (statusBar && lowBox) {
+								statusBar.style.width = '160px';
+								statusBar.style.right = `${Math.max(0, window.innerWidth - lowBox.right + 20)}px`;
+								await frames(2);
+								const barTop = statusBar.getBoundingClientRect().top;
+								// The first drawn row starting at the bar's top or below it, moved to 6 px under the bar's top, pressed in its
+								// first column, whose text holds no link.
+								const rowNear = () => {
+									for (let r = 1; r < low.grid.rows; r++) {
+										const el = low.cellElement({ row: r, column: 0 });
+										if (el?.isConnected && el.getBoundingClientRect().top >= barTop - 40) return { r, el };
+									}
+									return null;
+								};
+								for (let i = 0; i < 3; i++) {
+									const near = rowNear();
+									if (!near) break;
+									view.scrollDOM.scrollTop += near.el.getBoundingClientRect().top - (barTop + 6);
+									await sleep(300);
+									await frames(3);
+								}
+								const near = rowNear();
+								const r = near?.el.getBoundingClientRect();
+								const paneBottom = view.scrollDOM.getBoundingClientRect().bottom;
+								const point = r && { x: r.left + r.width / 2, y: Math.min(r.top + 8, paneBottom - 2) };
+								const ok = !!point && point.y > barTop && point.x > lowBox.left && point.x < statusBar.getBoundingClientRect().left;
+								const hits = [];
+								const hit = (event) => hits.push(`${event.type} ${event.target?.tagName}.${String(event.target?.className).slice(0, 30)}`);
+								for (const type of ['pointerdown', 'click']) window.addEventListener(type, hit, true);
+								const under = document.elementFromPoint(point?.x ?? 0, point?.y ?? 0);
+								if (ok) await click(point);
+								for (const type of ['pointerdown', 'click']) window.removeEventListener(type, hit, true);
+								beside = { ok, row: near?.r, rowTop: r?.top, barTop, paneBottom, point, under: under && `${under.tagName}.${under.className}`, hits, popovers: document.querySelectorAll('.popover').length, at: where(view), open: opened(view), drawn: rangeDrawn(view, low) };
+							}
+						} finally {
+							if (statusStyle === null) statusBar?.removeAttribute('style');
+							else statusBar?.setAttribute('style', statusStyle);
+						}
+						check('Own 133: a click on a cell cut off at the pane\'s bottom, beside a status bar over the table\'s box, opens that cell and starts no range', !!beside?.ok && beside.open === `${beside.row},0` && !beside.at.includes('from') && beside.drawn.inRange === 0, beside);
+						await leaveAll(view);
+
 						view = await open('Frozen tables');
 						await sleep(300);
 						check('Own 132: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });

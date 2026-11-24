@@ -226,13 +226,18 @@ class CellDrag {
 	}
 
 	/**
-	 * The cell drawn at a point: the cell there, a pinned copy's being its real cell; else, in the space between cells or over
-	 * a row not drawn yet, the row and column the point is in, as laid out. On what pins, a point between its cells keeps the
-	 * cell already reached, since the rows passing under aren't what shows there.
+	 * The cell drawn at a point, `x`, `y` being the pointer kept within the table's part on the screen: the cell right under
+	 * the pointer, where one of the table's is drawn, or else the one at the point kept within, a pinned copy's being its real
+	 * cell; else, in the space between cells or over a row not drawn yet, the row and column the point is in, as laid out. On
+	 * what pins, a point between its cells keeps the cell already reached, since the rows passing under aren't what shows
+	 * there. The pointer comes first because the point kept within can be a row off: beside a status bar floating over the
+	 * pane's bottom, it's kept above the bar across the whole table, and a click on a row cut off there would reach the row
+	 * above it.
 	 */
 	private cellAt(area: DragArea, x: number, y: number): Cell | null {
 		const { table } = this;
-		const drawn = table.cellAtPoint(x, y);
+		const moved = x !== this.x || y !== this.y;
+		const drawn = (moved ? table.cellAtPoint(this.x, this.y) : null) ?? table.cellAtPoint(x, y);
 		if (drawn) return within(table.grid, drawn);
 		if (overPinned(area, x, y)) return null;
 		const columns = table.columnLayout();

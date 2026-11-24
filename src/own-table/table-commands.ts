@@ -9,7 +9,7 @@ import { type Place, selectAt, targetIn } from '../editor/freeze-commands';
 import { hasMark, markText, readFreeze, withoutMark } from '../editor/freeze-mark';
 import { type DrawnTable, openCells, type OwnCell, ownTables } from '../editor/layout';
 import { type Cell, type Span, toCellSource } from '../editor/table-text';
-import { cellPlace, paddingFor, writeCell } from './cell-write';
+import { cellPlace, difference, paddingFor, writeCell } from './cell-write';
 import { ADDS, editCells, type Edited, editTable, type LineChange, lineChanges, readTableData, shownText, type TableEdit } from './table-edits';
 
 /**
@@ -117,7 +117,7 @@ function editAt(view: EditorView, table: Span, cell: Cell, edit: TableEdit, end:
 }
 
 /** A table's lines in the note. */
-function linesOf(view: EditorView, table: Span): string[] {
+export function linesOf(view: EditorView, table: Span): string[] {
 	const { doc } = view.state;
 	const lines: string[] = [];
 	for (let n = doc.lineAt(table.from).number; n <= doc.lineAt(table.to).number; n++) lines.push(doc.line(n).text);
@@ -129,6 +129,8 @@ interface Commit {
 	opens: boolean;
 	column?: number;
 	kind: 'rows' | 'cells';
+	/** Where a range of cells that stays selected starts, its cell moved to last being the edit's cell. */
+	anchor?: Cell | null;
 }
 
 /** Writes an edit's lines to the note, only where they differ, or takes the table away when it leaves none. */
@@ -158,7 +160,8 @@ function write(view: EditorView, table: Span, own: DrawnTable, changes: readonly
 	const now = changes.length ? ownTable(view, { from: table.from, to }) : own;
 	const finish = () => {
 		const cells = view.plugin(cellSelection);
-		cells?.select(at);
+		if (end.anchor) cells?.selectRange(end.anchor, at, undefined, false);
+		else cells?.select(at);
 		if (!end.opens) return;
 		cells?.opening();
 		now?.openCell(at);
@@ -172,7 +175,7 @@ function write(view: EditorView, table: Span, own: DrawnTable, changes: readonly
 // A selected cell or a range of cells: Backspace, Delete, Cut and Paste --------------------------------------------------
 
 /** The note's selected cell of the plugin's table, with the range it ends, if any, and the table. */
-function selectedCells(view: EditorView): { table: Span; own: DrawnTable; cell: Cell; anchor: Cell | null } | null {
+export function selectedCells(view: EditorView): { table: Span; own: DrawnTable; cell: Cell; anchor: Cell | null } | null {
 	const cells = view.plugin(cellSelection);
 	const found = targetIn(view);
 	const own = found && !found.open ? ownTable(view, found.table) : null;
@@ -199,6 +202,26 @@ function writeOne(view: EditorView, table: Span, own: DrawnTable, cell: Cell, te
 	if (!written) return;
 	const to = ChangeSet.of(written.changes, doc.length).mapPos(table.to, 1);
 	write(view, table, own, written.changes, to, cell, { opens: false, kind: 'cells' });
+}
+
+/**
+ * Gives a table new lines, as many as before, changing only the characters that differ on each line, so the note stays
+ * still and a caret elsewhere stays where it was: formatting on a selected cell or a range of cells. The cell, and the
+ * range it ends, stay selected.
+ */
+export function writeLines(view: EditorView, table: Span, own: DrawnTable, lines: readonly string[], cell: Cell, anchor: Cell | null): void {
+	const { doc } = view.state;
+	const first = doc.lineAt(table.from).number;
+	const changes: LineChange[] = [];
+	let shift = 0;
+	lines.forEach((text, index) => {
+		const line = doc.line(first + index);
+		const change = difference(line.text, text, line.from);
+		if (!change) return;
+		changes.push(change);
+		shift += change.insert.length - (change.to - change.from);
+	});
+	write(view, table, own, changes, table.to + shift, cell, { opens: false, kind: 'cells', anchor });
 }
 
 /**

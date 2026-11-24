@@ -115,11 +115,11 @@ What's planned, broadly. The order and the details may change.
 - **Edit from a selected cell:** Backspace, Delete, Cut and Paste act on the cell, with nothing to open first.
 - **Move rows and columns** from a selected cell, without opening the cells for edit.
 - **Select a range of cells** with Shift and the arrows.
+- **Format a selected cell or a range:** Bold, italic and the other formatting commands act on the cells' text, and take formatting off again.
 
 **Still being worked out:**
 
 - The arrow keys stay in the table while a cell is open, until Escape. Currently you can move through cells freely once you're in "edit mode," and there's nothing stopping you from arrowing out of the table and then having to re-select the table and hit `Enter` again to get back in. 
-- Bold, italic and other formatting act on a selected cell.
 - Vim's j and k pass a table in one press, like the arrows.
 - A search result in a table selects its cell instead of opening it.
 - ← and → swap around a table in right-to-left text.

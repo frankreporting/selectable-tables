@@ -2,12 +2,13 @@ import type { Extension } from '@codemirror/state';
 import { Notice, type Plugin } from 'obsidian';
 import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
-import { forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
+import { cellFormatter, forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
 import { addAtEnd, addRowFrom, clearCells, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
 import { startDrag } from './own-table/drag';
 import { pressCell, selectEvery } from './own-table/cell-drag';
 import { setTableControls } from './own-table/grips';
+import { formattingOnCells, giveBackAll } from './own-table/formatting';
 
 /** Set on the body by the preview's stylesheet, src/own-table/styles.css. */
 const STYLED = '--selectable-tables-styled';
@@ -44,8 +45,8 @@ interface Saved {
  * switch on, the plugin's own table takes the place of Obsidian's, and the keys run on it. Its frozen rows and columns
  * pin on a computer (pins.ts), and the freeze commands and the freeze items in the right-click menu act on it too, as
  * do Obsidian's Row, Column and Sort items and its table commands, rebuilt for it (table-commands.ts), its drag
- * handles and + buttons (grips.ts, drag.ts), its range of cells, dragged across (cell-drag.ts), and Backspace, Delete,
- * Cut and Paste on a selected cell or a range (table-commands.ts).
+ * handles and + buttons (grips.ts, drag.ts), its range of cells, dragged across (cell-drag.ts), Backspace, Delete,
+ * Cut and Paste on a selected cell or a range (table-commands.ts), and formatting on them (formatting.ts).
  * The setting is saved with the plugin's data, which Sync can carry to other devices.
  */
 export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {
@@ -88,11 +89,14 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	for (const command of tableCommands()) plugin.addCommand(command);
 	// The note's editors answer for an open cell while it's open; their own answers come back as the plugin unloads.
 	plugin.register(stopAnsweringAll);
+	// Formatting on the plugin's table: each note's editor hands it to the selected cells or the open cell's own editor
+	// while the plugin draws its tables, and has its own back as the plugin unloads.
+	plugin.register(giveBackAll);
 	const use = (drawing: boolean) => {
 		on = drawing;
 		extensions.length = 0;
 		// The freeze items in a table's right-click menu stay, on the plugin's table's cells and its pinned copies.
-		extensions.push(...(drawing ? [own.extension, keys, tableMenus] : usual));
+		extensions.push(...(drawing ? [own.extension, keys, tableMenus, formattingOnCells] : usual));
 		app.workspace.updateOptions();
 	};
 
@@ -124,6 +128,6 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 		},
 	});
 	// For the check script and timing runs, on the plugin: whether the switch is on, and the tables' insides.
-	Object.assign(plugin, { preview: { isOn: () => on, use, ...own.debug } });
+	Object.assign(plugin, { preview: { isOn: () => on, use, cellFormatter, ...own.debug } });
 	if (saved.ownTables) whenStyled(plugin, () => use(true));
 }

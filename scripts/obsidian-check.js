@@ -2615,8 +2615,9 @@
 		// window.__checkDragsOnly instead, only the section on its drag handles and + buttons, with
 		// window.__checkShadesOnly instead, only the section on its frozen tables' shadows, with
 		// window.__checkRangesOnly instead, only the section on its ranges of cells, with
-		// window.__checkCellDragsOnly instead, only the section on dragging across its cells, and with
-		// window.__checkCellEditsOnly instead, only the section on clearing, cutting and pasting its cells.
+		// window.__checkCellDragsOnly instead, only the section on dragging across its cells, with
+		// window.__checkCellEditsOnly instead, only the section on clearing, cutting and pasting its cells, and with
+		// window.__checkFormattingOnly instead, only the section on formatting its cells.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3518,8 +3519,8 @@
 					await press(view, 'Escape');
 					check('Own 38: Enter on a selected cell opens it, Escape selects it again, Escape goes back to the table, Enter to the same cell, and Escape twice to the line above', enterOpens && backToCell && backToTable && sameCell && sel(view).line === aboveSeed, { enterOpens, backToCell, backToTable, sameCell, line: sel(view).line });
 
-					// Copy gives the cell's Markdown; Toggle checkbox and Toggle comment change nothing; typing goes below. Cut and Paste
-					// act on the cell: Own 134 on.
+					// Copy gives the cell's Markdown; Toggle checkbox changes nothing; typing goes below. Cut and Paste act on the cell
+					// (Own 134 on), and so do Toggle comment and the other formatting commands (Own 146 on).
 					await caretOnLine(view, aboveSeed);
 					await press(view, 'ArrowDown');
 					await press(view, 'Enter');
@@ -3527,9 +3528,15 @@
 					await press(view, 'ArrowRight');
 					await press(view, 'ArrowRight');
 					const copied = clipboard(view, 'copy');
-					for (const id of ['editor:toggle-checklist-status', 'editor:toggle-comments']) app.commands.executeCommandById(id);
+					app.commands.executeCommandById('editor:toggle-checklist-status');
 					await settle();
-					check('Own 39: on a selected cell, Copy gives its Markdown, and Toggle checkbox and Toggle comment change nothing', copied.text === '**Keep damp**' && view.state.doc.toString() === cellsText && cellOf(view) === '1,2', { copied, cell: cellOf(view) });
+					const checkboxQuiet = view.state.doc.toString() === cellsText;
+					app.commands.executeCommandById('editor:toggle-comments');
+					await settle();
+					const commented = view.state.doc.toString().includes('%%**Keep damp**%%');
+					await press(view, 'z', { metaKey: true, code: 'KeyZ' });
+					await settle();
+					check('Own 39: on a selected cell, Copy gives its Markdown, Toggle checkbox changes nothing, and Toggle comment comments the cell, which Undo takes back', copied.text === '**Keep damp**' && checkboxQuiet && commented && view.state.doc.toString() === cellsText && cellOf(view) === '1,2', { copied, checkboxQuiet, commented, cell: cellOf(view) });
 					await realType('q');
 					const below = view.state.doc.toString();
 					const belowOk = below.slice(0, seed.to) === cellsText.slice(0, seed.to) && /^\n\nq\n/.test(below.slice(seed.to));
@@ -3752,7 +3759,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -7309,9 +7316,13 @@
 						await key('ArrowRight', shift);
 						await key('ArrowDown', shift);
 						await key('b', { meta: true });
-						const still = { text: view.state.doc.toString() === text, at: where(view), drawn: rangeDrawn(view, model).ok };
+						const bolded = view.state.doc.toString();
+						const still = { bolded: bolded !== text && bolded.split('**').length > text.split('**').length, at: where(view), drawn: rangeDrawn(view, model).ok };
+						await key('z', { meta: true });
+						await sleep(200);
+						still.undone = view.state.doc.toString() === text;
 						check('Own 115: typing on a range starts a paragraph below the table, and Undo takes it back', typed.table && typed.paragraph && undone, { typed, undone });
-						check('Own 115: Bold changes nothing on a range, and it stays', still.text && still.at === '2,1 from 1,0' && still.drawn, still);
+						check('Own 115: Bold acts on a range\'s cells (checked in full from Own 146 on), Undo takes it back, and the range stays', still.bolded && still.at === '2,1 from 1,0' && still.drawn && still.undone && where(view) === '2,1 from 1,0', still);
 						await realClick(model.cellElement({ row: 3, column: 1 }));
 						await sleep(200);
 						const clicked = { open: preview.openCell(view)?.cell, drawn: rangeDrawn(view, model) };
@@ -8633,6 +8644,450 @@
 							const file = app.vault.getAbstractFileByPath(`${name}.md`);
 							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
 						}
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkFormattingOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly) {
+					// --- Formatting on a selected cell or a range of cells of the plugin's table, and in its open cell (STA-16): Bold,
+					// Italic and the rest act on the cells' text, add and take off as Obsidian's own range does, keep a table Obsidian
+					// wrote lined up and a freeze mark where it is, and the line commands still leave a selected cell alone. Each is
+					// compared with Obsidian's own range doing the same with the switch off. Real keys and presses through the window's
+					// debugger, and the palette's commands through `executeCommandById`. Run alone with window.__checkOwnOnly,
+					// __checkCellsOnly and __checkFormattingOnly all true.
+					preview.use(true);
+					await sleep(400);
+					const touched = ['Table controls', 'Frozen tables', 'Table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const putBack = async () => {
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+					};
+					const codes = { Escape: 27, Enter: 13, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Backspace: 8, Delete: 46 };
+					const modifiers = (o) => (o.meta ? 4 : 0) | (o.shift ? 8 : 0);
+					const key = async (name, o = {}) => {
+						const text = name.length === 1 && !o.meta ? name : '';
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: codes[name] ?? name.toUpperCase().charCodeAt(0), modifiers: modifiers(o), unmodifiedText: macChar(name), text };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await sleep(o.wait ?? 160);
+					};
+					const shift = { shift: true };
+					const meta = { meta: true };
+					const round = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+					const mouse = (type, p, o = {}) => cdp.sendCommand('Input.dispatchMouseEvent', { type, ...round(p), button: type === 'mouseMoved' && !o.held ? 'none' : 'left', buttons: type === 'mouseReleased' || (type === 'mouseMoved' && !o.held) ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1, modifiers: 0 });
+					const press = async (p) => {
+						await mouse('mouseMoved', p);
+						await mouse('mousePressed', p);
+						await frames(2);
+					};
+					const release = async (p) => {
+						await mouse('mouseReleased', p);
+						await sleep(350);
+						await frames(2);
+					};
+					const glide = async (from, to) => {
+						for (let i = 1; i <= 6; i++) {
+							await mouse('mouseMoved', { x: from.x + ((to.x - from.x) * i) / 6, y: from.y + ((to.y - from.y) * i) / 6 }, { held: true });
+							await frames(1);
+						}
+						await frames(2);
+					};
+					const click = async (p) => {
+						await press(p);
+						await release(p);
+					};
+					const inCell = (el) => {
+						const r = el.getBoundingClientRect();
+						return { x: r.left + 5, y: r.top + r.height / 2 };
+					};
+					const where = (view) => {
+						const cells = preview.cells(view) ?? {};
+						return `${cells.selected ? `${cells.selected.row},${cells.selected.column}` : '-'}${cells.anchor ? ` from ${cells.anchor.row},${cells.anchor.column}` : ''}`;
+					};
+					const opened = (view) => {
+						const open = preview.openCell(view);
+						return open ? `${open.cell.row},${open.cell.column}` : null;
+					};
+					const under = (view, heading, nth = 0) => {
+						const text = view.state.doc.toString();
+						const start = heading ? text.indexOf(`## ${heading}`) : 0;
+						const next = heading ? text.indexOf('\n## ', start + 1) : -1;
+						return models(view).filter((model) => model.from > start && (next < 0 || model.from < next))[nth] ?? null;
+					};
+					const cellsOf = (markdown) => markdown.split('\n').filter((line, i) => i !== 1).map((line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((cell) => cell.trim()));
+					// A table's text under a heading, the plugin's or Obsidian's: from the heading's table to the line before a blank.
+					const tableAt = (view, heading) => {
+						const text = view.state.doc.toString();
+						const start = text.indexOf('\n|', heading ? text.indexOf(`## ${heading}`) : 0) + 1;
+						const end = text.indexOf('\n\n', start);
+						return text.slice(start, end < 0 ? text.length : end);
+					};
+					const cellsAt = (view, heading) => cellsOf(tableAt(view, heading));
+					const column = (view, heading, at, from, to) => cellsAt(view, heading).slice(from, to + 1).map((row) => row[at]);
+					const scrollTo = async (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'start' }) });
+						await sleep(400);
+						await frames(3);
+					};
+					const selectCell = async (view, model, row, col) => {
+						const td = model.cellElement({ row, column: col });
+						if (!td) return false;
+						await click(inCell(td));
+						await key('Escape');
+						return where(view) === `${row},${col}`;
+					};
+					const leave = async (view) => {
+						for (let i = 0; i < 3; i++) await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					const undo = () => key('z', meta);
+					const redo = () => key('z', { meta: true, shift: true });
+					const run = async (id) => {
+						app.commands.executeCommandById(`editor:${id}`);
+						await sleep(250);
+						await frames(2);
+					};
+					const obsidianCell = (view, heading, row, col, nth = 0) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						const widgets = Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget')).filter((el) => view.posAtDOM(el) > at);
+						return widgets[nth]?.querySelector('table')?.rows[row]?.cells[col] ?? null;
+					};
+					const obsidianRange = async (view, heading, from, to, nth = 0) => {
+						const a = obsidianCell(view, heading, from[0], from[1], nth);
+						const b = obsidianCell(view, heading, to[0], to[1], nth);
+						if (!a || !b) return false;
+						const p = inCell(a);
+						const q = inCell(b);
+						await press(p);
+						await glide(p, q);
+						await release(q);
+						return view.contentDOM.querySelectorAll('.cm-table-widget .is-selected').length > 0;
+					};
+					// The time from a key or a command to the note's new text.
+					const changedAfter = async (view, act) => {
+						let at = null;
+						const update = view.update;
+						view.update = function (transactions) {
+							const result = update.call(this, transactions);
+							if (at === null && transactions.some((tr) => tr.docChanged)) at = performance.now();
+							return result;
+						};
+						const start = performance.now();
+						await act();
+						for (let i = 0; i < 50 && at === null; i++) await sleep(20);
+						delete view.update;
+						await frames(2);
+						return at === null ? null : Math.round(at - start);
+					};
+					const timed = {};
+					// Each sequence of commands on a range, ours then Obsidian's, for Own 149.
+					const sequences = [
+						{ name: 'Seed, italic then bold twice', heading: 'Seeds', from: [1, 0], to: [3, 0], ids: ['toggle-italics', 'toggle-bold', 'toggle-bold'] },
+						{ name: 'Notes, every kind', heading: 'Seeds', from: [1, 2], to: [6, 2], ids: ['toggle-strikethrough', 'toggle-highlight', 'toggle-code', 'toggle-inline-math', 'toggle-comments', 'clear-formatting'] },
+						{ name: 'Seed and Count, bold on bold', heading: 'Seeds', from: [1, 0], to: [6, 1], ids: ['toggle-bold', 'toggle-bold', 'toggle-highlight', 'toggle-comments', 'toggle-comments'] },
+					];
+					const ours = {};
+					let view;
+					try {
+						// Own 146: what it relies on in Obsidian: the note's Editor has the four formatting methods, its own instance's
+						// handing them over, and the borrowed cell's base editor its own Editor with them.
+						view = await open('Table controls');
+						await sleep(300);
+						await scrollTo(view, 'Seeds');
+						const editor = app.workspace.activeEditor?.editor;
+						const names = ['toggleMarkdownFormatting', 'toggleHighlight', 'toggleComment', 'clearMarkdownFormatting'];
+						const proto = editor && Object.getPrototypeOf(editor);
+						const relies = {
+							methods: names.every((name) => typeof proto?.[name] === 'function'),
+							ranges: typeof proto?.getFormattingRanges === 'function' && typeof proto?.getTableSelection === 'function',
+							handed: names.every((name) => Object.prototype.hasOwnProperty.call(editor ?? {}, name)),
+							sameCm: editor?.cm === view,
+						};
+						const seeds = under(view, 'Seeds');
+						const apricot = seeds?.cellElement({ row: 1, column: 0 });
+						if (apricot) await click(inCell(apricot));
+						const borrowed = preview.openCell(view);
+						const formatter = borrowed && preview.cellFormatter(borrowed.view);
+						relies.cellEditor = !!formatter && names.every((name) => typeof formatter[name] === 'function');
+						await leave(view);
+						check('Own 146: Obsidian\'s Editor has the four formatting methods and getFormattingRanges, the note\'s editor hands them over, and an open cell\'s borrowed editor has its own Editor', Object.values(relies).every(Boolean), relies);
+
+						// Own 147: Bold on a selected cell, then off, with Undo and Redo, the cell selected the whole time (step 1).
+						const text = view.state.doc.toString();
+						const one = {};
+						one.selected = await selectCell(view, under(view, 'Seeds'), 1, 0);
+						timed['Bold on a cell'] = await changedAfter(view, () => key('b', meta));
+						one.on = [cellsAt(view, 'Seeds')[1][0], where(view)];
+						await key('b', meta);
+						one.off = [cellsAt(view, 'Seeds')[1][0], where(view)];
+						await undo();
+						one.undo1 = [cellsAt(view, 'Seeds')[1][0], where(view)];
+						await undo();
+						one.undo2 = [view.state.doc.toString() === text, where(view)];
+						await redo();
+						one.redo = [cellsAt(view, 'Seeds')[1][0], where(view)];
+						await undo();
+						one.back = view.state.doc.toString() === text;
+						check('Own 147: Cmd+B on a selected cell bolds its text and again takes it off, each Cmd+Z takes one back and Redo puts it again, the cell selected throughout', one.selected && one.on.join() === '**Apricot**,1,0' && one.off.join() === 'Apricot,1,0' && one.undo1.join() === '**Apricot**,1,0' && one.undo2.join() === 'true,1,0' && one.redo.join() === '**Apricot**,1,0' && one.back, one);
+
+						// Own 148: Italic and Bold on a range, then Bold off, the range kept, and three Undos back (step 2).
+						const range = {};
+						range.selected = await selectCell(view, under(view, 'Seeds'), 1, 0);
+						await key('ArrowDown', shift);
+						await key('ArrowDown', shift);
+						range.made = where(view);
+						timed['Italic on 3 cells'] = await changedAfter(view, () => key('i', meta));
+						range.italic = column(view, 'Seeds', 0, 1, 3);
+						await key('b', meta);
+						range.bold = column(view, 'Seeds', 0, 1, 3);
+						await key('b', meta);
+						range.off = column(view, 'Seeds', 0, 1, 3);
+						range.kept = where(view);
+						for (let i = 0; i < 3; i++) await undo();
+						range.back = view.state.doc.toString() === text;
+						range.after = where(view);
+						check('Own 148: Italic then Bold on a range act on every cell, Bold again takes it off every cell, Pear\'s included, leaving them italic, the range kept, and three Undos bring the cells back', range.made === '3,0 from 1,0' && range.italic.join() === '*Apricot*,***Pear***,*apple*' && range.bold.every((cell) => /^\*\*\*.+\*\*\*$/.test(cell)) && range.off.join() === '*Apricot*,*Pear*,*apple*' && range.kept === '3,0 from 1,0' && range.back && range.after === '3,0 from 1,0', range);
+						ours[sequences[0].name] = [range.italic, range.bold, range.off];
+						await leave(view);
+
+						// Own 149: in an open cell, Cmd+B takes bold off the whole cell, which stays open, and Undo puts it back (step 3).
+						const carrot = under(view, 'Seeds')?.cellElement({ row: 6, column: 0 });
+						const strong = carrot?.querySelector('strong');
+						const middle = strong && strong.getBoundingClientRect();
+						if (middle) await click({ x: middle.left + middle.width / 2, y: middle.top + middle.height / 2 });
+						const inOpen = { opened: opened(view) };
+						await key('b', meta);
+						await sleep(300);
+						inOpen.off = cellsAt(view, 'Seeds')[6][0];
+						inOpen.still = opened(view);
+						await undo();
+						await sleep(300);
+						inOpen.back = cellsAt(view, 'Seeds')[6][0];
+						await leave(view);
+						inOpen.text = view.state.doc.toString() === text;
+						check('Own 149: Cmd+B in an open cell holding bold text takes the bold off the whole cell, the cell stays open, and Undo brings it back', inOpen.opened === '6,0' && inOpen.off === 'Carrot top' && inOpen.still === '6,0' && inOpen.back === '**Carrot top**' && inOpen.text, inOpen);
+
+						// Own 150: every formatting command on ranges, from the palette, each against Obsidian's own range doing the same
+						// with the switch off (step 4): the same cells' text after each command.
+						const timedRanges = [];
+						for (const sequence of sequences.slice(1)) {
+							await scrollTo(view, sequence.heading);
+							const steps = [];
+							if (!(await selectCell(view, under(view, sequence.heading), ...sequence.from))) continue;
+							for (let r = sequence.from[0]; r < sequence.to[0]; r++) await key('ArrowDown', shift);
+							for (let c = sequence.from[1]; c < sequence.to[1]; c++) await key('ArrowRight', shift);
+							const made = where(view);
+							for (const id of sequence.ids) {
+								timedRanges.push(await changedAfter(view, () => run(id)));
+								steps.push(cellsAt(view, sequence.heading).slice(sequence.from[0], sequence.to[0] + 1).map((row) => row.slice(sequence.from[1], sequence.to[1] + 1)));
+							}
+							steps.made = made;
+							steps.kept = where(view);
+							ours[sequence.name] = steps;
+							await leave(view);
+							await putBack();
+							view = await open('Table controls');
+							await sleep(300);
+						}
+						ours[sequences[0].name] = ours[sequences[0].name].map((cells) => cells.map((cell) => [cell]));
+						timed['palette commands on a range, slowest'] = Math.max(...timedRanges.filter((ms) => ms !== null));
+						await leave(view);
+						preview.use(false);
+						await sleep(400);
+						const stock = {};
+						for (const sequence of sequences) {
+							view = await open('Table controls');
+							await sleep(300);
+							await scrollTo(view, sequence.heading);
+							const steps = [];
+							for (const id of sequence.ids) {
+								const ranged = await obsidianRange(view, sequence.heading, sequence.from, sequence.to);
+								await run(id);
+								steps.push(ranged ? cellsAt(view, sequence.heading).slice(sequence.from[0], sequence.to[0] + 1).map((row) => row.slice(sequence.from[1], sequence.to[1] + 1)) : null);
+							}
+							stock[sequence.name] = steps;
+							await leave(view);
+							await putBack();
+						}
+						preview.use(true);
+						await sleep(400);
+						const differ = sequences.filter(({ name }) => JSON.stringify(ours[name]?.slice(0)) !== JSON.stringify(stock[name]));
+						check('Own 150: every formatting command on a range leaves each cell\'s text as Obsidian\'s own range leaves it, step by step, and the range stays selected', differ.length === 0 && ours[sequences[1].name]?.kept === ours[sequences[1].name]?.made && ours[sequences[2].name]?.kept === ours[sequences[2].name]?.made, { differ: differ.map(({ name }) => ({ name, ours: ours[name], stock: stock[name] })), made: sequences.map(({ name }) => [ours[name]?.made, ours[name]?.kept]) });
+
+						// Own 151: a frozen table stays frozen: Bold, Comment and Clear formatting on Plants' Name, which holds the mark (step 5).
+						view = await open('Frozen tables');
+						await sleep(400);
+						await scrollTo(view, 'Plants');
+						const plantsText = view.state.doc.toString();
+						const frozen = { selected: await selectCell(view, under(view, 'Plants'), 0, 0), header: [] };
+						for (const id of ['toggle-bold', 'toggle-comments', 'clear-formatting']) {
+							await run(id);
+							const plants = under(view, 'Plants');
+							frozen.header.push([cellsAt(view, 'Plants')[0][0], plants?.pins.room.rows, plants?.pins.room.columns, where(view)]);
+						}
+						await leave(view);
+						for (let i = 0; i < 3; i++) await undo();
+						frozen.back = view.state.doc.toString() === plantsText;
+						const [boldName, commented, cleared] = frozen.header;
+						check('Own 151: Bold, Comment and Clear formatting on a header cell holding the freeze mark change only its text after the mark, and the table stays frozen', frozen.selected && boldName[0] === '%%freeze 2 1%% **Name**' && commented[0] === '%%freeze 2 1%% %%**Name**%%' && /^%%freeze 2 1%% (\*\*)?Name(\*\*)?$/.test(cleared[0]) && frozen.header.every(([, rows, columns, at]) => rows === 2 && columns === 1 && at === '0,0') && frozen.back, frozen);
+
+						// Own 152: columns stay tidy: Bold on Basil keeps Seeds written as Obsidian writes it; Bold on Hoe in Spaced by hand
+						// changes only that cell (step 6).
+						view = await open('Table controls');
+						await sleep(300);
+						await scrollTo(view, 'Seeds');
+						const tidy = { basil: await selectCell(view, under(view, 'Seeds'), 4, 0) };
+						await key('b', meta);
+						const seedLines = tableAt(view, 'Seeds').split('\n');
+						const widths = seedLines.map((line) => line.split('|')[1]?.length);
+						tidy.width = widths;
+						tidy.basilText = cellsAt(view, 'Seeds')[4][0];
+						tidy.longest = Math.max(...cellsOf(tableAt(view, 'Seeds')).map((row) => row[0].length)) + 2;
+						await leave(view);
+						await undo();
+						await scrollTo(view, 'Spaced by hand');
+						const handBefore = tableAt(view, 'Spaced by hand');
+						tidy.hoe = await selectCell(view, under(view, 'Spaced by hand'), 2, 0);
+						await key('b', meta);
+						tidy.hand = tableAt(view, 'Spaced by hand');
+						await leave(view);
+						await undo();
+						tidy.back = view.state.doc.toString() === text;
+						check('Own 152: Bold on Basil keeps the Seed column as wide as its longest text and two spaces on every row; Bold on Hoe in a table spaced by hand changes only its cell', tidy.basil && tidy.basilText === '**Basil**' && widths.every((width) => width === tidy.longest) && tidy.hoe && tidy.hand === handBefore.replace('|Hoe|', '|**Hoe**|') && tidy.back, tidy);
+
+						// Own 153: commands that would change the whole table still do nothing on a selected cell or a range (step 7).
+						const quiet = {};
+						await scrollTo(view, 'Seeds');
+						for (const [label, ranged] of [['cell', false], ['range', true]]) {
+							await selectCell(view, under(view, 'Seeds'), 2, 1);
+							if (ranged) await key('ArrowDown', shift);
+							for (const id of ['toggle-checklist-status', 'toggle-bullet-list', 'insert-horizontal-rule']) await run(id);
+							await key('l', meta);
+							quiet[label] = [view.state.doc.toString() === text, where(view)];
+							await leave(view);
+						}
+						check('Own 153: Toggle checkbox, Cmd+L, Toggle bullet list and Insert horizontal rule leave the table\'s text alone on a selected cell and on a range', quiet.cell[0] && quiet.range[0], quiet);
+
+						// Own 154: Table 2000 by 12: Bold on the second column's 1,999 body cells, timed, and one Undo (step 8).
+						view = await open('Table 2000 by 12');
+						await sleep(1500);
+						const bigText = view.state.doc.toString();
+						const big = () => models(view)[0];
+						const last = big()?.count ?? 0;
+						// Shown first, back at its start sideways, and pressed in its first column, whose text holds no link.
+						big().scrollSideways(-big().sideways().scroll);
+						big().showCell({ row: 1, column: 0 });
+						await sleep(500);
+						await frames(3);
+						const long = { selected: await selectCell(view, big(), 1, 0) };
+						await key('ArrowRight');
+						long.selected = long.selected && where(view) === '1,1';
+						// Nothing more runs on a cell not selected: Cmd+B would format the note's text.
+						if (!long.selected) throw new Error(`Own 154: the second column's first cell wasn't selected (${where(view)})`);
+						await key('ArrowDown', { meta: true, shift: true, wait: 600 });
+						long.made = where(view);
+						timed['Bold on 1,999 cells'] = await changedAfter(view, () => key('b', { meta: true, wait: 400 }));
+						const bolded = cellsOf(view.state.doc.sliceString(big().from, big().to)).slice(1).map((row) => row[1]);
+						long.bolded = bolded.filter((cell) => /^\*\*.*\*\*$/.test(cell)).length;
+						long.kept = where(view);
+						long.rows = rowsRight(view).length;
+						await undo();
+						await sleep(400);
+						long.back = view.state.doc.toString() === bigText;
+						long.after = where(view);
+						await leave(view);
+						results.push({ name: 'Own 154 times: key or command to new text (ms)', ok: true, detail: timed });
+						check('Own 154: on Table 2000 by 12, Cmd+B on a range over the second column bolds every cell, one Undo takes it back, and the range stays', long.selected && long.made === `${last},1 from 1,1` && long.bolded === last && long.kept === long.made && long.rows === 0 && long.back && long.after === long.made, long);
+						check('Own 154: Bold on 1,999 cells takes at most 1 s, and the other commands at most 100 ms', timed['Bold on 1,999 cells'] !== null && timed['Bold on 1,999 cells'] <= 1000 && Object.entries(timed).filter(([name]) => name !== 'Bold on 1,999 cells').every(([, ms]) => ms !== null && ms <= 100), timed);
+
+						// Own 155: 40 seeded random steps on Seeds and Plants: a range moved by Shift+arrows, a formatting command, Undo or
+						// Redo. After each, nothing crashed, the drawing matches the text, the table keeps its shape and its freeze, the
+						// range stays, and an Undo right after a command takes back exactly that command.
+						let seed = 160;
+						const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+						const pick = (list) => list[Math.floor(random() * list.length)];
+						const ids = ['toggle-bold', 'toggle-italics', 'toggle-strikethrough', 'toggle-highlight', 'toggle-code', 'toggle-inline-math', 'toggle-comments', 'clear-formatting'];
+						const fuzz = [];
+						const kinds = {};
+						for (const [note, heading] of [['Table controls', 'Seeds'], ['Frozen tables', 'Plants']]) {
+							view = await open(note);
+							await sleep(400);
+							await scrollTo(view, heading);
+							const shape = () => cellsAt(view, heading).map((row) => row.length).join();
+							const startShape = shape();
+							const header = () => tableAt(view, heading).split('\n')[0].match(/%%freeze \d+ \d+%%/)?.[0] ?? null;
+							const mark = header();
+							await selectCell(view, under(view, heading), 1, 0);
+							// Commands this run can still undo: an Undo never reaches past them into what the run put back.
+							let undoable = 0;
+							for (let step = 0; step < 20; step++) {
+								const before = view.state.doc.toString();
+								const kind = pick(['move', 'command', 'command', 'command', ...(undoable ? ['undo'] : [])]);
+								kinds[kind] = (kinds[kind] ?? 0) + 1;
+								let label = kind;
+								if (kind === 'move') {
+									label = pick(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight']);
+									await key(label, shift);
+								} else if (kind === 'command') {
+									label = pick(ids);
+									const at = where(view);
+									await run(label);
+									const after = view.state.doc.toString();
+									if (after !== before) {
+										undoable++;
+										await undo();
+										const undone = view.state.doc.toString() === before;
+										await redo();
+										const redone = view.state.doc.toString() === after;
+										if (!undone || !redone || where(view) !== at) fuzz.push({ note, step, label, undone, redone, at, now: where(view) });
+									}
+								} else {
+									undoable--;
+									await undo();
+								}
+								const problems = [];
+								if (crashed(view)) problems.push('crashed');
+								if (rowsRight(view).length) problems.push('rows');
+								if (shape() !== startShape) problems.push('shape');
+								if (header() !== mark) problems.push('mark');
+								if (where(view) === '-') problems.push('selection lost');
+								if (problems.length) fuzz.push({ note, step, label, problems });
+							}
+							await leave(view);
+							await putBack();
+						}
+						results.push({ name: 'Own 155 the random steps taken, by kind', ok: true, detail: kinds });
+						check('Own 155: 40 seeded random steps: after each, nothing crashed, the drawing matches the text, the table keeps its shape and freeze, the range or cell stays, and one Undo takes back one command', fuzz.length === 0, fuzz.slice(0, 4));
+
+						// Own 156: with the switch off, Bold on a selected cell of Obsidian's table still does nothing, as before.
+						preview.use(false);
+						await sleep(400);
+						view = await open('Table controls');
+						await sleep(300);
+						await scrollTo(view, 'Seeds');
+						const stockCell = obsidianCell(view, 'Seeds', 1, 0);
+						if (stockCell) await click(inCell(stockCell));
+						await key('Escape');
+						const stockSelected = where(view);
+						await key('b', meta);
+						const stockQuiet = view.state.doc.toString() === text;
+						await leave(view);
+						preview.use(true);
+						await sleep(400);
+						view = await open('Frozen tables');
+						await sleep(300);
+						check('Own 156: with the switch off, Cmd+B on a selected cell of Obsidian\'s table leaves its text alone, and nothing crashed with it on', stockSelected === '1,0' && stockQuiet && crashed(view) === 0 && rowsRight(view).length === 0, { stockSelected, stockQuiet, crashed: crashed(view) });
+					} finally {
+						delete view?.update;
+						view = await open('Watering schedule');
+						await sleep(300);
+						await putBack();
 						preview.use(false);
 						await sleep(300);
 					}

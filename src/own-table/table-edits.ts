@@ -304,8 +304,16 @@ function finish(grid: Grid, origins: number[], to: Cell, mark: string | null, co
  * - `paste`: cells copied from a table, written over the cells from `at` on, the table growing rows and columns to fit.
  *   Onto the header, they bring their columns' alignments; elsewhere only new columns take any. The cell afterwards is
  *   the last one pasted.
+ * - `clear`: the range menu's *Clear cells*, which empties its cells and never deletes rows or columns. Each column
+ *   keeps its width, as Obsidian's item writes the table at the widths it had. The cell afterwards is the range's first.
+ * - `align`: the range menu's *Align* items, on each of its columns. The cell afterwards is `head`, the range's cell
+ *   moved to last, which stays selected with the range.
  */
-export type CellsEdit = { kind: 'delete'; bounds: Bounds; head: Cell; forward: boolean } | { kind: 'paste'; at: Cell } & TableData;
+export type CellsEdit =
+	| { kind: 'delete'; bounds: Bounds; head: Cell; forward: boolean }
+	| ({ kind: 'paste'; at: Cell } & TableData)
+	| { kind: 'clear'; bounds: Bounds }
+	| { kind: 'align'; bounds: Bounds; head: Cell; alignment: Alignment };
 
 /** Obsidian's table data on the clipboard: each cell's Markdown, row by row, and each column's alignment. */
 export interface TableData {
@@ -379,15 +387,24 @@ export function editCells(lines: readonly string[], edit: CellsEdit): Edited | n
 		for (let at = column; at <= right; at++) widths[at] = widthOf(rows, at);
 		return finish(grid, origins, { row: bottom, column: right }, mark);
 	}
-	const { bounds, head, forward } = edit;
+	const { bounds } = edit;
 	// The range among Obsidian's rows: a row of dashes at its top isn't in it.
 	const top = grid.dropped.has(clamp(bounds.top, 0, grid.drawn.length - 1)) ? rowOf(bounds.top) + 1 : rowOf(bounds.top);
 	const bottom = rowOf(bounds.bottom);
 	const left = clamp(bounds.left, 0, columns - 1);
 	const right = clamp(bounds.right, 0, columns - 1);
+	if (edit.kind === 'align') {
+		for (let column = left; column <= right; column++) alignments[column] = edit.alignment;
+		return finish(grid, origins, { row: rowOf(edit.head.row), column: edit.head.column }, mark);
+	}
+	if (top > bottom) return null;
+	if (edit.kind === 'clear') {
+		for (let row = top; row <= bottom; row++) for (let column = left; column <= right; column++) set(row, column, '');
+		return finish(grid, origins, { row: top, column: left }, mark);
+	}
+	const { head, forward } = edit;
 	const headRow = rowOf(head.row);
 	const last = rows.length - 1;
-	if (top > bottom) return null;
 	let to: Cell;
 	if (left === 0 && right === columns - 1) {
 		if (top === 0 && bottom === last) return { lines: null, cell: { row: 0, column: 0 } };

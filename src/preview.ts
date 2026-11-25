@@ -1,5 +1,5 @@
 import type { Extension } from '@codemirror/state';
-import { type App, Notice, type Plugin, PluginSettingTab } from 'obsidian';
+import { addIcon, type App, Notice, type Plugin, PluginSettingTab, removeIcon } from 'obsidian';
 import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
 import { cellFormatter, forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
@@ -8,7 +8,8 @@ import { addAtEnd, addRowFrom, clearCells, pasteCells, pasteIntoCell, tableComma
 import { startDrag } from './own-table/drag';
 import { clickCell, clickSelectsCells, pressCell, selectEvery, setClickSelects } from './own-table/cell-drag';
 import { setTableControls } from './own-table/grips';
-import { formattingOnCells, giveBackAll } from './own-table/formatting';
+import { formattingOnCells, giveBackAll, HIGHLIGHTS, swatchIcon } from './own-table/formatting';
+import { rangeItems } from './own-table/range-menu';
 
 /** Set on the body by the preview's stylesheet, src/own-table/styles.css. */
 const STYLED = '--selectable-tables-styled';
@@ -133,7 +134,12 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	plugin.register(() => setCellEdits(null));
 	// Obsidian's table controls on the plugin's table: its Row, Column and Sort items, before the freeze items in a cell's
 	// right-click menu, and its table commands, which act only on the plugin's table.
-	setTableItems(tableItems);
+	// A range of cells has its own menu, with Obsidian's highlight colors as swatches, which the plugin adds as icons.
+	setTableItems((menu, view, place, kind) => (kind === 'range' ? rangeItems(menu, view) : tableItems(menu, view, place, kind)));
+	for (const { color } of HIGHLIGHTS) addIcon(swatchIcon(color), `<circle cx="50" cy="50" r="38" style="fill: var(--color-${color}); stroke: none" />`);
+	plugin.register(() => {
+		for (const { color } of HIGHLIGHTS) removeIcon(swatchIcon(color));
+	});
 	plugin.register(() => setTableItems(null));
 	// The drag handles and the + buttons, and drags across cells, on the plugin's table.
 	setTableControls({

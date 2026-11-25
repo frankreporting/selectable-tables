@@ -255,7 +255,7 @@ The notes read like Obsidian's own, for an average user:
 - **Three headings, in this order: New, Improved, Fixed.** Leave out any that's empty.
 - **Short, plain bullets:** one line each, on what the user will notice, in their words. Name keys and buttons, not internals: no issue numbers, function names or Obsidian's internals, and no reasons they don't need.
 
-Linear's release pipeline *Selectable Tables* holds the release being built: each push to `master` that changes what ships in the plugin adds its issues to the open release (`.github/workflows/linear-release.yml`, whose paths say what counts). Its access key is the repository's `LINEAR_ACCESS_KEY` secret, and lives nowhere else. Run that workflow by hand, with a tag or commit to sync from, when the open release has to be filled again from scratch; it's a dry run unless that box is unticked. When the plugin is renamed, Brian renames the pipeline; the key and the workflows stay.
+Linear's release pipeline *Better Markdown Tables*, the plugin's name from the relaunch on, holds the release being built: each push to `master` that changes what ships in the plugin adds its issues to the open release (`.github/workflows/linear-release.yml`, whose paths say what counts). Its access key is the repository's `LINEAR_ACCESS_KEY` secret, and lives nowhere else. Run that workflow by hand, with a tag or commit to sync from, when the open release has to be filled again from scratch; it's a dry run unless that box is unticked.
 
 To release:
 

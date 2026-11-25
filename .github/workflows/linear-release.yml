@@ -1,6 +1,7 @@
 name: Linear release
 
-# Keeps Selectable Tables' release in Linear up to date, through its release pipeline. Each push to
+# Keeps the plugin's release in Linear up to date, through the Better Markdown Tables release
+# pipeline, the plugin's name from the relaunch on. Each push to
 # master that changes what ships in the plugin adds its issues to the open release, and publishing a
 # release on GitHub names the Linear release by its version, links it and marks it complete. The
 # pipeline's access key is the LINEAR_ACCESS_KEY secret; no job runs on a pull request.

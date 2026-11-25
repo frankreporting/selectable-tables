@@ -1007,7 +1007,9 @@ export class Model implements Span, DrawnTable, DragTable {
 		const changedColumns = columns !== this.columns;
 		const sameLook = this.metrics === metrics;
 		this.columns = columns;
-		this.aligns = Array.from({ length: columns }, (_, c) => alignOf(delimiter[c] ?? ''));
+		const aligns = Array.from({ length: columns }, (_, c) => alignOf(delimiter[c] ?? ''));
+		const realigned = aligns.some((align, c) => align !== this.aligns[c]);
+		this.aligns = aligns;
 		this.metrics = metrics;
 		this.headWords = cellsOf(headLine, columns).map((text) => this.withMedia(text, true, measureCell(text, metrics, true, measure)));
 		this.rowWords = lines.map((line) => this.measureRow(line));
@@ -1021,6 +1023,12 @@ export class Model implements Span, DrawnTable, DragTable {
 		this.generation++;
 		this.text = doc;
 		if (changedColumns) this.redrawAll();
+		else if (realigned) {
+			// Only the delimiter row changed, as Align does: a row's text is the same, so each drawn row, the header and the
+			// open cell's row included, is drawn again, in place, with its column's new alignment.
+			for (const row of this.rendered.keys()) this.dirty.add(row);
+			this.headText = null;
+		}
 		this.checkRows = true;
 		this.todo = true;
 		this.remeasure = true;
@@ -1625,6 +1633,9 @@ export class Model implements Span, DrawnTable, DragTable {
 			},
 			get slides() {
 				return model.slides;
+			},
+			get alignment() {
+				return model.aligns.join(',');
 			},
 			lines(rows: number): string[] {
 				const doc = model.view?.state.doc;

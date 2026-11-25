@@ -139,6 +139,8 @@ export interface PinHost {
 	readonly startBorder: number;
 	/** Whether the table moves sideways, by its scrollbar. */
 	readonly slides: boolean;
+	/** Each column's alignment, which the rows are drawn with, as one string. */
+	readonly alignment: string;
 	/** The header's line, then the first body rows' lines, `rows` of them. */
 	lines(rows: number): string[];
 	/** The header and some body rows, rendered as the table draws them, header first. */
@@ -346,7 +348,7 @@ export class Pins {
 	 * The frozen rows as rendered for the copies, header first, the lines they were rendered from, and those lines' cells:
 	 * a column padded again, as typing in a table Obsidian wrote does to every row, changes the lines and not the cells.
 	 */
-	private source: { lines: string[]; cells: string; rows: HTMLTableRowElement[]; generation: number } | null = null;
+	private source: { lines: string[]; cells: string; rows: HTMLTableRowElement[]; alignment: string; generation: number } | null = null;
 	private generation = 0;
 	private paint: Paint | null = null;
 	private fit = { rows: false, columns: false };
@@ -402,14 +404,15 @@ export class Pins {
 		const lines = host.lines(Math.max(0, freeze.rows - 1));
 		const source = this.source;
 		let changed = false;
-		if (!source || source.lines.length !== lines.length || source.lines.some((line, index) => line !== lines[index])) {
-			const cells = lines.map((line) => cellsOf(line, host.columns).join('\u0000')).join('\n');
+		if (!source || source.alignment !== host.alignment || source.lines.length !== lines.length || source.lines.some((line, index) => line !== lines[index])) {
+			// The columns' alignment too: Align changes only the delimiter row, which no copied row holds.
+			const cells = `${host.alignment}\n${lines.map((line) => cellsOf(line, host.columns).join('\u0000')).join('\n')}`;
 			if (source && source.cells === cells) source.lines = lines;
 			else {
 				this.drop();
 				const rows = host.render(lines.slice(1));
 				rows.forEach((tr, index) => tr.setAttribute(ROW_ATTRIBUTE, String(index)));
-				this.source = { lines, cells, rows, generation: ++this.generation };
+				this.source = { lines, cells, rows, alignment: host.alignment, generation: ++this.generation };
 				changed = true;
 			}
 		}

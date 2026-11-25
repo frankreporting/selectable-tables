@@ -1,7 +1,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { ChangeSet, EditorSelection } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { type Command, editorInfoField, htmlToMarkdown, type IconName, Menu, type MenuItem } from 'obsidian';
+import { type Command, editorInfoField, htmlToMarkdown, type IconName, Menu, type MenuItem, Platform } from 'obsidian';
 import { cellSelection } from '../editor/cells';
 import { type Bounds, boundsOf, type Grid, sameCell, writesTable } from '../editor/decide';
 import { escapeCell, noteView, wholeTable } from '../editor/extension';
@@ -471,7 +471,20 @@ export function tableItems(menu: Menu, view: EditorView, place: Place, grip?: 'r
 	flat(SORT_ITEMS);
 }
 
-/** A drag handle's menu, at a click on it without a drag: the same items as a right-click on it. */
+/**
+ * A right-click on a drag handle: its row or column is selected as a range of cells first, as a click on it selects
+ * it, so the range shows what the menu is for, and stays after the menu (Brian's hand check, 11/25; Obsidian's handle
+ * selects nothing at a right-click). A phone's long press, which Obsidian turns into a right-click, keeps the row's
+ * first cell: a finger makes no range yet.
+ */
+export function gripItems(menu: Menu, view: EditorView, place: Place, grip: 'row' | 'column'): void {
+	const table = place.table();
+	const own = table && ownTable(view, table);
+	if (table && own && !Platform.isMobile) selectWhole(view, { from: table.from, to: table.to, grid: own.grid }, grip, grip === 'row' ? place.cell.row : place.cell.column);
+	tableItems(menu, view, place, grip);
+}
+
+/** A drag handle's menu, at a finger's tap on it: the same items as a right-click on it. */
 export function gripMenu(view: EditorView, place: Place, grip: 'row' | 'column', at: MouseEvent): void {
 	if (!selectAt(view, place)) return;
 	const menu = new Menu();

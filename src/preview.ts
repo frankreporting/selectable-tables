@@ -4,7 +4,7 @@ import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
 import { cellFormatter, forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
-import { addAtEnd, addRowFrom, clearCells, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
+import { addAtEnd, addRowFrom, clearCells, gripItems, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
 import { startDrag } from './own-table/drag';
 import { clickCell, clickSelectsCells, pressCell, selectEvery, setClickSelects } from './own-table/cell-drag';
 import { setTableControls } from './own-table/grips';
@@ -135,7 +135,7 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	// Obsidian's table controls on the plugin's table: its Row, Column and Sort items, before the freeze items in a cell's
 	// right-click menu, and its table commands, which act only on the plugin's table.
 	// A range of cells has its own menu, with Obsidian's highlight colors as swatches, which the plugin adds as icons.
-	setTableItems((menu, view, place, kind) => (kind === 'range' ? rangeItems(menu, view) : tableItems(menu, view, place, kind)));
+	setTableItems((menu, view, place, kind) => (kind === 'range' ? rangeItems(menu, view) : kind ? gripItems(menu, view, place, kind) : tableItems(menu, view, place)));
 	for (const { color } of HIGHLIGHTS) addIcon(swatchIcon(color), `<circle cx="50" cy="50" r="38" style="fill: var(--color-${color}); stroke: none" />`);
 	plugin.register(() => {
 		for (const { color } of HIGHLIGHTS) removeIcon(swatchIcon(color));

@@ -9556,7 +9556,7 @@
 					preview.use(true);
 					preview.setClickSelects(true);
 					await sleep(400);
-					const touched = ['Cell moves', 'Two report tables', 'Table 2000 by 12'];
+					const touched = ['Cell moves', 'Two report tables', 'Table 2000 by 12', 'Frozen table 2000 by 12'];
 					const onDiskBefore = {};
 					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
 					const plugin = app.plugins.plugins['selectable-tables'];
@@ -9776,6 +9776,16 @@
 
 						// Own 168 (step 2): Clear cells, the Align items, Delete cells, Cut, Copy and Paste, each against Obsidian's range.
 						const items = {};
+						// How the Seed column is drawn afterwards, its header and Tomato's cell: a cell's own alignment, as the browser
+						// lays it out (Brian's hand check, 11/25: the text took the alignment, and the plugin's table didn't draw it).
+						const drawnAlign = (on) => async (view) => {
+							await sleep(300);
+							await frames(3);
+							return [0, 3].map((row) => {
+								const el = cellIn(view, on, row, 1);
+								return el ? getComputedStyle(el).textAlign : null;
+							});
+						};
 						for (const [name, range, path] of [
 							['clear', FERN, ['Clear cells']],
 							['left', FERN, ['Align left']],
@@ -9783,13 +9793,15 @@
 							['right', FERN, ['Align right']],
 							['delete', A2, ['Delete cells']],
 						]) {
-							items[name] = { off: await runItem(false, range, path, text), on: await runItem(true, range, path, text) };
+							const align = path[0].startsWith('Align');
+							items[name] = { off: await runItem(false, range, path, text, align ? drawnAlign(false) : undefined), on: await runItem(true, range, path, text, align ? drawnAlign(true) : undefined) };
 						}
 						// Only the plugin's Undo is checked: with the switch off, Undo after Obsidian's own Align or Clear formatting on a
 						// range doesn't take it back (the note is put back by hand after each).
 						const same = (name) => items[name].on.chosen && items[name].on.table === items[name].off.table && items[name].on.table !== trays && items[name].on.undone;
 						check('Own 168: Clear cells empties the range\'s cells, as on Obsidian\'s range, and the range goes, its first cell selected', same('clear') && items.clear.on.at === '1,1', items.clear);
 						check('Own 168: Align left, center and right align the range\'s columns, as on Obsidian\'s range, the range still selected', ['left', 'center', 'right'].every(same) && items.center.on.at === '2,2 from 1,1', { left: items.left, center: items.center, right: items.right });
+						check('Own 168: the plugin\'s table draws each alignment at once, the header and the body, as Obsidian\'s table draws it', ['left', 'center', 'right'].every((name) => items[name].on.after?.join() === items[name].off.after?.join()) && items.center.on.after?.every((align) => align === 'center') && items.right.on.after?.every((align) => align === 'end' || align === 'right'), { left: [items.left.on.after, items.left.off.after], center: [items.center.on.after, items.center.off.after], right: [items.right.on.after, items.right.off.after] });
 						check('Own 168: on A2\'s row, Delete cells deletes the row, as on Obsidian\'s range', same('delete') && !items.delete.on.table.includes('| A2 '), items.delete);
 						// The clipboard: what Copy and Cut put there, and what Paste writes from it, onto Tomato's two rows.
 						const clipboardFor = async (on) => {
@@ -9936,6 +9948,8 @@
 							if (!grip) continue;
 							await rightClick(centre(grip));
 							far[`${kind} menu`] = shapeOf(menusShown()[0]).length;
+							far[`${kind} at`] = where(view);
+							far[`${kind} rows`] = big().grid.rows;
 							await closeMenus();
 							await leave(view);
 						}
@@ -9963,10 +9977,45 @@
 						results.push({ name: 'Own 172 a click on row 3\'s grip, then Delete, in Table 2000 by 12 (ms)', ok: true, detail: far.ms });
 						check('Own 172: in Table 2000 by 12, a click on row 3\'s grip selects the row, and Delete deletes it in under 100 ms; Undo brings it back', far.at === '3,0 from 3,11' && far.gone && far.ms !== null && far.ms < 100 && far.back, far);
 						check('Own 172: a right-click on a row\'s grip and on a column\'s still shows its menu, and on a phone a tap on a grip does too', far['row menu'] >= 5 && far['column menu'] >= 8 && far.tap?.menu >= 5, far);
+						check('Own 172: a right-click on a grip selects its row or column as a range first, as a click does', far['row at'] === '5,0 from 5,11' && far['column at'] === `0,2 from ${far['column rows'] - 1},2`, far);
+
+						// Own 173: past row 300 of Frozen table 2000 by 12, where a block's copy of the header pins, Column 2 centered by a
+						// change to the delimiter row alone, as Align or a second pane writes it: the copy draws it, and so do the rows.
+						view = await open('Frozen table 2000 by 12');
+						await sleep(1500);
+						await leave(view);
+						const frozenText = view.state.doc.toString();
+						const frozen = () => models(view)[0];
+						const firstLine = view.state.doc.lineAt(frozen().from).number;
+						const pinAt = () => view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientTop + (parseFloat(getComputedStyle(view.dom).getPropertyValue('--selectable-tables-band')) || 0);
+						const copyCell = (column) => {
+							const box = frozen().boxes.find((b) => {
+								const r = b.isConnected && b.getBoundingClientRect();
+								return r && r.top <= pinAt() && r.bottom > pinAt();
+							});
+							return box?.querySelector('.selectable-tables-copy-table table')?.rows[0]?.cells[column] ?? null;
+						};
+						const deepRow = view.state.doc.line(firstLine + 2 + 320);
+						view.dispatch({ effects: view.constructor.scrollIntoView(deepRow.from, { y: 'start' }) });
+						await sleep(500);
+						await frames(4);
+						const copied = { before: copyCell(2) && getComputedStyle(copyCell(2)).textAlign };
+						const delimiter = view.state.doc.line(firstLine + 1);
+						const cells = delimiter.text.split('|');
+						cells[3] = cells[3].replace(/^ ?-/, ':').replace(/- ?$/, ':');
+						view.dispatch({ changes: { from: delimiter.from, to: delimiter.to, insert: cells.join('|') } });
+						await sleep(600);
+						await frames(4);
+						const bodyCell = frozen().cellElement({ row: 321, column: 2 });
+						Object.assign(copied, { delimiter: view.state.doc.line(firstLine + 1).text.slice(0, 60), copy: copyCell(2) && getComputedStyle(copyCell(2)).textAlign, body: bodyCell && getComputedStyle(bodyCell).textAlign });
+						view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: frozenText } });
+						await sleep(400);
+						await leave(view);
+						check('Own 173: a column centered deep in Frozen table 2000 by 12 is drawn centered in the pinned copy of its header and in its rows', !!copied.before && copied.before !== 'center' && copied.copy === 'center' && copied.body === 'center', copied);
 
 						view = await open('Cell moves');
 						await sleep(300);
-						check('Own 173: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+						check('Own 174: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						if (hadNative) config.nativeMenus = nativeBefore;
 						else delete config.nativeMenus;

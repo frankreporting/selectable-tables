@@ -1,0 +1,81 @@
+name: Linear release
+
+# Keeps the plugin's release in Linear up to date, through the Better Markdown Tables release
+# pipeline, the plugin's name from the relaunch on. Each push to
+# master that changes what ships in the plugin adds its issues to the open release, and publishing a
+# release on GitHub names the Linear release by its version, links it and marks it complete. The
+# pipeline's access key is the LINEAR_ACCESS_KEY secret; no job runs on a pull request.
+#
+# Run it by hand to sync from a given ref, such as the last release's tag, the first time
+# (Actions › Linear release › Run workflow). It's a dry run unless that box is unticked.
+
+on:
+    push:
+        branches: [master]
+    release:
+        types: [published]
+    workflow_dispatch:
+        inputs:
+            base_ref:
+                description: Sync the commits after this tag or commit, instead of those since the last sync
+                required: false
+            dry_run:
+                description: Only log what would change in Linear
+                type: boolean
+                default: true
+
+permissions:
+    contents: read
+
+# One at a time, so two syncs never race for the same release.
+concurrency:
+    group: linear-release
+    cancel-in-progress: false
+
+env:
+    # What ships in the plugin, or shapes main.js. Check scripts, tests, docs and the test vault stay out.
+    PLUGIN_PATHS: src/**,styles.css,manifest.json,package.json,package-lock.json,versions.json,esbuild.config.mjs
+
+jobs:
+    sync:
+        if: github.event_name != 'release'
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Add the merged issues to the open release
+              uses: linear/linear-release-action@cfd42077dccdc0c26a38589934e2aa11046f57b7 # v0.18.3
+              with:
+                  access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+                  include_paths: ${{ env.PLUGIN_PATHS }}
+                  base_ref: ${{ inputs.base_ref }}
+                  dry_run: ${{ inputs.dry_run && 'true' || 'false' }}
+
+    complete:
+        if: github.event_name == 'release'
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            # Only sync can set a release's version, so name the open release first. HEAD as the base
+            # scans no commits.
+            - name: Give the open release its version
+              uses: linear/linear-release-action@cfd42077dccdc0c26a38589934e2aa11046f57b7 # v0.18.3
+              with:
+                  access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+                  base_ref: HEAD
+                  version: ${{ github.event.release.tag_name }}
+                  name: ${{ github.event.release.tag_name }}
+
+            - name: Mark it complete, with a link to the GitHub release
+              uses: linear/linear-release-action@cfd42077dccdc0c26a38589934e2aa11046f57b7 # v0.18.3
+              with:
+                  access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+                  command: complete
+                  version: ${{ github.event.release.tag_name }}
+                  links: |
+                      GitHub release=${{ github.event.release.html_url }}

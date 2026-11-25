@@ -149,3 +149,39 @@ test('Obsidian\'s table data is read only in its shape', () => {
 		assert.equal(readTableData(bad), null, bad);
 	}
 });
+
+test('Clear cells empties a range\'s cells, every column keeping its width, never deletes rows or columns, and goes to its first cell', () => {
+	const edited = editCells(trays, { kind: 'clear', bounds: boundsOf(cell(2, 2), cell(1, 1)) });
+	assert.deepEqual(edited && { lines: edited.lines, cell: edited.cell }, {
+		lines: [
+			'| Tray | Seed                        | Notes         |',
+			'| ---- | --------------------------- | ------------- |',
+			'| A1   |                             |               |',
+			'| A2   |                             |               |',
+			'| B1   | Tomato                      | a \\| b        |',
+			'| B2   | #seed/late                  | Water twice   |',
+		],
+		cell: cell(1, 1),
+	});
+	const across = editCells(trays, { kind: 'clear', bounds: boundsOf(cell(2, 0), cell(2, 2)) });
+	assert.equal(across?.lines?.length, trays.length, 'a range across every column keeps its row');
+	assert.equal(across?.lines?.[3], '|      |                             |               |');
+});
+
+test('Clear cells keeps the freeze mark in its header cell', () => {
+	const frozen = ['| %%freeze 1 0%% Tray | Seed |', '| -------------------- | ---- |', '| A1                   | Fern |'];
+	const edited = editCells(frozen, { kind: 'clear', bounds: boundsOf(cell(0, 0), cell(1, 1)) });
+	assert.deepEqual(edited?.lines, ['| %%freeze 1 0%%      |      |', '| ------------------- | ---- |', '|                     |      |']);
+});
+
+test('Align sets each of a range\'s columns and stays on the cell moved to last', () => {
+	const edited = editCells(trays, { kind: 'align', bounds: boundsOf(cell(1, 1), cell(2, 2)), head: cell(2, 2), alignment: 'center' });
+	assert.deepEqual(edited?.lines?.slice(0, 3), [
+		'| Tray |            Seed             |     Notes     |',
+		'| ---- | :-------------------------: | :-----------: |',
+		'| A1   | [[Watering schedule\\|Fern]] | **Keep damp** |',
+	]);
+	assert.deepEqual(edited?.cell, cell(2, 2));
+	const left = editCells(trays, { kind: 'align', bounds: boundsOf(cell(1, 0), cell(1, 0)), head: cell(1, 0), alignment: 'left' });
+	assert.equal(left?.lines?.[1], '| :--- | --------------------------- | ------------- |');
+});

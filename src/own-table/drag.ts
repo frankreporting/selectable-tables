@@ -1,10 +1,11 @@
 import type { EditorView } from '@codemirror/view';
 import type { Text } from '@codemirror/state';
+import type { Grid } from '../editor/decide';
 import { selectAt } from '../editor/freeze-commands';
 import type { Cell, Span } from '../editor/table-text';
 import { DRAG_START, edgeScroll, type Extent, landing, targetEdge } from './drag-sums';
 import { profile, timed } from './profile';
-import { gripMenu, moveTo } from './table-commands';
+import { gripMenu, moveTo, selectWhole } from './table-commands';
 
 /**
  * Dragging a row or a column by its handle, on the plugin's own table, as Obsidian's table drags them (read from
@@ -14,14 +15,18 @@ import { gripMenu, moveTo } from './table-commands';
  *
  * The table may be drawn as blocks of 100 rows with only the rows near the pane in the page, so the row being dragged
  * can leave the page as the note scrolls: the handle that moves is a copy, put in the first cell of the row under the
- * pointer, and the landing is worked out from the table's heights, not from rows in the page. A press that doesn't
- * move is a click, which shows the handle's menu (Obsidian selects the row or column as a range of cells, which the
- * plugin's table doesn't have yet).
+ * pointer, and the landing is worked out from the table's heights, not from rows in the page.
+ *
+ * With a mouse or a pen, the press selects the row or column as a range of cells, which stays selected through the drag,
+ * and the moved one is selected after, as in Obsidian; a press that doesn't move leaves it selected, and only a
+ * right-click shows the handle's menu. A finger makes no range yet (STA-111): its press selects the row's first cell or
+ * the column's header cell, and a tap shows the menu, as a phone has no right-click.
  */
 
 /** What a drag needs from the table: the model, in model.ts. */
 export interface DragTable extends Span {
 	readonly view: EditorView | null;
+	readonly grid: Grid;
 	readonly rtl: boolean;
 	/** The cell a handle is in, a pinned copy's being its real cell. */
 	cellAt(target: Element): Cell | null;
@@ -116,13 +121,18 @@ class Drag {
 				// The pointer is gone already: its pointerup or pointercancel ends the drag.
 			}
 		}
-		// The row or column shows as its cell selected, as Obsidian selects it as a range: an open cell closes first.
-		selectAt(view, { table: () => table, cell: kind === 'row' ? { row: cell.row, column: 0 } : { row: 0, column: cell.column } });
+		// The row or column is selected as a range of cells, as Obsidian selects it, and a finger's as its first cell: an
+		// open cell closes first.
+		this.whole = event.pointerType !== 'touch';
+		if (this.whole) selectWhole(view, table, kind, this.origin);
+		else selectAt(view, { table: () => table, cell: kind === 'row' ? { row: cell.row, column: 0 } : { row: 0, column: cell.column } });
 		this.frame = this.win.requestAnimationFrame(this.tick);
 	}
 
 	private readonly pointerId: number;
 	private captured: HTMLElement | null = null;
+	/** Whether the press selected its row or column as a range: a mouse's or a pen's. */
+	private readonly whole: boolean;
 
 	private readonly onLost = (event: PointerEvent) => {
 		if (event.pointerId === this.pointerId) this.cancel();
@@ -142,10 +152,11 @@ class Drag {
 		this.end();
 		if (changed) return;
 		if (!started) {
-			gripMenu(view, { table: () => table, cell: this.cell }, kind, event);
+			// A click leaves the row or column selected; a finger's tap shows the handle's menu.
+			if (!this.whole) gripMenu(view, { table: () => table, cell: this.cell }, kind, event);
 			return;
 		}
-		if (land && land.index !== origin) moveTo(view, table, kind, origin, land.index);
+		if (land && land.index !== origin) moveTo(view, table, kind, origin, land.index, this.whole);
 	};
 
 	private readonly onCancel = (event: PointerEvent) => {

@@ -2629,8 +2629,9 @@
 		// window.__checkRangesOnly instead, only the section on its ranges of cells, with
 		// window.__checkCellDragsOnly instead, only the section on dragging across its cells, with
 		// window.__checkCellEditsOnly instead, only the section on clearing, cutting and pasting its cells, with
-		// window.__checkFormattingOnly instead, only the section on formatting its cells, and with
-		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks.
+		// window.__checkFormattingOnly instead, only the section on formatting its cells, with
+		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks, and with
+		// window.__checkRangeMenusOnly instead, only the section on a range's right-click menu and the grips' clicks.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3776,7 +3777,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -6187,6 +6188,7 @@
 							await release(to);
 							out.afterRow = view.state.doc.toString();
 							out.cellAfterRow = on ? tableAt(view, null)?.cell ?? null : undefined;
+							out.anchorAfterRow = on ? preview.cells(view)?.anchor ?? null : undefined;
 							out.leftOver = view.contentDOM.querySelectorAll('.table-drag-target, .selectable-tables-dragged, .cm-table-widget.is-dragging').length;
 							await key('z', { meta: true });
 							out.undoneRow = view.state.doc.toString() === text;
@@ -6202,6 +6204,8 @@
 							await release(end);
 							out.afterColumn = view.state.doc.toString();
 							out.cellAfterColumn = on ? tableAt(view, null)?.cell ?? null : undefined;
+							out.anchorAfterColumn = on ? preview.cells(view)?.anchor ?? null : undefined;
+							out.rowsAfterColumn = on ? tableAt(view, null)?.grid.rows : undefined;
 							await key('z', { meta: true });
 							out.undoneColumn = view.state.doc.toString() === text;
 							await leaveAll(view);
@@ -6215,10 +6219,11 @@
 						check('Own 93: dragging Cactus\'s grip onto Fern puts Cactus above Fern, as Obsidian\'s own table does', dragsOn.afterRow === dragsOff.afterRow && dragsOn.afterRow !== dragsOn.text && /\| Cactus[^\n]*\n\| Fern/.test(dragsOn.afterRow), { on: firstTable(dragsOn.afterRow), off: firstTable(dragsOff.afterRow) });
 						check('Own 93: dragging Room\'s grip onto Notes puts Room after Notes, as Obsidian\'s own table does', dragsOn.afterColumn === dragsOff.afterColumn && /\| Plant +\| Notes +\| Room/.test(dragsOn.afterColumn), { on: firstTable(dragsOn.afterColumn), off: firstTable(dragsOff.afterColumn) });
 						check('Own 93: while dragging, Obsidian\'s blue line shows on the landing row\'s top and the landing column\'s far edge, as with the switch off', dragsOn.dragging && dragsOn.rowLine !== null && Math.abs(dragsOn.rowLine) <= 2 && dragsOn.colLine !== null && Math.abs(dragsOn.colLine) <= 2 && dragsOff.rowLine !== null && Math.abs(dragsOff.rowLine) <= 2, { on: [dragsOn.rowLine, dragsOn.colLine], off: [dragsOff.rowLine, dragsOff.colLine] });
-						check('Own 93: let go, the moved row\'s first cell, or the moved column\'s header, is selected, and nothing of the drag is left', dragsOn.cellAfterRow?.row === 1 && dragsOn.cellAfterRow?.column === 0 && dragsOn.cellAfterColumn?.row === 0 && dragsOn.cellAfterColumn?.column === 2 && dragsOn.leftOver === 0, { row: dragsOn.cellAfterRow, column: dragsOn.cellAfterColumn, leftOver: dragsOn.leftOver });
+						check('Own 93: let go, the moved row, or the moved column, is selected as a range from its first cell, and nothing of the drag is left', dragsOn.cellAfterRow?.row === 1 && dragsOn.cellAfterRow?.column === 0 && dragsOn.anchorAfterRow?.row === 1 && dragsOn.anchorAfterRow?.column === 2 && dragsOn.cellAfterColumn?.row === 0 && dragsOn.cellAfterColumn?.column === 2 && dragsOn.anchorAfterColumn?.column === 2 && dragsOn.anchorAfterColumn?.row === dragsOn.rowsAfterColumn - 1 && dragsOn.leftOver === 0, { row: [dragsOn.cellAfterRow, dragsOn.anchorAfterRow], column: [dragsOn.cellAfterColumn, dragsOn.anchorAfterColumn, dragsOn.rowsAfterColumn], leftOver: dragsOn.leftOver });
 						check('Own 93: one Undo puts each back', dragsOn.undoneRow && dragsOn.undoneColumn, dragsOn);
 
-						// Own 94: the grips' menus, right-clicked and clicked, against Obsidian's grips' menus with the switch off.
+						// Own 94: the grips' menus, right-clicked, against Obsidian's grips' menus with the switch off; a click shows none
+						// and selects the row or column as a range (STA-118).
 						const gripMenusFor = async (on) => {
 							preview.use(on);
 							await sleep(400);
@@ -6241,6 +6246,8 @@
 								await sleep(200);
 								out[`${kind} click`] = titlesOf(menusShown()[0]);
 								out[`${kind} selected`] = tableAt(view, null)?.cell ?? null;
+								out[`${kind} anchor`] = preview.cells(view)?.anchor ?? null;
+								out[`${kind} rows`] = tableAt(view, null)?.grid.rows;
 								await closeMenus();
 								await leaveAll(view);
 							}
@@ -6250,7 +6257,7 @@
 						const gripMenusOff = await gripMenusFor(false);
 						const gripMenusOn = await gripMenusFor(true);
 						check('Own 94: a right-click on a row\'s grip shows that row\'s items, and on a column\'s grip Sort and its items, as Obsidian\'s grips do', gripMenusOn['row right-click'].join() === gripMenusOff['row right-click'].join() && gripMenusOn['column right-click'].join() === gripMenusOff['column right-click'].join() && gripMenusOn['row right-click'].length >= 5 && gripMenusOn['column right-click'].length >= 8, { on: gripMenusOn, off: gripMenusOff });
-						check('Own 94: a click on a grip without dragging shows the same menu, and selects its row\'s first cell or its column\'s header', gripMenusOn['row click'].join() === gripMenusOn['row right-click'].join() && gripMenusOn['column click'].join() === gripMenusOn['column right-click'].join() && gripMenusOn['row selected']?.row === 2 && gripMenusOn['column selected']?.column === 1 && gripMenusOn['column selected']?.row === 0, gripMenusOn);
+						check('Own 94: a click on a grip without dragging shows no menu, and selects its row or its column as a range, from its first cell', gripMenusOn['row click'].length === 0 && gripMenusOn['column click'].length === 0 && gripMenusOn['row selected']?.row === 2 && gripMenusOn['row selected']?.column === 0 && gripMenusOn['row anchor']?.row === 2 && gripMenusOn['row anchor']?.column === 2 && gripMenusOn['column selected']?.column === 1 && gripMenusOn['column selected']?.row === 0 && gripMenusOn['column anchor']?.column === 1 && gripMenusOn['column anchor']?.row === gripMenusOn['column rows'] - 1, gripMenusOn);
 
 						// Own 95: the + buttons, against Obsidian's: a row at the end, its first cell open; a column at the end, its
 						// header open.
@@ -6528,14 +6535,14 @@
 								await leaveAll(view);
 								await restore(view, text);
 								await sleep(300);
-								// Clicked without dragging: its menu.
+								// Right-clicked: its menu.
 								const bedNow = gripOf(view, on, 'Plants', 'column', 1);
 								if (on && bedNow) {
 									// Still pinned, the grip in the band above the header.
 									out.pinnedAtClick = Math.abs(cellOf(view, on, 'Plants', 0, 1).getBoundingClientRect().top - (view.scrollDOM.getBoundingClientRect().top + out.band)) <= 2;
 									const at = centre(bedNow);
-									await press(at);
-									await release(at);
+									await press(at, 'right');
+									await release(at, 'right');
 									out.pinnedMenu = titlesOf(menusShown()[0]);
 									await closeMenus();
 									await leaveAll(view);
@@ -6562,8 +6569,8 @@
 								const bedAgain = gripOf(view, on, 'Plants', 'column', 1);
 								if (on && bedAgain) {
 									const at = centre(bedAgain);
-									await press(at);
-									await release(at);
+									await press(at, 'right');
+									await release(at, 'right');
 									out.placeMenu = titlesOf(menusShown()[0]);
 									await closeMenus();
 									await leaveAll(view);
@@ -6614,8 +6621,8 @@
 							};
 							const click = async (grip) => {
 								const at = centre(grip);
-								await press(at);
-								await release(at);
+								await press(at, 'right');
+								await release(at, 'right');
 								const titles = titlesOf(menusShown()[0]);
 								await closeMenus();
 								await leaveAll(view);
@@ -6654,7 +6661,7 @@
 						results.push({ name: 'Own 99 pinned header\'s column grip reachable (switch on, off)', ok: true, detail: [frozenOn.columnReachable, frozenOff.columnReachable] });
 						check('Own 99: with the switch on, Plants\' rows pin a grip\'s height below the pane\'s top, and with the switch off at its top', frozenOn.pinned && frozenOn.band > 0 && frozenOff.pinned, { on: { pinned: frozenOn.pinned, band: frozenOn.band }, off: { pinned: frozenOff.pinned } });
 						check('Own 99: with the switch on, the pinned header\'s grip for Bed is in the pane, and dragged onto Sown it writes what the same drag writes with the header at its place; with the switch off it\'s above the pane, as before', frozenOn.columnReachable && frozenOn.afterColumn === frozenOn.afterPlaceColumn && !frozenOff.columnReachable, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn)?.slice(0, 300), place: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.columnReachable } });
-						check('Own 99: a click on the pinned header\'s grip shows the same menu as at the header\'s place', frozenOn.pinnedAtClick && !!frozenOn.pinnedMenu?.length && frozenOn.pinnedMenu.join() === frozenOn.placeMenu?.join(), { pinnedAtClick: frozenOn.pinnedAtClick, pinned: frozenOn.pinnedMenu, place: frozenOn.placeMenu });
+						check('Own 99: a right-click on the pinned header\'s grip shows the same menu as at the header\'s place', frozenOn.pinnedAtClick && !!frozenOn.pinnedMenu?.length && frozenOn.pinnedMenu.join() === frozenOn.placeMenu?.join(), { pinnedAtClick: frozenOn.pinnedAtClick, pinned: frozenOn.pinnedMenu, place: frozenOn.placeMenu });
 						check('Own 99: with the header at its place, Bed\'s grip dragged onto Sown puts Bed after Sown, as with the switch off', frozenOn.placeReachable && frozenOn.afterPlaceColumn === frozenOff.afterPlaceColumn && /\| Sown +\| Bed/.test(plants(frozenOn.afterPlaceColumn) ?? ''), { on: { reachable: frozenOn.placeReachable, text: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.placeReachable, text: plants(frozenOff.afterPlaceColumn)?.slice(0, 300) } });
 						const deep = await deepGrip();
 						const deepText = (text) => {
@@ -6663,7 +6670,7 @@
 							return lines.slice(at, at + 4).map((line) => line.slice(0, 160));
 						};
 						check('Own 99: past row 300 of Frozen table 2000 by 12, the pinned header\'s grip for Column 2 is in the pane, and dragged onto Column 3 it writes what the same drag writes at the table\'s top', deep.pinned && deep.reachable && !!deep.afterDeep && deep.afterDeep !== deep.text && deep.afterDeep === deep.afterPlace, { pinned: deep.pinned, reachable: deep.reachable, deep: deepText(deep.afterDeep), place: deepText(deep.afterPlace) });
-						check('Own 99: there, a click on it shows the same menu as at the table\'s top', deep.deepPinnedAtClick && !!deep.deepMenu?.length && deep.deepMenu.join() === deep.placeMenu?.join(), { pinnedAtClick: deep.deepPinnedAtClick, deep: deep.deepMenu, place: deep.placeMenu });
+						check('Own 99: there, a right-click on it shows the same menu as at the table\'s top', deep.deepPinnedAtClick && !!deep.deepMenu?.length && deep.deepMenu.join() === deep.placeMenu?.join(), { pinnedAtClick: deep.deepPinnedAtClick, deep: deep.deepMenu, place: deep.placeMenu });
 						check('Own 99: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						await closeMenus();
@@ -9534,6 +9541,504 @@
 						}
 						const settingsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
 						if (((await plugin.loadData())?.clickSelects ?? true) !== (savedBefore?.clickSelects ?? true)) await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
+						preview.setClickSelects(false);
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkRangeMenusOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly) {
+					// --- A range of cells' right-click menu, and a grip's click selecting its row or column, on the plugin's table
+					// (STA-118): the range's menu against Obsidian's own range's with the switch off, item by item, the Format
+					// submenu's checkmarks included, then the grips. Real presses, right-clicks, drags and keys through the window's
+					// debugger, with Obsidian drawing its menus. The menu's Cut, Copy and Paste reach the system clipboard, so it's
+					// saved first and put back after. Run alone with window.__checkOwnOnly, __checkCellsOnly and
+					// __checkRangeMenusOnly all true.
+					preview.use(true);
+					preview.setClickSelects(true);
+					await sleep(400);
+					const touched = ['Cell moves', 'Two report tables', 'Table 2000 by 12', 'Frozen table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const plugin = app.plugins.plugins['selectable-tables'];
+					const savedBefore = await plugin.loadData();
+					const config = app.vault.config;
+					const hadNative = Object.hasOwn(config, 'nativeMenus');
+					const nativeBefore = config.nativeMenus;
+					const board = window.electron?.clipboard ?? window.electron?.remote?.clipboard;
+					const boardBefore = board && { text: board.readText(), html: board.readHTML(), rtf: board.readRTF(), image: board.readImage() };
+					const codes = { Escape: 27, Enter: 13, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Backspace: 8, Delete: 46 };
+					const modifiers = (o) => (o.meta ? 4 : 0) | (o.shift ? 8 : 0);
+					const key = async (name, o = {}) => {
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: codes[name] ?? name.toUpperCase().charCodeAt(0), modifiers: modifiers(o), unmodifiedText: macChar(name), text: '' };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await sleep(o.wait ?? 200);
+					};
+					const shift = { shift: true };
+					const round = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+					const mouse = (type, p, o = {}) => cdp.sendCommand('Input.dispatchMouseEvent', { type, ...round(p), button: type === 'mouseMoved' && !o.held ? 'none' : (o.button ?? 'left'), buttons: type === 'mouseReleased' || (type === 'mouseMoved' && !o.held) ? 0 : o.button === 'right' ? 2 : 1, clickCount: type === 'mouseMoved' ? 0 : 1, modifiers: 0 });
+					const press = async (p, o = {}) => {
+						await mouse('mouseMoved', p);
+						await sleep(120);
+						await mouse('mousePressed', p, o);
+						await frames(2);
+					};
+					const release = async (p, o = {}) => {
+						await mouse('mouseReleased', p, o);
+						await sleep(400);
+						await frames(2);
+					};
+					const click = async (p) => {
+						await press(p);
+						await release(p);
+					};
+					const rightClick = async (p) => {
+						await press(p, { button: 'right' });
+						await release(p, { button: 'right' });
+						await sleep(200);
+					};
+					const glide = async (from, to, steps = 8) => {
+						for (let i = 1; i <= steps; i++) {
+							await mouse('mouseMoved', { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }, { held: true });
+							await frames(1);
+						}
+						await frames(2);
+					};
+					const centre = (el) => {
+						const r = el.getBoundingClientRect();
+						return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+					};
+					// A point in a cell clear of its text, so a link there isn't followed: its padding, at its left.
+					const inCell = (el) => {
+						const r = el.getBoundingClientRect();
+						return { x: r.left + 5, y: r.top + r.height / 2 };
+					};
+					const where = (view) => {
+						const cells = preview.cells(view) ?? {};
+						return `${cells.selected ? `${cells.selected.row},${cells.selected.column}` : '-'}${cells.anchor ? ` from ${cells.anchor.row},${cells.anchor.column}` : ''}`;
+					};
+					const under = (view, heading, nth = 0) => {
+						const text = view.state.doc.toString();
+						const start = heading ? text.indexOf(`## ${heading}`) : 0;
+						const next = heading ? text.indexOf('\n## ', start + 1) : -1;
+						return models(view).filter((model) => model.from > start && (next < 0 || model.from < next))[nth] ?? null;
+					};
+					const obsidianCell = (view, heading, row, column, nth = 0) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						const widgets = Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget')).filter((el) => view.posAtDOM(el) > at);
+						return widgets[nth]?.querySelector('table')?.rows[row]?.cells[column] ?? null;
+					};
+					// The text of the table under a heading, from its header to the next blank line.
+					const tableText = (view, heading) => {
+						const text = view.state.doc.toString();
+						const start = text.indexOf('\n|', heading ? text.indexOf(`## ${heading}`) : 0) + 1;
+						const end = text.indexOf('\n\n', start);
+						return text.slice(start, end < 0 ? text.length : end);
+					};
+					// A table's cells as its text reads, the header first, the delimiter left out: formatting pads a table Obsidian
+					// wrote again, where Obsidian's range leaves its padding, so cells are what compare.
+					const cellsOf = (markdown) => JSON.stringify(markdown.split('\n').filter((line, i) => i !== 1).map((line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((cell) => cell.trim())));
+					const scrollTo = async (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'start' }) });
+						await sleep(400);
+						await frames(3);
+					};
+					const leave = async (view) => {
+						for (let i = 0; i < 3; i++) await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					const undo = () => key('z', { meta: true, wait: 400 });
+					const menusShown = () => Array.from(document.querySelectorAll('.menu'));
+					const closeMenus = async () => {
+						for (let i = 0; i < 4 && menusShown().length; i++) {
+							menusShown().pop()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+							await sleep(200);
+						}
+					};
+					const itemsOf = (menu) => Array.from(menu?.querySelectorAll('.menu-item, .menu-separator') ?? []);
+					// A menu as it reads: each item's section, title, checkmark and submenu, and a line where Obsidian separates
+					// sections. Icons apart: `iconsOf`.
+					const shapeOf = (menu) =>
+						itemsOf(menu).map((el) => (el.classList.contains('menu-separator') ? '|' : `${el.dataset.section ?? ''}: ${el.querySelector('.menu-item-title')?.textContent ?? ''}${el.classList.contains('mod-checked') ? ' ✓' : ''}${el.classList.contains('has-submenu') ? ' ›' : ''}`));
+					const iconsOf = (menu) =>
+						itemsOf(menu)
+							.filter((el) => el.classList.contains('menu-item'))
+							.map((el) => Array.from(el.querySelector('.menu-item-icon:not(.mod-checked):not(.mod-submenu) svg')?.classList ?? []).find((name) => name.startsWith('lucide-')) ?? '');
+					const itemNamed = (menu, title) => itemsOf(menu).find((el) => el.querySelector('.menu-item-title')?.textContent === title) ?? null;
+					// A submenu, opened as a hand opens it: the pointer resting on its item.
+					const openSub = async (title) => {
+						const item = itemNamed(menusShown().at(-1), title);
+						if (!item) return null;
+						const count = menusShown().length;
+						await mouse('mouseMoved', centre(item));
+						for (let i = 0; i < 20 && menusShown().length === count; i++) await sleep(100);
+						await sleep(150);
+						return menusShown().length > count ? menusShown().at(-1) : null;
+					};
+					// An item chosen with a real click, down a path of submenus.
+					const choose = async (path) => {
+						for (const title of path.slice(0, -1)) if (!(await openSub(title))) return false;
+						const item = itemNamed(menusShown().at(-1), path.at(-1));
+						if (!item) return false;
+						await click(centre(item));
+						await sleep(300);
+						return true;
+					};
+					// A range, on the plugin's table (a click on its first cell, then Shift and the arrows) or on Obsidian's own (a
+					// drag across it), in Cell moves' Seed trays.
+					const rangeIn = async (view, on, from, moves, to) => {
+						if (on) {
+							await click(inCell(under(view, 'Seed trays').cellElement({ row: from[0], column: from[1] })));
+							for (const move of moves) await key(move, shift);
+							return where(view);
+						}
+						const a = obsidianCell(view, 'Seed trays', from[0], from[1]);
+						const b = obsidianCell(view, 'Seed trays', to[0], to[1]);
+						const p = inCell(a);
+						const q = inCell(b);
+						await press(p);
+						await glide(p, q);
+						await release(q);
+						return view.contentDOM.querySelectorAll('.cm-table-widget .is-selected').length;
+					};
+					const cellIn = (view, on, row, column) => (on ? under(view, 'Seed trays').cellElement({ row, column }) : obsidianCell(view, 'Seed trays', row, column));
+					// Fern to the empty cell beside Basil, as the test plan has it, and A2's row.
+					const FERN = { from: [1, 1], moves: ['ArrowRight', 'ArrowDown'], to: [2, 2] };
+					const A2 = { from: [2, 0], moves: ['ArrowRight', 'ArrowRight'], to: [2, 2] };
+					// Opens Cell moves at Seed trays, with the switch on or off, the table as it was.
+					const seedTrays = async (on, text) => {
+						preview.use(on);
+						await sleep(400);
+						const view = await open('Cell moves');
+						await sleep(300);
+						if (text !== undefined && view.state.doc.toString() !== text) {
+							view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+							await sleep(400);
+						}
+						await scrollTo(view, 'Seed trays');
+						await leave(view);
+						await scrollTo(view, 'Seed trays');
+						return view;
+					};
+					// A menu item chosen on a range, with the switch on or off: the table's text after it, the selection after it
+					// (switch on), and whether Undo took it back.
+					const runItem = async (on, range, path, text, after) => {
+						const view = await seedTrays(on, text);
+						await rangeIn(view, on, range.from, range.moves, range.to);
+						await rightClick(inCell(cellIn(view, on, range.to[0], range.to[1])));
+						const chosen = await choose(path);
+						await closeMenus();
+						const out = { chosen, table: tableText(view, 'Seed trays'), at: on ? where(view) : null };
+						if (after) out.after = await after(view);
+						await undo();
+						out.undone = view.state.doc.toString() === text;
+						if (!out.undone) {
+							view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+							await sleep(300);
+						}
+						await leave(view);
+						return out;
+					};
+					let view;
+					try {
+						config.nativeMenus = false;
+						app.updateUseNativeMenu();
+						view = await open('Cell moves');
+						await sleep(300);
+						const text = view.state.doc.toString();
+						const trays = tableText(view, 'Seed trays');
+
+						// Own 167 (step 1): the range's menu, its Format submenu and its Highlight colors, against Obsidian's own range's
+						// with the switch off, in Seed trays; then Format › Italic on both.
+						const menuFor = async (on) => {
+							view = await seedTrays(on, text);
+							const range = await rangeIn(view, on, FERN.from, FERN.moves, FERN.to);
+							await rightClick(inCell(cellIn(view, on, 1, 2)));
+							const top = menusShown()[0];
+							const out = { range, at: on ? where(view) : null, top: shapeOf(top), topIcons: iconsOf(top) };
+							const format = await openSub('Format');
+							out.format = shapeOf(format);
+							out.formatIcons = iconsOf(format);
+							out.highlight = shapeOf(await openSub('Highlight'));
+							await closeMenus();
+							await leave(view);
+							return out;
+						};
+						const menuOff = await menuFor(false);
+						const menuOn = await menuFor(true);
+						const italicOff = await runItem(false, FERN, ['Format', 'Italic'], text);
+						const italicOn = await runItem(true, FERN, ['Format', 'Italic'], text);
+						check('Own 167: inside a range, the right-click menu has Obsidian\'s range items, in its order and sections, as on Obsidian\'s own range', menuOn.at === '2,2 from 1,1' && menuOn.top.join('\n') === menuOff.top.join('\n') && menuOn.top.length >= 9 && menuOn.topIcons.join() === menuOff.topIcons.join(), { on: menuOn.top, off: menuOff.top, icons: [menuOn.topIcons, menuOff.topIcons], at: menuOn.at, range: menuOff.range });
+						check('Own 167: its Format submenu and Highlight colors are Obsidian\'s', menuOn.format.join('\n') === menuOff.format.join('\n') && menuOn.format.length >= 8 && menuOn.formatIcons.join() === menuOff.formatIcons.join() && menuOn.highlight.join('\n') === menuOff.highlight.join('\n') && menuOn.highlight.length === 7, { on: [menuOn.format, menuOn.highlight, menuOn.formatIcons], off: [menuOff.format, menuOff.highlight, menuOff.formatIcons] });
+						check('Own 167: Format › Italic puts every cell of the range in italics, as on Obsidian\'s range, the range still selected, and Undo takes it back', italicOn.chosen && cellsOf(italicOn.table) === cellsOf(italicOff.table) && italicOn.table !== trays && italicOn.at === '2,2 from 1,1' && italicOn.undone, { on: italicOn, off: italicOff });
+
+						// Own 168 (step 2): Clear cells, the Align items, Delete cells, Cut, Copy and Paste, each against Obsidian's range.
+						const items = {};
+						// How the Seed column is drawn afterwards, its header and Tomato's cell: a cell's own alignment, as the browser
+						// lays it out (Brian's hand check, 11/25: the text took the alignment, and the plugin's table didn't draw it).
+						const drawnAlign = (on) => async (view) => {
+							await sleep(300);
+							await frames(3);
+							return [0, 3].map((row) => {
+								const el = cellIn(view, on, row, 1);
+								return el ? getComputedStyle(el).textAlign : null;
+							});
+						};
+						for (const [name, range, path] of [
+							['clear', FERN, ['Clear cells']],
+							['left', FERN, ['Align left']],
+							['center', FERN, ['Align center']],
+							['right', FERN, ['Align right']],
+							['delete', A2, ['Delete cells']],
+						]) {
+							const align = path[0].startsWith('Align');
+							items[name] = { off: await runItem(false, range, path, text, align ? drawnAlign(false) : undefined), on: await runItem(true, range, path, text, align ? drawnAlign(true) : undefined) };
+						}
+						// Only the plugin's Undo is checked: with the switch off, Undo after Obsidian's own Align or Clear formatting on a
+						// range doesn't take it back (the note is put back by hand after each).
+						const same = (name) => items[name].on.chosen && items[name].on.table === items[name].off.table && items[name].on.table !== trays && items[name].on.undone;
+						check('Own 168: Clear cells empties the range\'s cells, as on Obsidian\'s range, and the range goes, its first cell selected', same('clear') && items.clear.on.at === '1,1', items.clear);
+						check('Own 168: Align left, center and right align the range\'s columns, as on Obsidian\'s range, the range still selected', ['left', 'center', 'right'].every(same) && items.center.on.at === '2,2 from 1,1', { left: items.left, center: items.center, right: items.right });
+						check('Own 168: the plugin\'s table draws each alignment at once, the header and the body, as Obsidian\'s table draws it', ['left', 'center', 'right'].every((name) => items[name].on.after?.join() === items[name].off.after?.join()) && items.center.on.after?.every((align) => align === 'center') && items.right.on.after?.every((align) => align === 'end' || align === 'right'), { left: [items.left.on.after, items.left.off.after], center: [items.center.on.after, items.center.off.after], right: [items.right.on.after, items.right.off.after] });
+						check('Own 168: on A2\'s row, Delete cells deletes the row, as on Obsidian\'s range', same('delete') && !items.delete.on.table.includes('| A2 '), items.delete);
+						// The clipboard: what Copy and Cut put there, and what Paste writes from it, onto Tomato's two rows.
+						const clipboardFor = async (on) => {
+							const out = {};
+							board?.clear();
+							out.copy = await runItem(on, FERN, ['Copy'], text, async () => board?.readText() ?? null);
+							board?.clear();
+							out.cut = await runItem(on, FERN, ['Cut'], text, async () => board?.readText() ?? null);
+							view = await seedTrays(on, text);
+							await rangeIn(view, on, FERN.from, FERN.moves, FERN.to);
+							await rightClick(inCell(cellIn(view, on, 1, 2)));
+							await choose(['Copy']);
+							await closeMenus();
+							await leave(view);
+							out.paste = await runItem(on, { from: [3, 1], moves: ['ArrowRight', 'ArrowDown'], to: [4, 2] }, ['Paste'], text);
+							return out;
+						};
+						const clipOff = await clipboardFor(false);
+						const clipOn = await clipboardFor(true);
+						check('Own 168: the menu\'s Copy puts the range on the clipboard, as Obsidian\'s does, and changes nothing', !!board && clipOn.copy.chosen && clipOn.copy.after === clipOff.copy.after && !!clipOn.copy.after && clipOn.copy.table === trays, { on: clipOn.copy, off: clipOff.copy });
+						check('Own 168: the menu\'s Cut copies the same and clears the cells, as Obsidian\'s does', clipOn.cut.chosen && clipOn.cut.after === clipOff.cut.after && !!clipOn.cut.after && clipOn.cut.table === clipOff.cut.table && clipOn.cut.table !== trays && clipOn.cut.undone, { on: clipOn.cut, off: clipOff.cut });
+						check('Own 168: the menu\'s Paste writes the copied cells over Tomato\'s two rows, as Obsidian\'s does', clipOn.paste.chosen && clipOn.paste.table === clipOff.paste.table && clipOn.paste.table !== trays && clipOn.paste.undone, { on: clipOn.paste, off: clipOff.paste });
+
+						// Own 169 (step 3): each Format item on the range, against Obsidian's range: the cells afterwards, and the
+						// submenu's checkmarks once it's on, read from a second right-click.
+						const formats = {};
+						const reopened = async (view, on) => {
+							await rightClick(inCell(cellIn(view, on, 1, 2)));
+							const format = shapeOf(await openSub('Format'));
+							const highlight = shapeOf(await openSub('Highlight'));
+							await closeMenus();
+							return { format, highlight };
+						};
+						for (const path of [['Format', 'Bold'], ['Format', 'Italic'], ['Format', 'Strikethrough'], ['Format', 'Highlight', 'Default'], ['Format', 'Highlight', 'Red'], ['Format', 'Code'], ['Format', 'Math'], ['Format', 'Comment']]) {
+							const name = path.slice(1).join(' › ');
+							formats[name] = { off: await runItem(false, FERN, path, text, (view) => reopened(view, false)), on: await runItem(true, FERN, path, text, (view) => reopened(view, true)) };
+						}
+						// Clear formatting, on cells formatted first.
+						const formattedText = text.replace('| A1   | [[Watering schedule\\|Fern]] |', '| A1   | **[[Watering schedule\\|Fern]]** |');
+						formats['Clear formatting'] = { off: await runItem(false, FERN, ['Format', 'Clear formatting'], formattedText), on: await runItem(true, FERN, ['Format', 'Clear formatting'], formattedText) };
+						const formatMisses = Object.entries(formats).filter(([, { on, off }]) => !on.chosen || cellsOf(on.table) !== cellsOf(off.table) || on.table === trays || !on.undone).map(([name]) => name);
+						const checkMisses = Object.entries(formats).filter(([, { on, off }]) => on.after && (on.after.format.join() !== off.after?.format.join() || on.after.highlight.join() !== off.after?.highlight.join())).map(([name]) => name);
+						const checkedOn = (name, title) => formats[name].on.after?.format.some((line) => line.endsWith(`: ${title} ✓`) || line.endsWith(`: ${title} ✓ ›`));
+						check('Own 169: each Format item acts on every cell of the range as on Obsidian\'s range, and Undo takes it back', formatMisses.length === 0 && formattedText !== text, { misses: formatMisses, formats: Object.fromEntries(formatMisses.map((name) => [name, formats[name]])) });
+						check('Own 169: once on, each shows its checkmark, as on Obsidian\'s range', checkMisses.length === 0 && checkedOn('Bold', 'Bold') && checkedOn('Italic', 'Italic') && checkedOn('Code', 'Code') && formats['Highlight › Red'].on.after?.highlight.some((line) => line.endsWith(': Red ✓')), { misses: checkMisses, bold: formats.Bold.on.after, red: formats['Highlight › Red'].on.after, redOff: formats['Highlight › Red'].off.after });
+
+						// Own 170 (step 4): a right-click outside the range, on Tomato, ends it and shows Tomato's menu, as now.
+						view = await seedTrays(true, text);
+						await rangeIn(view, true, FERN.from, FERN.moves, FERN.to);
+						await rightClick(inCell(cellIn(view, true, 3, 1)));
+						const outside = { at: where(view), menu: shapeOf(menusShown()[0]), outlined: !!under(view, 'Seed trays').cellElement({ row: 3, column: 1 })?.classList.contains('selectable-tables-cell') };
+						await closeMenus();
+						await leave(view);
+						const titled = (title) => outside.menu.some((line) => line.includes(`: ${title}`));
+						check('Own 170: a right-click on Tomato, outside the range, ends it, selects Tomato, and shows its menu: Row, Column, Sort and the freeze items', outside.at === '3,1' && outside.outlined && titled('Row') && titled('Column') && titled('Sort by column (A to Z)') && titled('Freeze rows up to here') && !titled('Clear cells'), outside);
+
+						// Own 171 (step 5): Two report tables' grips. A click on Basil's row grip selects the row, with no menu, and
+						// Backspace deletes it; a click on Room's column grip selects the column, and Escape leaves its header; Cactus's
+						// grip dragged above Fern selects its row from the press, through the drag, and after; a click elsewhere ends it.
+						view = await open('Two report tables');
+						await sleep(300);
+						await leave(view);
+						const reportText = view.state.doc.toString();
+						const first = () => models(view)[0];
+						const gripOf = (kind, index) => (kind === 'row' ? first().cellElement({ row: index, column: 0 }) : first().cellElement({ row: 0, column: index }))?.querySelector(`:scope > .table-${kind === 'row' ? 'row' : 'col'}-drag-handle`) ?? null;
+						const grips = {};
+						let at = centre(gripOf('row', 2));
+						await click(at);
+						grips.basil = { at: where(view), menus: menusShown().length };
+						await key('Backspace');
+						grips.basil.gone = !view.state.doc.toString().includes('| Basil') && view.state.doc.toString() !== reportText;
+						await undo();
+						grips.basil.back = view.state.doc.toString() === reportText;
+						await leave(view);
+						const rows = first().grid.rows;
+						at = centre(gripOf('column', 1));
+						await click(at);
+						grips.room = { at: where(view), menus: menusShown().length };
+						await key('Escape');
+						grips.room.escaped = where(view);
+						await leave(view);
+						const cactus = centre(gripOf('row', 3));
+						await press(cactus);
+						grips.cactus = { pressed: where(view) };
+						const fern = first().cellElement({ row: 1, column: 0 }).getBoundingClientRect();
+						const onto = { x: cactus.x, y: fern.top + fern.height / 2 };
+						await glide(cactus, onto);
+						grips.cactus.during = where(view);
+						await release(onto);
+						grips.cactus.after = where(view);
+						grips.cactus.moved = /\| Cactus[^\n]*\n\| Fern/.test(view.state.doc.toString());
+						await click(inCell(first().cellElement({ row: 3, column: 1 })));
+						grips.cactus.elsewhere = where(view);
+						await undo();
+						grips.cactus.back = view.state.doc.toString() === reportText;
+						await leave(view);
+						check('Own 171: a click on Basil\'s row grip selects its row as a range and shows no menu, and Backspace deletes the row; Undo brings it back', grips.basil.at === '2,0 from 2,2' && grips.basil.menus === 0 && grips.basil.gone && grips.basil.back, grips.basil);
+						check('Own 171: a click on Room\'s column grip selects the column as a range, and Escape leaves its header cell selected', grips.room.at === `0,1 from ${rows - 1},1` && grips.room.menus === 0 && grips.room.escaped === '0,1', grips.room);
+						check('Own 171: Cactus\'s grip dragged above Fern selects its row from the press and through the drag, lands there still selected, and a click elsewhere ends it', grips.cactus.pressed === '3,0 from 3,2' && grips.cactus.during === '3,0 from 3,2' && grips.cactus.moved && grips.cactus.after === '1,0 from 1,2' && grips.cactus.elsewhere === '3,1' && grips.cactus.back, grips.cactus);
+
+						// Own 172 (step 6): in Table 2000 by 12, a click on row 3's grip, then Delete, timed from the key to the new text;
+						// a right-click on a row's grip and on a column's still shows its menu; on a phone, a tap on a grip still does.
+						view = await open('Table 2000 by 12');
+						await sleep(1500);
+						await leave(view);
+						const bigText = view.state.doc.toString();
+						const big = () => models(view)[0];
+						// Escape on a long selected table scrolls to its end, so the table's top is brought back before each press.
+						// A margin above it, so the header's column grips, which sit above the header, are in the pane.
+						const toTop = async () => {
+							big().scrollSideways(-big().sideways().scroll);
+							view.dispatch({ effects: view.constructor.scrollIntoView(big().from, { y: 'start', yMargin: 80 }) });
+							await sleep(500);
+							await frames(3);
+						};
+						await toTop();
+						const bigGrip = (kind, index) => (kind === 'row' ? big().cellElement({ row: index, column: 0 }) : big().cellElement({ row: 0, column: index }))?.querySelector(`:scope > .table-${kind === 'row' ? 'row' : 'col'}-drag-handle`) ?? null;
+						const far = {};
+						await click(centre(bigGrip('row', 3)));
+						far.at = where(view);
+						// Row 3's line: the header, the delimiter, then rows 1, 2 and 3.
+						const rowLine = view.state.doc.lineAt(big().from).number + 4;
+						const rowThree = view.state.doc.line(rowLine).text;
+						const linesBefore = view.state.doc.lines;
+						let changedAt = null;
+						const update = view.update;
+						view.update = function (transactions) {
+							const result = update.call(this, transactions);
+							if (changedAt === null && transactions.some((tr) => tr.docChanged)) changedAt = performance.now();
+							return result;
+						};
+						const started = performance.now();
+						await key('Delete', { wait: 0 });
+						for (let i = 0; i < 50 && changedAt === null; i++) await sleep(20);
+						delete view.update;
+						far.ms = changedAt === null ? null : Math.round(changedAt - started);
+						far.gone = view.state.doc.lines === linesBefore - 1 && view.state.doc.line(rowLine).text !== rowThree;
+						await undo();
+						far.back = view.state.doc.toString() === bigText;
+						await leave(view);
+						for (const [kind, index] of [['row', 5], ['column', 2]]) {
+							await toTop();
+							const grip = bigGrip(kind, index);
+							if (!grip) continue;
+							await rightClick(centre(grip));
+							far[`${kind} menu`] = shapeOf(menusShown()[0]).length;
+							far[`${kind} at`] = where(view);
+							far[`${kind} rows`] = big().grid.rows;
+							await closeMenus();
+							await leave(view);
+						}
+						const body = document.body;
+						const wasMobile = body.classList.contains('is-mobile');
+						try {
+							body.classList.add('is-mobile');
+							await cdp.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+							await sleep(300);
+							await toTop();
+							await click(inCell(big().cellElement({ row: 4, column: 0 })));
+							await sleep(300);
+							const grip = bigGrip('row', 4);
+							if (grip) {
+								await cdp.sendCommand('Input.synthesizeTapGesture', { ...round(centre(grip)), gestureSourceType: 'touch' });
+								await sleep(600);
+								far.tap = { menu: shapeOf(menusShown()[0]).length, at: where(view) };
+							}
+							await closeMenus();
+						} finally {
+							await cdp.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
+							if (!wasMobile) body.classList.remove('is-mobile');
+							await leave(view);
+						}
+						results.push({ name: 'Own 172 a click on row 3\'s grip, then Delete, in Table 2000 by 12 (ms)', ok: true, detail: far.ms });
+						check('Own 172: in Table 2000 by 12, a click on row 3\'s grip selects the row, and Delete deletes it in under 100 ms; Undo brings it back', far.at === '3,0 from 3,11' && far.gone && far.ms !== null && far.ms < 100 && far.back, far);
+						check('Own 172: a right-click on a row\'s grip and on a column\'s still shows its menu, and on a phone a tap on a grip does too', far['row menu'] >= 5 && far['column menu'] >= 8 && far.tap?.menu >= 5, far);
+						check('Own 172: a right-click on a grip selects its row or column as a range first, as a click does', far['row at'] === '5,0 from 5,11' && far['column at'] === `0,2 from ${far['column rows'] - 1},2`, far);
+
+						// Own 173: past row 300 of Frozen table 2000 by 12, where a block's copy of the header pins, Column 2 centered by a
+						// change to the delimiter row alone, as Align or a second pane writes it: the copy draws it, and so do the rows.
+						view = await open('Frozen table 2000 by 12');
+						await sleep(1500);
+						await leave(view);
+						const frozenText = view.state.doc.toString();
+						const frozen = () => models(view)[0];
+						const firstLine = view.state.doc.lineAt(frozen().from).number;
+						const pinAt = () => view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientTop + (parseFloat(getComputedStyle(view.dom).getPropertyValue('--selectable-tables-band')) || 0);
+						const copyCell = (column) => {
+							const box = frozen().boxes.find((b) => {
+								const r = b.isConnected && b.getBoundingClientRect();
+								return r && r.top <= pinAt() && r.bottom > pinAt();
+							});
+							return box?.querySelector('.selectable-tables-copy-table table')?.rows[0]?.cells[column] ?? null;
+						};
+						const deepRow = view.state.doc.line(firstLine + 2 + 320);
+						view.dispatch({ effects: view.constructor.scrollIntoView(deepRow.from, { y: 'start' }) });
+						await sleep(500);
+						await frames(4);
+						const copied = { before: copyCell(2) && getComputedStyle(copyCell(2)).textAlign };
+						const delimiter = view.state.doc.line(firstLine + 1);
+						const cells = delimiter.text.split('|');
+						cells[3] = cells[3].replace(/^ ?-/, ':').replace(/- ?$/, ':');
+						view.dispatch({ changes: { from: delimiter.from, to: delimiter.to, insert: cells.join('|') } });
+						await sleep(600);
+						await frames(4);
+						const bodyCell = frozen().cellElement({ row: 321, column: 2 });
+						Object.assign(copied, { delimiter: view.state.doc.line(firstLine + 1).text.slice(0, 60), copy: copyCell(2) && getComputedStyle(copyCell(2)).textAlign, body: bodyCell && getComputedStyle(bodyCell).textAlign });
+						view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: frozenText } });
+						await sleep(400);
+						await leave(view);
+						check('Own 173: a column centered deep in Frozen table 2000 by 12 is drawn centered in the pinned copy of its header and in its rows', !!copied.before && copied.before !== 'center' && copied.copy === 'center' && copied.body === 'center', copied);
+
+						view = await open('Cell moves');
+						await sleep(300);
+						check('Own 174: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						if (hadNative) config.nativeMenus = nativeBefore;
+						else delete config.nativeMenus;
+						app.updateUseNativeMenu();
+						if (board && boardBefore) {
+							board.clear();
+							const data = {};
+							if (boardBefore.text) data.text = boardBefore.text;
+							if (boardBefore.html) data.html = boardBefore.html;
+							if (boardBefore.rtf) data.rtf = boardBefore.rtf;
+							if (boardBefore.image && !boardBefore.image.isEmpty()) data.image = boardBefore.image;
+							if (Object.keys(data).length) board.write(data);
+						}
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						if (((await plugin.loadData())?.clickSelects ?? true) !== (savedBefore?.clickSelects ?? true)) {
+							const settingsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+							await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
+						}
 						preview.setClickSelects(false);
 						preview.use(false);
 						await sleep(300);

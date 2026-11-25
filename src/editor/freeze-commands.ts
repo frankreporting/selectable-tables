@@ -2,7 +2,7 @@ import { isolateHistory } from '@codemirror/commands';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import { type Command, type Editor, type IconName, type MarkdownFileInfo, type MarkdownView, Menu, Notice } from 'obsidian';
 import { cellSelection, TABLE_CLASS } from './cells';
-import { selectedTable, writesTable } from './decide';
+import { boundsOf, selectedTable, writesTable } from './decide';
 import { escapeCell, noteView, wholeTable } from './extension';
 import { canFreeze } from './freeze';
 import { hasMark, MAX_FROZEN_COLUMNS, readFreeze } from './freeze-mark';
@@ -144,9 +144,11 @@ export function selectAt(view: EditorView, place: Place): boolean {
 
 /**
  * Items a preview build puts before the freeze items, on the plugin's own table: Obsidian's Row, Column and Sort, which
- * its own table menu has over its own table (src/own-table/table-commands.ts).
+ * its own table menu has over its own table (src/own-table/table-commands.ts). A drag handle's menu is its row's or
+ * its column's, and a right-click inside a range of cells gets the range's menu (src/own-table/range-menu.ts), with no
+ * freeze items, as Obsidian's range has none.
  */
-type TableItems = (menu: Menu, view: EditorView, place: Place, grip?: 'row' | 'column') => void;
+type TableItems = (menu: Menu, view: EditorView, place: Place, kind?: 'row' | 'column' | 'range') => void;
 
 let tableItems: TableItems | null = null;
 
@@ -217,7 +219,14 @@ export const tableMenus = ViewPlugin.define((view) => {
 			if (tableItems && place.table() && selectAt(view, place)) tableItems(Menu.forEvent(event), view, place, handle.matches('.table-row-drag-handle') ? 'row' : 'column');
 			return;
 		}
-		// The cell is selected first, so it shows which cell the menu is for. An open cell's empty space keeps it open.
+		// Inside the range of cells selected, the range's menu, and the range stays.
+		if (tableItems && inRange(view, place)) {
+			caught = { event, place: null };
+			tableItems(Menu.forEvent(event), view, place, 'range');
+			return;
+		}
+		// The cell is selected first, so it shows which cell the menu is for, and a range ends. An open cell's empty space
+		// keeps it open.
 		const open = openCell(view)?.place.cell;
 		if (open?.row !== place.cell.row || open?.column !== place.cell.column) selectAt(view, place);
 		if (tableItems && place.table()) tableItems(Menu.forEvent(event), view, place);
@@ -244,6 +253,16 @@ export const tableMenus = ViewPlugin.define((view) => {
 		},
 	};
 });
+
+/** Whether a cell is in the note's range of cells, in the same table: a range of one cell is that cell selected. */
+function inRange(view: EditorView, place: Place): boolean {
+	const cells = view.plugin(cellSelection);
+	const table = selectedTable(view.state, viewLayout(view));
+	if (!cells?.anchor || !cells.selected || !table || place.table()?.from !== table.from) return false;
+	const { top, bottom, left, right } = boundsOf(cells.anchor, cells.selected);
+	const { row, column } = place.cell;
+	return row >= top && row <= bottom && column >= left && column <= right;
+}
 
 /** The freeze commands, offered with a cell of a table selected or open in Live Preview. */
 export function freezeCommands(): Command[] {

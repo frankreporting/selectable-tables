@@ -1,9 +1,9 @@
 import { isolateHistory } from '@codemirror/commands';
 import { ChangeSet, EditorSelection } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { type Command, editorInfoField, htmlToMarkdown, type IconName, Menu, type MenuItem } from 'obsidian';
+import { type Command, editorInfoField, htmlToMarkdown, type IconName, Menu, type MenuItem, Platform } from 'obsidian';
 import { cellSelection } from '../editor/cells';
-import { boundsOf, writesTable } from '../editor/decide';
+import { type Bounds, boundsOf, type Grid, sameCell, writesTable } from '../editor/decide';
 import { escapeCell, noteView, wholeTable } from '../editor/extension';
 import { type Place, selectAt, targetIn } from '../editor/freeze-commands';
 import { hasMark, markText, readFreeze, withoutMark } from '../editor/freeze-mark';
@@ -38,7 +38,7 @@ const ROW_ITEMS: Item[] = [
 	{ edit: 'row-delete', name: 'Delete row', icon: 'lucide-trash-2', section: 'table-modify' },
 ];
 
-const ALIGN_ITEMS: Item[] = [
+export const ALIGN_ITEMS: Item[] = [
 	{ edit: 'col-align-left', name: 'Align left', icon: 'lucide-align-left', section: 'table-align' },
 	{ edit: 'col-align-center', name: 'Align center', icon: 'lucide-align-center', section: 'table-align' },
 	{ edit: 'col-align-right', name: 'Align right', icon: 'lucide-align-right', section: 'table-align' },
@@ -75,6 +75,8 @@ interface EditEnd {
 	column?: number;
 	/** Where a drag puts its row or column. */
 	to?: number;
+	/** The edit's row or column selected afterwards as a range of cells, as a handle's drag leaves it. */
+	whole?: 'row' | 'column';
 }
 
 /**
@@ -113,7 +115,7 @@ function editAt(view: EditorView, table: Span, cell: Cell, edit: TableEdit, end:
 		if (open) own.openCell(cell);
 		return true;
 	}
-	return commit(view, table, own, edited, { opens: open || ADDS.has(edit), kind: 'rows', ...(end.column === undefined ? {} : { column: end.column }) });
+	return commit(view, table, own, edited, { opens: open || ADDS.has(edit), kind: 'rows', ...(end.column === undefined ? {} : { column: end.column }), ...(end.whole ? { whole: end.whole } : {}) });
 }
 
 /** A table's lines in the note. */
@@ -131,6 +133,8 @@ interface Commit {
 	kind: 'rows' | 'cells';
 	/** Where a range of cells that stays selected starts, its cell moved to last being the edit's cell. */
 	anchor?: Cell | null;
+	/** The edit's cell's row or column selected whole afterwards, the cell being its first, as a handle selects it. */
+	whole?: 'row' | 'column';
 }
 
 /** Writes an edit's lines to the note, only where they differ, or takes the table away when it leaves none. */
@@ -160,7 +164,8 @@ function write(view: EditorView, table: Span, own: DrawnTable, changes: readonly
 	const now = changes.length ? ownTable(view, { from: table.from, to }) : own;
 	const finish = () => {
 		const cells = view.plugin(cellSelection);
-		if (end.anchor) cells?.selectRange(end.anchor, at, undefined, false);
+		const anchor = end.whole ? wholeEnd((now ?? own).grid, at, end.whole) : end.anchor;
+		if (anchor) cells?.selectRange(anchor, at, undefined, false);
 		else cells?.select(at);
 		if (!end.opens) return;
 		cells?.opening();
@@ -262,6 +267,42 @@ export function pasteCells(view: EditorView, data: DataTransfer): void {
 	if (text !== null) writeOne(view, table, own, cell, text);
 }
 
+/** The note's range of cells of the plugin's table, if it's still the one from `anchor` to `cell` in the table at `from`. */
+function rangeStill(view: EditorView, from: number, anchor: Cell, cell: Cell): { table: Span; own: DrawnTable; cell: Cell; anchor: Cell; bounds: Bounds } | null {
+	const found = selectedCells(view);
+	if (!found?.anchor || found.table.from !== from || !sameCell(found.anchor, anchor) || !sameCell(found.cell, cell)) return null;
+	return { ...found, anchor: found.anchor, bounds: boundsOf(found.anchor, found.cell) };
+}
+
+/**
+ * The range menu's *Clear cells*, as Obsidian's: the range's cells are emptied, never its rows or columns, each column
+ * keeping its width, and the range's first cell is selected. Nothing happens when the range has changed since the menu.
+ */
+export function clearRange(view: EditorView, from: number, anchor: Cell, cell: Cell): void {
+	const found = rangeStill(view, from, anchor, cell);
+	if (!found) return;
+	const edited = editCells(linesOf(view, found.table), { kind: 'clear', bounds: found.bounds });
+	if (edited) commit(view, found.table, found.own, edited, { opens: false, kind: 'cells' });
+}
+
+/** The range menu's *Delete cells*, as Backspace on the range. */
+export function deleteRange(view: EditorView, from: number, anchor: Cell, cell: Cell): void {
+	if (rangeStill(view, from, anchor, cell)) clearCells(view, false);
+}
+
+/**
+ * The range menu's *Align left*, *center* and *right*, on each of the range's columns, as Obsidian's: to the start or
+ * the end of the table's direction. The range stays selected.
+ */
+export function alignRange(view: EditorView, from: number, anchor: Cell, cell: Cell, edit: TableEdit): void {
+	const found = rangeStill(view, from, anchor, cell);
+	if (!found) return;
+	const rtl = found.own.rtl;
+	const alignment = edit === 'col-align-center' ? 'center' : (edit === 'col-align-left') !== rtl ? 'left' : 'right';
+	const edited = editCells(linesOf(view, found.table), { kind: 'align', bounds: found.bounds, head: found.cell, alignment });
+	if (edited) commit(view, found.table, found.own, edited, { opens: false, kind: 'cells', anchor: found.anchor });
+}
+
 /**
  * Paste of cells copied from a table into an open cell of the plugin's table, as into Obsidian's: the cell closes, the
  * cells are written over it and on, and the last one pasted opens. Anything else on the clipboard is the cell editor's
@@ -337,12 +378,30 @@ export function addAtEnd(view: EditorView, table: Span, what: 'row' | 'column'):
 }
 
 /**
- * A drag handle let go: its row moves to the row it was let go on, or its column to the column, and the moved row's
- * first cell, or the column's header cell, is selected, where Obsidian selects the row or column as a range of cells.
+ * A drag handle let go: its row moves to the row it was let go on, or its column to the column. With a mouse or a pen
+ * the moved row or column is selected as a range of cells, as Obsidian has it; after a finger's drag, which makes no
+ * range yet, its first cell, or the column's header cell.
  */
-export function moveTo(view: EditorView, table: Span, what: 'row' | 'column', from: number, to: number): void {
+export function moveTo(view: EditorView, table: Span, what: 'row' | 'column', from: number, to: number, whole: boolean): void {
 	const cell = what === 'row' ? { row: from, column: 0 } : { row: 0, column: from };
-	runEditAt(view, table, cell, what === 'row' ? 'row-move' : 'col-move', { to });
+	runEditAt(view, table, cell, what === 'row' ? 'row-move' : 'col-move', { to, ...(whole ? { whole: what } : {}) });
+}
+
+/** The far end of a row or a column selected whole from its first cell: the row's last cell, or the column's last. */
+function wholeEnd(grid: Grid, first: Cell, whole: 'row' | 'column'): Cell {
+	return whole === 'row' ? { row: first.row, column: Math.max(0, grid.columns(first.row) - 1) } : { row: Math.max(0, grid.rows - 1), column: first.column };
+}
+
+/**
+ * A press on a drag handle with a mouse or a pen: its row or column is selected as a range of cells, from its first cell,
+ * as Obsidian's handle selects it, and an open cell closes first. Its first cell is the range's cell moved to last, so
+ * Escape goes back to it, at the handle, and the note is kept to it, not to the far end: a column's last cell can be
+ * 2,000 rows down.
+ */
+export function selectWhole(view: EditorView, table: Span & { readonly grid: Grid }, what: 'row' | 'column', index: number): void {
+	const first = what === 'row' ? { row: index, column: 0 } : { row: 0, column: index };
+	if (!selectAt(view, { table: () => table, cell: first })) return;
+	view.plugin(cellSelection)?.selectRange(wholeEnd(table.grid, first, what), first, undefined, false);
 }
 
 /**
@@ -360,6 +419,12 @@ function isOpen(view: EditorView, { row, column }: Cell): boolean {
 	return !!open && open.note === view && open.cell.row === row && open.cell.column === column;
 }
 
+/** A menu item's submenu, made by Obsidian's private `setSubmenu`, or null without it. */
+export function submenuOf(item: MenuItem): Menu | null {
+	const submenu = (item as unknown as { setSubmenu?: () => Menu }).setSubmenu;
+	return typeof submenu === 'function' ? submenu.call(item) : null;
+}
+
 /**
  * A group of items under a title, as Obsidian's table menu has *Row* and *Column*: a submenu, which only Obsidian's
  * private `setSubmenu` makes. Without it, the items follow a heading in the menu itself.
@@ -367,8 +432,7 @@ function isOpen(view: EditorView, { row, column }: Cell): boolean {
 function group(menu: Menu, title: string, key: string): (item: Item, add: (item: MenuItem) => void) => void {
 	const sub: { menu: Menu | null } = { menu: null };
 	menu.addItem((item) => {
-		const submenu = (item as unknown as { setSubmenu?: () => Menu }).setSubmenu;
-		if (typeof submenu === 'function') sub.menu = submenu.call(item);
+		sub.menu = submenuOf(item);
 		item.setSection(sub.menu ? 'table' : `table-${key}`).setIcon('lucide-table').setTitle(title);
 		if (!sub.menu) item.setIsLabel(true);
 	});
@@ -407,7 +471,20 @@ export function tableItems(menu: Menu, view: EditorView, place: Place, grip?: 'r
 	flat(SORT_ITEMS);
 }
 
-/** A drag handle's menu, at a click on it without a drag: the same items as a right-click on it. */
+/**
+ * A right-click on a drag handle: its row or column is selected as a range of cells first, as a click on it selects
+ * it, so the range shows what the menu is for, and stays after the menu (Brian's hand check, 11/25; Obsidian's handle
+ * selects nothing at a right-click). A phone's long press, which Obsidian turns into a right-click, keeps the row's
+ * first cell: a finger makes no range yet.
+ */
+export function gripItems(menu: Menu, view: EditorView, place: Place, grip: 'row' | 'column'): void {
+	const table = place.table();
+	const own = table && ownTable(view, table);
+	if (table && own && !Platform.isMobile) selectWhole(view, { from: table.from, to: table.to, grid: own.grid }, grip, grip === 'row' ? place.cell.row : place.cell.column);
+	tableItems(menu, view, place, grip);
+}
+
+/** A drag handle's menu, at a finger's tap on it: the same items as a right-click on it. */
 export function gripMenu(view: EditorView, place: Place, grip: 'row' | 'column', at: MouseEvent): void {
 	if (!selectAt(view, place)) return;
 	const menu = new Menu();

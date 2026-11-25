@@ -4,7 +4,7 @@ import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
 import { cellFormatter, forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
-import { addAtEnd, addRowFrom, clearCells, gripItems, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
+import { addAtEnd, clearCells, gripItems, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
 import { startDrag } from './own-table/drag';
 import { clickCell, clickSelectsCells, pressCell, selectEvery, setClickSelects } from './own-table/cell-drag';
 import { setTableControls } from './own-table/grips';
@@ -112,7 +112,7 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 			queueMicrotask(() => use(false));
 		},
 		// The plain cell editor gets the plugin's keys, as Obsidian gives its own editor every plugin's extensions.
-		{ plain: () => keys, escape: (view) => void escapeCell(view), addRow: addRowFrom, pasteCells: pasteIntoCell },
+		{ plain: () => keys, escape: (view) => void escapeCell(view), pasteCells: pasteIntoCell },
 	);
 	// Backspace, Delete, Cut and Paste on a selected cell or a range of cells of the plugin's table.
 	setCellEdits({ clear: clearCells, paste: pasteCells });

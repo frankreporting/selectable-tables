@@ -4,7 +4,7 @@ import { type Editor, editorEditorField, editorInfoField, editorLivePreviewField
 import { cellFollowsCaret, cellSelected, cellSelection, TABLE_CLASS } from './cells';
 import { Action, arrow, backspace, blankLinesAbove, caretInTable, clearCells, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText, writesCell } from './decide';
 import { frozenTables } from './freeze';
-import { openCells, type OwnCell, ownSpans, ownTables, viewLayout } from './layout';
+import { inOwnCell, openCells, type OwnCell, ownSpans, ownTables, viewLayout } from './layout';
 import type { Span } from './table-text';
 
 /** On the editor while a table is selected; styles.css hides the caret then, as Obsidian does for images. */
@@ -290,10 +290,11 @@ function jumpKey(keys: Keys, jump: Jump, shift: Jump): KeyBinding {
 }
 
 /**
- * The same, for a key that also jumps out of an open cell. Obsidian binds these in a cell's editor as
- * plain keys that hand over to the note, and this runs first. It's Escape and the jump in one press,
- * which leaves a cell selected: opening the next one takes a caret, and a caret right after a cell is
- * trimmed is what can eat a table's pipes, so Enter opens it, through Enter's check.
+ * The same, for a key that also jumps out of an open cell of Obsidian's table. Obsidian binds these in a
+ * cell's editor as plain keys that hand over to the note, and this runs first. It's Escape and the jump
+ * in one press, which leaves a cell selected: opening the next one takes a caret, and a caret right after
+ * a cell is trimmed is what can eat a table's pipes, so Enter opens it, through Enter's check. An open
+ * cell of the plugin's own table keeps these keys in its text, with its own bindings, so this stands aside there.
  */
 function cellJumpKey(keys: Keys, jump: (context: Context, forward: boolean) => Action | null, forward: boolean): KeyBinding {
 	const go: Jump = (c) => jump(c, forward);
@@ -301,6 +302,7 @@ function cellJumpKey(keys: Keys, jump: (context: Context, forward: boolean) => A
 		...jumpKey(keys, go, (c) => shifted(c, forward ? 'down' : 'up')),
 		run(view) {
 			if (active(view)) return run(view, go(context(view))) || leaveToObsidian(view, forward ? 'jump down' : 'jump up');
+			if (view.state.facet(inOwnCell)) return false;
 			const main = view.hasFocus && !view.compositionStarted ? escapeCell(view) : null;
 			if (main) run(main, go(context(main)));
 			return main !== null;

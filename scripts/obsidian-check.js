@@ -9239,11 +9239,12 @@
 						const text = view.state.doc.toString();
 						await leaveAll(view);
 						await click(await cellMiddle(model, 2, 0));
-						const basil = { at: where(view), open: opened(view), editors: model.boxes[0].querySelectorAll('.cm-editor').length, focused: view.hasFocus, outlined: model.cellElement({ row: 2, column: 0 })?.classList.contains('selectable-tables-cell') };
+						const basil = { at: where(view), open: opened(view), editors: model.boxes[0].querySelectorAll('.cm-editor').length, focused: view.hasFocus, outlined: model.cellElement({ row: 2, column: 0 })?.classList.contains('selectable-tables-cell'), pointer: getComputedStyle(model.cellElement({ row: 1, column: 1 })).cursor };
 						await key('ArrowRight');
 						await key('ArrowRight');
 						basil.after = where(view);
 						check('Own 157: a click on Basil selects it, outlined, with no cell open and the keyboard in the note, and → twice selects Needs sun', basil.at === '2,0' && !basil.open && basil.editors === 0 && basil.focused && basil.outlined && basil.after === '2,2' && view.state.doc.toString() === text, basil);
+						check('Own 157: the pointer is an arrow over the cells, not a text cursor', basil.pointer !== 'text' && basil.pointer !== 'auto', basil.pointer);
 
 						// Own 158 (step 2): a double-click on Balcony opens it with the caret where it landed; Escape selects it again; a
 						// click on Kitchen selects it, and a second click a moment later opens it.
@@ -9286,9 +9287,19 @@
 							await glide(leaveDry, below, {}, 3);
 							await release(below);
 							const sel = editor.state.selection.main;
-							drag = { ...drag, at: where(view), open: opened(view), ranged: ranged(model), text: editor.state.sliceDoc(sel.from, sel.to), same: preview.openCell(view)?.view === editor };
+							drag = { ...drag, at: where(view), open: opened(view), ranged: ranged(model), text: editor.state.sliceDoc(sel.from, sel.to), same: preview.openCell(view)?.view === editor, pointer: getComputedStyle(editor.contentDOM).cursor };
+							// Let go over another cell, Leave dry: its click goes to their row, which must not select the table (Brian's hand
+							// check, 11/24).
+							await press(from);
+							await glide(from, { x: from.x + 24, y: from.y }, {}, 3);
+							await glide({ x: from.x + 24, y: from.y }, leaveDry, {}, 4);
+							await release(leaveDry);
+							const over = editor.state.selection.main;
+							drag.overCell = { at: where(view), open: opened(view), ranged: ranged(model), text: editor.state.sliceDoc(over.from, over.to), same: preview.openCell(view)?.view === editor, whole: view.state.selection.main.from === model.from && view.state.selection.main.to === model.to };
 						}
 						check('Own 159: in the open Needs sun, a drag across sun, onto Leave dry and past the table\'s bottom selects only its text, makes no range, and the cell stays open', drag.needsOpen === '2,2' && drag.onLeaveDry?.open === '2,2' && drag.onLeaveDry.ranged === 0 && drag.open === '2,2' && drag.same && drag.ranged === 0 && drag.at === '-' && drag.text?.startsWith('sun'), drag);
+						check('Own 159: let go over Leave dry, the drag keeps its text selected, the cell stays open, and the table isn\'t selected', drag.overCell?.open === '2,2' && drag.overCell.same && drag.overCell.ranged === 0 && drag.overCell.at === '-' && drag.overCell.text?.startsWith('sun') && !drag.overCell.whole, drag.overCell);
+						check('Own 159: the pointer is a text cursor in the open cell', drag.pointer === 'text', drag.pointer);
 
 						// Own 160 (step 4): with Needs sun open, a click on Office closes it and selects Office; a click on the line between
 						// the tables takes the outline off and puts the caret on that line.
@@ -9406,8 +9417,9 @@
 						model = tableAt(view, null);
 						await leaveAll(view);
 						const fernAgain = await cellMiddle(model, 1, 0);
+						const offPointer = getComputedStyle(model.cellElement({ row: 1, column: 0 })).cursor;
 						await click(fernAgain);
-						const off = { click: opened(view) };
+						const off = { click: opened(view), pointer: offPointer };
 						const fernText = preview.openCell(view)?.view.contentDOM.querySelector('.cm-line');
 						if (fernText) {
 							const r = fernText.getBoundingClientRect();
@@ -9420,9 +9432,11 @@
 						off.drag = { at: where(view), open: opened(view), ranged: ranged(model) };
 						await leaveAll(view);
 						preview.setClickSelects(true);
+						app.workspace.updateOptions();
 						await plugin.saveData({ ...(await plugin.loadData()), clickSelects: savedBefore?.clickSelects });
 						check('Own 163: the settings tab holds one switch, Click to select a cell, a toggle, on, with its description, and turned off it\'s off and saved', setting.count === 1 && setting.name === 'Click to select a cell' && setting.desc === 'A click selects a cell, and a double-click opens it. Turn it off to open a cell with one click, as in Obsidian.' && setting.type === 'toggle' && setting.on === true && setting.after.on === false && setting.after.setting === false && setting.after.saved === false, setting);
 						check('Own 163: with it off, a click on Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before', off.click === '1,0' && off.drag.at === '1,1 from 1,0' && !off.drag.open && off.drag.ranged === 2, off);
+						check('Own 163: with it off, the pointer over a cell is Obsidian\'s text cursor again', off.pointer === 'text', off.pointer);
 
 						// Own 164 (step 8): a phone's layout: a tap on Basil selects it, its row's and column's handles show, and the note
 						// doesn't take the keyboard; a second tap opens it, with the keyboard in the cell.

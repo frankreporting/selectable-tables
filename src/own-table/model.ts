@@ -1317,8 +1317,14 @@ export class Model implements Span, DrawnTable, DragTable {
 		};
 		// Whether the last press was a finger's, for its click: a tap doesn't focus the note, which would show a keyboard.
 		let touched = false;
+		// The open cell's element an element is in, if it is: its cell holds the cell's editor.
+		const inOpenCell = (target: Element) => !!target.closest('td, th')?.querySelector('.cm-editor');
+		// Whether the last press began in the open cell. Let go over another cell, its click goes to what the two share, a
+		// row or the table, and it's the end of a selection in the cell's text, not a click beside the cells.
+		let pressedOpen = false;
 		dom.addEventListener('pointerdown', (event) => {
 			touched = event.pointerType === 'touch';
+			pressedOpen = inOpenCell(event.target as Element);
 			// A drag handle drags its row or column, or shows its menu at a click.
 			const grip = gripOf(event.target as Element);
 			if (grip && dom.contains(grip.grip)) {
@@ -1347,7 +1353,10 @@ export class Model implements Span, DrawnTable, DragTable {
 			true,
 		);
 		dom.addEventListener('click', (event) => {
+			const fromOpen = pressedOpen;
+			pressedOpen = false;
 			if (leftAlone(event) || (event.target as Element).closest(`${GRIPS}, ${BUTTONS}`)) return;
+			if (fromOpen && !inOpenCell(event.target as Element)) return;
 			const pressed = (event.target as Element).closest('td, th');
 			const el = pressed?.instanceOf(HTMLTableCellElement) ? (this.pins.pressBeneath(pressed, event.clientX, event.clientY) ?? pressed) : pressed;
 			const cell = el?.instanceOf(HTMLTableCellElement) && dom.contains(el) ? this.cellOf(el) : null;

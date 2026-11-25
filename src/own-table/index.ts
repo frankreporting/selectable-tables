@@ -12,6 +12,7 @@ import { endOfNextLine, findTables, type Found, lineChange, updateTables } from 
 import { OBSIDIAN_ROW, ROW_CLASS } from './hide-rows';
 import { isCopy, knownLanguages, languageCopy } from './language';
 import { BARS_CLASS, useBoxes, usesBars } from './bar';
+import { CLICKS_CLASS, clickSelectsCells } from './cell-drag';
 import { blockSpans } from './blocks';
 import { BOX_CLASS, BOX_ID, type BoxRange, boxes } from './boxes';
 import { availableWidth, forgetMetrics, knownMetrics, lookChanged, metricsFor } from './metrics';
@@ -257,7 +258,7 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 	};
 
 	const attributes = EditorView.editorAttributes.of((view) => ({
-		class: [ACTIVE_CLASS, usesBars(view) ? BARS_CLASS : ''].filter(Boolean).join(' '),
+		class: [ACTIVE_CLASS, usesBars(view) ? BARS_CLASS : '', clickSelectsCells() ? CLICKS_CLASS : ''].filter(Boolean).join(' '),
 	}));
 
 	/**

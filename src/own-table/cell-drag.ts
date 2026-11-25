@@ -48,6 +48,9 @@ let current: CellDrag | null = null;
  */
 let clickSelects = true;
 
+/** On a note's editor while the setting is on: the pointer is an arrow over the plugin's cells, as a click only selects. */
+export const CLICKS_CLASS = 'selectable-tables-click-selects';
+
 export function setClickSelects(on: boolean): void {
 	clickSelects = on;
 }

@@ -82,6 +82,8 @@ class PreviewSettings extends PluginSettingTab {
 		if (key !== CLICK_SELECTS) return;
 		const on = value === true;
 		setClickSelects(on);
+		// Every editor draws again, with the pointer the setting gives its cells.
+		this.app.workspace.updateOptions();
 		this.saved.clickSelects = on;
 		await this.save();
 	}

@@ -141,3 +141,24 @@ export function zoneScroll(area: DragArea, x: number, y: number, dt: number, rat
 	const dx = onStrip ? 0 : edgeScroll({ top: 0, bottom: 0, left, right }, Math.max(left, Math.min(right, x)), 0, dt, ratio).dx;
 	return { dx, dy };
 }
+
+/** What a click on a cell that's already there knows: how many quick clicks it is, and the cell's state. */
+export interface CellClick {
+	/** The setting *Click to select a cell*: a click selects a cell, and a double-click opens it. */
+	selects: boolean;
+	/** The click's count: 2 for a double-click's second. */
+	count: number;
+	/** The cell clicked is the open cell. */
+	open: boolean;
+	/** The cell clicked is the selected cell, alone, not part of a range. */
+	selectedAlone: boolean;
+}
+
+/**
+ * Whether a click on a cell of the plugin's table opens it, or only selects it. With the setting on, a click selects
+ * the cell, and opens it only as a double-click, on the cell already selected alone (as in Numbers, which also covers
+ * a slow double-click), or on the open cell, which stays open. With it off, every click opens, as in Obsidian.
+ */
+export function clickOpens({ selects, count, open, selectedAlone }: CellClick): boolean {
+	return !selects || count > 1 || open || selectedAlone;
+}

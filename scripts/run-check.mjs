@@ -16,10 +16,10 @@
 // Before the run it fixes what it can and says so: the window's throttling and focus emulation, leftover
 // window.__check* flags, custom hotkeys (all set aside in memory, unsaved, since the checks press keys as Obsidian
 // binds them by default), extra panes, and the build, reloaded from disk. It stops before starting when the window
-// isn't minimized, and warns about a theme, snippets or changed sample notes, which it leaves alone. It takes the
-// timing lock (/tmp/obsidian-timing.lock) for the run, waiting within the deadline while another chat holds it.
-// Afterwards it puts the hotkeys, the panes, the throttling and the debugger back, and releases the lock, whatever
-// happened. Exit codes: 0 all passed, 1 some failed, 2 no results (stalled, deadline, or the window stopped
+// isn't minimized, and warns about a theme, snippets, changed sample notes, or a click setting running other than
+// it's saved, which it leaves alone. It takes the timing lock (/tmp/obsidian-timing.lock) for the run, waiting within
+// the deadline while another chat holds it. Afterwards it puts the hotkeys, the panes, the throttling, the debugger,
+// the plugin's click setting and its switch for drawing tables back, and releases the lock, whatever happened. Exit codes: 0 all passed, 1 some failed, 2 no results (stalled, deadline, or the window stopped
 // answering), 3 the setup stopped it.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -129,7 +129,12 @@ const SETUP = `(async () => {
 	const win = require('electron').remote.getCurrentWindow();
 	out.minimized = win.isMinimized();
 	if (!out.minimized && !${args.includes('--minimize')}) return JSON.stringify({ ...out, stop: 'the window is in front: minimizing it changes the screen, so it needs an OK first (then run with --minimize)' });
-	const saved = (window.__runCheckSaved = { keys: null, layout: null, attached: false });
+	const saved = (window.__runCheckSaved = { keys: null, layout: null, attached: false, settings: null });
+	const plugin = app.plugins.plugins['selectable-tables'];
+	if (plugin?.preview) {
+		saved.settings = { clickSelects: plugin.preview.clickSelects(), drawing: plugin.preview.isOn() };
+		if (((await plugin.loadData())?.clickSelects ?? true) !== saved.settings.clickSelects) out.warnings.push('Click to select a cell is ' + (saved.settings.clickSelects ? 'on' : 'off') + ' but saved the other way');
+	}
 	win.webContents.setBackgroundThrottling(false);
 	const debug = win.webContents.debugger;
 	if (!debug.isAttached()) {
@@ -182,6 +187,21 @@ const RESTORE = `(async () => {
 	if (saved?.layout) {
 		await app.workspace.changeLayout(saved.layout);
 		done.push('panes');
+	}
+	// The plugin's settings, as they were: the click setting through its tab, as its toggle sets it, so the plugin's own
+	// copy, the saved file and the flag all agree (a check that changed it left the plugin's copy off, 11/25); and the
+	// switch that has the plugin draw tables, which the checks turn off as they end.
+	const plugin = app.plugins.plugins['selectable-tables'];
+	if (saved?.settings && plugin?.preview) {
+		const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+		const want = saved.settings.clickSelects;
+		const differed = plugin.preview.clickSelects() !== want || ((await plugin.loadData())?.clickSelects ?? true) !== want;
+		if (tab?.setControlValue) await tab.setControlValue('clickSelects', want);
+		if (differed) done.push('the click setting');
+		if (plugin.preview.isOn() !== saved.settings.drawing) {
+			plugin.preview.use(saved.settings.drawing);
+			done.push('the plugin drawing tables');
+		}
 	}
 	const win = require('electron').remote.getCurrentWindow();
 	if (saved?.attached && win.webContents.debugger.isAttached()) {

@@ -1,12 +1,12 @@
 import type { Extension } from '@codemirror/state';
-import { Notice, type Plugin } from 'obsidian';
+import { type App, Notice, type Plugin, PluginSettingTab } from 'obsidian';
 import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
 import { cellFormatter, forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
 import { addAtEnd, addRowFrom, clearCells, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
 import { startDrag } from './own-table/drag';
-import { pressCell, selectEvery } from './own-table/cell-drag';
+import { clickCell, clickSelectsCells, pressCell, selectEvery, setClickSelects } from './own-table/cell-drag';
 import { setTableControls } from './own-table/grips';
 import { formattingOnCells, giveBackAll } from './own-table/formatting';
 
@@ -34,9 +34,67 @@ function whenStyled(plugin: Plugin, ready: () => void): void {
 	plugin.register(() => watch.disconnect());
 }
 
-/** What the plugin saves for the preview: whether it draws tables itself. */
+/** What the plugin saves for the preview: whether it draws tables itself, and whether a click on a cell selects it. */
 interface Saved {
 	ownTables?: boolean;
+	clickSelects?: boolean;
+}
+
+/** The one setting: whether a click on a cell of the plugin's table selects it, the default, or opens it. */
+const CLICK_SELECTS = 'clickSelects';
+
+/**
+ * A toggle in Obsidian's declarative settings (1.13 on), which settings search finds. The `obsidian` package this repo
+ * pins, 1.12.3, doesn't declare them yet.
+ */
+interface ToggleDefinition {
+	name: string;
+	desc: string;
+	control: { type: 'toggle'; key: string; defaultValue: boolean };
+}
+
+/** The plugin's settings tab, in a preview build: how a click on a cell of the plugin's table works. */
+class PreviewSettings extends PluginSettingTab {
+	constructor(
+		app: App,
+		plugin: Plugin,
+		private readonly saved: Saved,
+		private readonly save: () => Promise<void>,
+	) {
+		super(app, plugin);
+	}
+
+	getSettingDefinitions(): ToggleDefinition[] {
+		return [
+			{
+				name: 'Click to select a cell',
+				desc: 'A click selects a cell, and a double-click opens it. Turn it off to open a cell with one click, as in Obsidian.',
+				control: { type: 'toggle', key: CLICK_SELECTS, defaultValue: true },
+			},
+		];
+	}
+
+	getControlValue(key: string): unknown {
+		return key === CLICK_SELECTS ? clickSelectsCells() : undefined;
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key !== CLICK_SELECTS) return;
+		const on = value === true;
+		setClickSelects(on);
+		// Every editor draws again, with the pointer the setting gives its cells.
+		this.app.workspace.updateOptions();
+		this.saved.clickSelects = on;
+		await this.save();
+	}
+
+	/**
+	 * Never called: Obsidian draws the tab from the definitions above. The 1.12.3 typings this repo pins make it abstract,
+	 * so it stays, and lint warns about it, until the typings are updated.
+	 */
+	display(): void {
+		this.containerEl.empty();
+	}
 }
 
 /**
@@ -46,8 +104,9 @@ interface Saved {
  * pin on a computer (pins.ts), and the freeze commands and the freeze items in the right-click menu act on it too, as
  * do Obsidian's Row, Column and Sort items and its table commands, rebuilt for it (table-commands.ts), its drag
  * handles and + buttons (grips.ts, drag.ts), its range of cells, dragged across (cell-drag.ts), Backspace, Delete,
- * Cut and Paste on a selected cell or a range (table-commands.ts), and formatting on them (formatting.ts).
- * The setting is saved with the plugin's data, which Sync can carry to other devices.
+ * Cut and Paste on a selected cell or a range (table-commands.ts), and formatting on them (formatting.ts). A click on
+ * a cell selects it, and a double-click opens it, unless the settings tab's one setting says otherwise. The switch and
+ * the setting are saved with the plugin's data, which Sync can carry to other devices.
  */
 export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {
 	const { app } = plugin;
@@ -83,8 +142,13 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 			if (table.view) addAtEnd(table.view, table, what);
 		},
 		pressCell,
+		clickCell,
 		selectEvery,
 	});
+	// A click on a cell selects it, and a double-click opens it, unless the setting says otherwise: on by default.
+	setClickSelects(saved.clickSelects ?? true);
+	plugin.register(() => setClickSelects(true));
+	plugin.addSettingTab(new PreviewSettings(app, plugin, saved, () => plugin.saveData(saved)));
 	plugin.register(() => setTableControls(null));
 	for (const command of tableCommands()) plugin.addCommand(command);
 	// The note's editors answer for an open cell while it's open; their own answers come back as the plugin unloads.
@@ -128,6 +192,6 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 		},
 	});
 	// For the check script and timing runs, on the plugin: whether the switch is on, and the tables' insides.
-	Object.assign(plugin, { preview: { isOn: () => on, use, cellFormatter, ...own.debug } });
+	Object.assign(plugin, { preview: { isOn: () => on, use, cellFormatter, clickSelects: clickSelectsCells, setClickSelects, ...own.debug } });
 	if (saved.ownTables) whenStyled(plugin, () => use(true));
 }

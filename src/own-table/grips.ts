@@ -86,6 +86,8 @@ export interface TableControls {
 	add(table: DragTable & Span, what: 'row' | 'column'): void;
 	/** A press on a cell, or in the open cell's text: a drag across cells once the pointer reaches another cell. */
 	pressCell(table: CellDragTable, event: PointerEvent, cell: Cell, inOpenCell: boolean): void;
+	/** A click on a cell no drag took: whether it selected the cell, with the setting *Click to select a cell* on; else it opens. */
+	clickCell(table: CellDragTable, event: MouseEvent, cell: Cell, touch: boolean): boolean;
 	/** Four quick clicks on a cell: every cell of the table selected. */
 	selectEvery(table: CellDragTable): void;
 }

@@ -797,3 +797,15 @@ body {
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) .table-col-btn {
 	border-bottom: none;
 }
+
+/*
+ * With Click to select a cell on, a click on a cell only selects it, so the pointer is an arrow over the cells, where
+ * Obsidian shows a text cursor, and a text cursor in the open cell's editor. Links, handles and buttons keep their own.
+ */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-click-selects .cm-table-widget.selectable-tables-own :is(td, th) {
+	cursor: var(--cursor);
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-click-selects .cm-table-widget.selectable-tables-own :is(td, th) .cm-editor {
+	cursor: text;
+}

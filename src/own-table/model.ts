@@ -1299,8 +1299,9 @@ export class Model implements Span, DrawnTable, DragTable {
 		const colgroup = table.createEl('colgroup');
 		const thead = index === 0 ? table.createEl('thead') : null;
 		const tbody = table.createEl('tbody');
-		// A press on a cell opens it, with the caret where it landed, and a press beside the cells selects the whole
-		// table. The browser moves no caret and starts no selection: the press's default is prevented, apart from a
+		// A click on a cell selects it, and a double-click opens it with the caret where it landed, or with the setting
+		// *Click to select a cell* off, a click opens it (cell-drag.ts, `clickCell`); a press beside the cells selects the
+		// whole table. The browser moves no caret and starts no selection: the press's default is prevented, apart from a
 		// link's, the table's own scrollbar's, and the open cell's editor's.
 		const onScrollbar = (event: MouseEvent) => event.target === dom && (event.offsetX >= dom.clientWidth || event.offsetY >= dom.clientHeight);
 		const inEditor = (target: Element) => {
@@ -1314,7 +1315,16 @@ export class Model implements Span, DrawnTable, DragTable {
 		const hold = (event: MouseEvent) => {
 			if (!leftAlone(event)) event.preventDefault();
 		};
+		// Whether the last press was a finger's, for its click: a tap doesn't focus the note, which would show a keyboard.
+		let touched = false;
+		// The open cell's element an element is in, if it is: its cell holds the cell's editor.
+		const inOpenCell = (target: Element) => !!target.closest('td, th')?.querySelector('.cm-editor');
+		// Whether the last press began in the open cell. Let go over another cell, its click goes to what the two share, a
+		// row or the table, and it's the end of a selection in the cell's text, not a click beside the cells.
+		let pressedOpen = false;
 		dom.addEventListener('pointerdown', (event) => {
+			touched = event.pointerType === 'touch';
+			pressedOpen = inOpenCell(event.target as Element);
 			// A drag handle drags its row or column, or shows its menu at a click.
 			const grip = gripOf(event.target as Element);
 			if (grip && dom.contains(grip.grip)) {
@@ -1343,7 +1353,10 @@ export class Model implements Span, DrawnTable, DragTable {
 			true,
 		);
 		dom.addEventListener('click', (event) => {
+			const fromOpen = pressedOpen;
+			pressedOpen = false;
 			if (leftAlone(event) || (event.target as Element).closest(`${GRIPS}, ${BUTTONS}`)) return;
+			if (fromOpen && !inOpenCell(event.target as Element)) return;
 			const pressed = (event.target as Element).closest('td, th');
 			const el = pressed?.instanceOf(HTMLTableCellElement) ? (this.pins.pressBeneath(pressed, event.clientX, event.clientY) ?? pressed) : pressed;
 			const cell = el?.instanceOf(HTMLTableCellElement) && dom.contains(el) ? this.cellOf(el) : null;
@@ -1352,6 +1365,7 @@ export class Model implements Span, DrawnTable, DragTable {
 				return;
 			}
 			event.preventDefault();
+			if (tableControls()?.clickCell(this, event, cell, touched)) return;
 			this.open(this, cell, { x: event.clientX, y: event.clientY, visible: visibleAt(el as HTMLTableCellElement, event.clientX, event.clientY) });
 		});
 		// A picture that loads changes its row's height, and can widen its column, as in Obsidian's table, where the

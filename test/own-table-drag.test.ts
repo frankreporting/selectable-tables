@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { columnExtents, type DragArea, edgeScroll, landing, lookAt, overPinned, targetEdge, zoneScroll } from '../src/own-table/drag-sums';
+import { clickOpens, columnExtents, type DragArea, edgeScroll, landing, lookAt, overPinned, targetEdge, zoneScroll } from '../src/own-table/drag-sums';
 
 const pane = { top: 100, bottom: 700, left: 0, right: 800 };
 
@@ -125,4 +125,15 @@ test('a drag across cells moves the table sideways near its box\'s sides, or jus
 	assert.equal(zoneScroll(frozen, 150, 400, 16, 2).dx, 0);
 	assert.equal(zoneScroll({ ...tall, rtl: true, strip: 600 }, 600, 400, 16, 2).dx, 32);
 	assert.equal(zoneScroll({ ...tall, rtl: true, strip: 600 }, 650, 400, 16, 2).dx, 0);
+});
+
+test('with the setting on, a click selects a cell, and a double-click, or a click on the cell already selected, opens it', () => {
+	const click = { selects: true, count: 1, open: false, selectedAlone: false };
+	assert.equal(clickOpens(click), false);
+	assert.equal(clickOpens({ ...click, count: 2 }), true);
+	assert.equal(clickOpens({ ...click, selectedAlone: true }), true);
+	// A click in the open cell's own space keeps it open.
+	assert.equal(clickOpens({ ...click, open: true }), true);
+	// The setting off: every click opens, as in Obsidian.
+	assert.equal(clickOpens({ ...click, selects: false }), true);
 });

@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
-import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, showsCellAfter, stay, stopsEdit, tab, typeBelow, typesText, writesTable } from '../src/editor/decide';
+import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, showsCellAfter, stay, stopsEdit, tab, typeBelow, typeOn, typesText, writesTable } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
 import type { Cell } from '../src/editor/table-text';
 
@@ -422,8 +422,31 @@ describe('a range of cells, on the plugin\'s own table', () => {
 		assert.deepEqual(copied(on(state, cells(cell(2, 2)), { own: true })), { text: 'i' }, 'one cell copies its text');
 	});
 
-	test('typing goes below the table, as on a selected cell', () => {
-		assert.equal(typeBelow(on(state(), cells(cell(2, 2), cell(0, 0)), { own: true }))?.type, 'below');
+	test('typing replaces the cell moved to last, the one Enter opens', () => {
+		assert.deepEqual(typeOn(on(state(), cells(cell(2, 2), cell(0, 0)), { own: true })), { type: 'replace', cell: cell(2, 2) });
+		assert.deepEqual(typeOn(on(state(), cells(cell(0, 1), cell(2, 2)), { own: true })), { type: 'replace', cell: cell(0, 1) });
+	});
+});
+
+describe('typing on a selected cell of the plugin\'s table', () => {
+	const grid = { rows: 3, columns: () => 2 };
+	const at = (row: number, column: number): Cells => ({ selected: { row, column }, anchor: null, left: null, grid });
+
+	test('it replaces the cell\'s text', () => {
+		assert.deepEqual(typeOn(on(note(selected('Intro\n\n', '\n\nAfter')), at(1, 1), { own: true })), { type: 'replace', cell: { row: 1, column: 1 } });
+		assert.deepEqual(typeOn(on(note(selected('Intro\n\n', '\n\nAfter', false)), at(0, 0), { own: true })), { type: 'replace', cell: { row: 0, column: 0 } });
+	});
+
+	test('a table selected whole still starts a paragraph below it', () => {
+		assert.equal(typeOn(on(note(selected('Intro\n\n', '\n\nAfter')), noCells, { own: true }))?.type, 'below');
+	});
+
+	test('Obsidian\'s table still starts a paragraph below it, from a selected cell too', () => {
+		assert.equal(typeOn(on(note(selected('Intro\n\n', '\n\nAfter')), at(1, 1)))?.type, 'below');
+	});
+
+	test('with no table selected, it steps aside', () => {
+		assert.equal(typeOn(on(note(`Intro\n‸\n${TABLE}\n\nAfter`), at(1, 1), { own: true })), null);
 	});
 });
 

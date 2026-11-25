@@ -1,8 +1,9 @@
-import { cursorDocEnd, cursorDocStart, redo, selectDocEnd, selectDocStart, undo } from '@codemirror/commands';
+import { cursorDocEnd, cursorDocStart, isolateHistory, redo, selectDocEnd, selectDocStart, undo } from '@codemirror/commands';
 import { Annotation, EditorSelection, type Extension, Transaction, type TransactionSpec } from '@codemirror/state';
 import { EditorView, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { type App, editorInfoField, MarkdownView, Notice } from 'obsidian';
 import { writesCell, writesTable } from '../editor/decide';
+import { hasMark, markText, readFreeze } from '../editor/freeze-mark';
 import { type OwnCell, openCells } from '../editor/layout';
 import { type Cell, type Span, toCellEditor, toCellSource } from '../editor/table-text';
 import { type CellEditor, type CellHooks, makeCellEditor, suggesting } from './cell-editor';
@@ -17,8 +18,8 @@ import { timed } from './profile';
  * cell's caret, so commands act there. Each change to the note from anywhere else comes back into the cell.
  */
 
-/** Where the caret goes in a cell that opens: its text's start or end, all of it, or a click. */
-export type At = 'start' | 'end' | 'all' | Click | { note: { anchor: number; head: number } };
+/** Where the caret goes in a cell that opens: its text's start or end, all of it, a click, or the end of it emptied for typing over. */
+export type At = 'start' | 'end' | 'all' | 'replace' | Click | { note: { anchor: number; head: number } };
 
 /** On an open cell's drawn text, hidden by the preview's styles.css while its editor shows. */
 const HIDDEN_CLASS = 'selectable-tables-open-text';
@@ -231,6 +232,10 @@ export class OpenCell implements OwnCell {
 		const view = this.editor.view;
 		const length = view.state.doc.length;
 		let selection: EditorSelection;
+		if (at === 'replace') {
+			this.typeOver();
+			return;
+		}
 		if (at === 'start') selection = EditorSelection.single(0);
 		else if (at === 'all') selection = EditorSelection.single(0, length);
 		else if (at === 'end') selection = EditorSelection.single(length);
@@ -243,6 +248,21 @@ export class OpenCell implements OwnCell {
 			selection = EditorSelection.single(pos ?? length);
 		}
 		view.dispatch({ selection, scrollIntoView: true });
+	}
+
+	/**
+	 * Empties the cell for typing over, as a spreadsheet's selected cell takes a key: a header cell keeps its freeze mark,
+	 * with a space after it, and the caret goes at the end. The caret goes to the old text's end first, which puts the note's
+	 * selection there before anything changes, so Undo puts it back in the cell. The emptying starts a step of the note's
+	 * history of its own, and the key's typing, right after it and touching it, joins that step, so one Undo takes both back.
+	 */
+	private typeOver(): void {
+		const view = this.editor.view;
+		const text = view.state.doc.toString();
+		view.dispatch({ selection: EditorSelection.single(text.length), scrollIntoView: true });
+		const kept = this.cell.row === 0 && hasMark(text) ? `${markText(readFreeze(text))} ` : '';
+		if (text === kept) return;
+		view.dispatch({ changes: { from: 0, to: text.length, insert: kept }, selection: EditorSelection.single(kept.length), userEvent: 'delete.selection', annotations: isolateHistory.of('before'), scrollIntoView: true });
 	}
 
 	/** Where a selection in the note's text falls in the cell's, or null when it isn't in the cell. */
@@ -371,6 +391,8 @@ export class OpenCell implements OwnCell {
 		const annotations: Annotation<unknown>[] = [writesCell.of(true)];
 		const event = tr.annotation(Transaction.userEvent);
 		if (event && !event.startsWith('select')) annotations.push(Transaction.userEvent.of(event));
+		const isolate = tr.annotation(isolateHistory);
+		if (isolate) annotations.push(isolateHistory.of(isolate));
 		return { changes, selection, annotations, scrollIntoView: false };
 	}
 

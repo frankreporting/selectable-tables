@@ -714,7 +714,7 @@ export class Pins {
 		const was = this.carrying;
 		if (was && was !== tr) {
 			was.removeClass(CARRIED_CLASS);
-			for (const name of [CARRY_FROM, CARRY_TO, CARRY_TRAVEL]) was.style.removeProperty(name);
+			for (const name of [CARRY_FROM, CARRY_TO, CARRY_TRAVEL, 'transform']) was.style.removeProperty(name);
 		}
 		this.carrying = tr;
 		const range = carried ? this.carryAt.get(carried.cell.row) : undefined;
@@ -722,6 +722,12 @@ export class Pins {
 			setStyle(tr, CARRY_FROM, px(range.from));
 			setStyle(tr, CARRY_TO, px(range.to));
 			setStyle(tr, CARRY_TRAVEL, px(range.to - range.from));
+			// The animation that starts now moves the row only from the next frame on: until then it's pending, and the row
+			// rests at the table's top. A key typed on a selected cell opens it in its own keydown, and the browser's own scroll
+			// to the caret it types, in that same task, took the note up there. The same move, set inline, holds until the
+			// animation runs over it.
+			const scroll = this.host.view?.scrollDOM.scrollTop;
+			if (!tr.hasClass(CARRIED_CLASS) && scroll !== undefined) setStyle(tr, 'transform', `translateY(${px(Math.max(0, Math.min(range.to - range.from, scroll - range.from)))})`);
 			tr.addClass(CARRIED_CLASS);
 		}
 		const first = this.host.pinBlocks[0];
@@ -856,6 +862,19 @@ export class Pins {
 		else if (this.fit.rows && this.host.blockCount === 1) {
 			for (let row = 0; row < this.freeze.rows - 1; row++) {
 				if (this.host.rowElement(row)?.hasClass(PINNED_ROW_CLASS) === false) {
+					this.measure();
+					break;
+				}
+			}
+		}
+		// A frozen row drawn in the first block of a table of more blocks, as the selected cell's row is kept there however far
+		// the note scrolls (`keptRow` in model.ts), has where it's carried read on the next measure, so its cell opens where
+		// it pins in the same task, as a key typed on the cell opens it: opened uncarried, its editor's scroll to the caret
+		// took the note to the table's top.
+		if (block.index === 0 && this.fit.rows && this.host.blockCount > 1) {
+			for (let row = 1; row < this.freeze.rows; row++) {
+				const tr = this.host.rowElement(row - 1);
+				if (tr?.isConnected && block.dom.contains(tr) && !this.carryAt.has(row)) {
 					this.measure();
 					break;
 				}

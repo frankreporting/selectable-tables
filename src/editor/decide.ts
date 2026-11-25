@@ -35,6 +35,8 @@ export type Action =
 	| { type: 'edit'; cell: Cell }
 	/** Empties a selected cell or a range of cells of the plugin's own table, or deletes the range's rows or columns: Delete is `forward`. */
 	| { type: 'clear'; forward: boolean }
+	/** A key that types on a selected cell of the plugin's own table: the cell opens emptied, and the key's text goes into it. */
+	| { type: 'replace'; cell: Cell }
 	/**
 	 * A key that types starts a new paragraph below the table: the text from `from` to `to` becomes `insert`,
 	 * which adds the line breaks the paragraph needs, and the caret goes to `pos`, in the note after that.
@@ -423,6 +425,18 @@ export function typeBelow({ state, layout }: TableContext): Action | null {
 	}
 	const pos = state.changes(change).apply(doc).line(last + 2).from;
 	return { type: 'below', ...change, pos };
+}
+
+/**
+ * A key that types on a selected cell of the plugin's own table replaces the cell's text, as a spreadsheet does (Brian,
+ * 11/24): the cell opens emptied, a header cell keeping its freeze mark, and the key's text goes into it. On a range of
+ * cells, it's the cell moved to last, the one Enter opens, and the range ends. A table selected whole, and Obsidian's
+ * table, still start a paragraph below the table.
+ */
+export function typeOn(context: TableContext): Action | null {
+	const { state, layout, cells } = context;
+	if (layout.ownTables && cells.selected && selectedTable(state, layout)) return { type: 'replace', cell: cells.selected };
+	return typeBelow(context);
 }
 
 /** The parts of a key event that say whether it types. */

@@ -2630,8 +2630,9 @@
 		// window.__checkCellDragsOnly instead, only the section on dragging across its cells, with
 		// window.__checkCellEditsOnly instead, only the section on clearing, cutting and pasting its cells, with
 		// window.__checkFormattingOnly instead, only the section on formatting its cells, with
-		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks, and with
-		// window.__checkRangeMenusOnly instead, only the section on a range's right-click menu and the grips' clicks.
+		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks, with
+		// window.__checkRangeMenusOnly instead, only the section on a range's right-click menu and the grips' clicks, and with
+		// window.__checkTypingOnly instead, only the section on typing over a selected cell.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
@@ -3537,8 +3538,8 @@
 					await press(view, 'Escape');
 					check('Own 38: Enter on a selected cell opens it, Escape selects it again, Escape goes back to the table, Enter to the same cell, and Escape twice to the line above', enterOpens && backToCell && backToTable && sameCell && sel(view).line === aboveSeed, { enterOpens, backToCell, backToTable, sameCell, line: sel(view).line });
 
-					// Copy gives the cell's Markdown; Toggle checkbox changes nothing; typing goes below. Cut and Paste act on the cell
-					// (Own 134 on), and so do Toggle comment and the other formatting commands (Own 146 on).
+					// Copy gives the cell's Markdown; Toggle checkbox changes nothing; typing replaces the cell's text (Own 175 on). Cut
+					// and Paste act on the cell (Own 134 on), and so do Toggle comment and the other formatting commands (Own 146 on).
 					await caretOnLine(view, aboveSeed);
 					await press(view, 'ArrowDown');
 					await press(view, 'Enter');
@@ -3556,11 +3557,12 @@
 					await settle();
 					check('Own 39: on a selected cell, Copy gives its Markdown, Toggle checkbox changes nothing, and Toggle comment comments the cell, which Undo takes back', copied.text === '**Keep damp**' && checkboxQuiet && commented && view.state.doc.toString() === cellsText && cellOf(view) === '1,2', { copied, checkboxQuiet, commented, cell: cellOf(view) });
 					await realType('q');
-					const below = view.state.doc.toString();
-					const belowOk = below.slice(0, seed.to) === cellsText.slice(0, seed.to) && /^\n\nq\n/.test(below.slice(seed.to));
+					const typedOpen = preview.openCell(view);
+					const over = { open: typedOpen ? `${typedOpen.cell.row},${typedOpen.cell.column}` : null, cell: typedOpen?.view.state.doc.toString(), note: typedOpen?.texts().source };
 					await press(view, 'z', { metaKey: true, code: 'KeyZ' });
 					await settle();
-					check('Own 39: a letter typed on a selected cell starts a paragraph below the table, and Undo takes it back with the table selected', belowOk && view.state.doc.toString() === cellsText && whole(view, models(view)[0]), { belowOk, after: JSON.stringify(below.slice(seed.to, seed.to + 8)) });
+					over.undone = view.state.doc.toString() === cellsText;
+					check('Own 39: a letter typed on a selected cell replaces its text, in the cell, opened, and Undo takes it back', over.open === '1,2' && over.cell === 'q' && over.note === 'q' && over.undone, over);
 					await restore(view, cellsText);
 
 					// A held ↓ through the 2,000-row table: the cell moves a row at a time across the seams, and stays in view.
@@ -3777,7 +3779,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly && !window.__checkTypingOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -7383,14 +7385,14 @@
 						check('Own 114: Escape goes to the cell moved to last, Enter opens that cell, a plain arrow ends the range on its corner that way, and Tab moves on from the cell moved to last', JSON.stringify(keysOn) === JSON.stringify(['2,1', '-', '2,1', '1,0 from 2,1', 'open 1,0', '2,1', '1,0', '2,2']), keysOn);
 						await leave(view);
 
-						// Typing goes below the table; Bold changes nothing, and the range stays; a click ends it. Delete, Cut and Paste act
-						// on a range: Own 136 on.
+						// Typing replaces the cell moved to last, and ends the range; Bold acts on the range, which stays; a click ends it.
+						// Delete, Cut and Paste act on a range: Own 136 on.
 						await selectCell(view, model, 1, 0);
 						await key('ArrowRight', shift);
 						await key('ArrowDown', shift);
 						await key('x');
-						const tableText = text.slice(text.indexOf('| Tray'), text.indexOf('| B2'));
-						const typed = { table: view.state.doc.toString().includes(tableText), paragraph: view.state.doc.toString().includes('\nx\n') || view.state.doc.toString().endsWith('\nx') };
+						const typedOpen = preview.openCell(view);
+						const typed = { open: typedOpen ? `${typedOpen.cell.row},${typedOpen.cell.column}` : null, cell: typedOpen?.view.state.doc.toString(), at: where(view), drawn: model.boxes.filter((box) => box.isConnected).reduce((n, box) => n + box.querySelectorAll('td.is-selected, th.is-selected').length, 0) };
 						await key('z', { meta: true });
 						await sleep(200);
 						const undone = view.state.doc.toString() === text;
@@ -7405,7 +7407,7 @@
 						await key('z', { meta: true });
 						await sleep(200);
 						still.undone = view.state.doc.toString() === text;
-						check('Own 115: typing on a range starts a paragraph below the table, and Undo takes it back', typed.table && typed.paragraph && undone, { typed, undone });
+						check('Own 115: typing on a range replaces the cell moved to last, opened, ends the range, and Undo takes it back', typed.open === '2,1' && typed.cell === 'x' && typed.at === '-' && typed.drawn === 0 && undone, { typed, undone });
 						check('Own 115: Bold acts on a range\'s cells (checked in full from Own 146 on), Undo takes it back, and the range stays', still.bolded && still.at === '2,1 from 1,0' && still.drawn && still.undone && where(view) === '2,1 from 1,0', still);
 						await realClick(model.cellElement({ row: 3, column: 1 }));
 						await sleep(200);
@@ -10099,6 +10101,393 @@
 							const settingsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
 							await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
 						}
+						preview.setClickSelects(false);
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkTypingOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly) {
+					// --- Typing on a selected cell of the plugin's table (STA-13): it replaces the cell's text, as a spreadsheet does.
+					// The cell opens emptied inside the key's own event and the key types there, a dead key's and an input method's
+					// composition included, and one Undo puts the old text back. A table selected whole still types below it. Real
+					// presses and keys through the window's debugger, a simulated composition always finished with Input.insertText.
+					// Run alone with window.__checkOwnOnly, __checkCellsOnly and __checkTypingOnly all true.
+					preview.use(true);
+					preview.setClickSelects(true);
+					await sleep(400);
+					const touched = ['Two report tables', 'Frozen tables', 'Table 2000 by 12', 'Frozen table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const plugin = app.plugins.plugins['selectable-tables'];
+					const savedBefore = await plugin.loadData();
+					const round = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+					const mouse = (type, p, o = {}) => cdp.sendCommand('Input.dispatchMouseEvent', { type, ...round(p), button: type === 'mouseMoved' && !o.held ? 'none' : 'left', buttons: type === 'mouseReleased' || (type === 'mouseMoved' && !o.held) ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1, modifiers: 0 });
+					const press = async (p) => {
+						await mouse('mouseMoved', p);
+						await mouse('mousePressed', p);
+						await frames(2);
+					};
+					const release = async (p) => {
+						await mouse('mouseReleased', p);
+						await sleep(350);
+						await frames(2);
+					};
+					const click = async (p) => {
+						await press(p);
+						await release(p);
+					};
+					const glide = async (from, to, steps = 6) => {
+						for (let i = 1; i <= steps; i++) {
+							await mouse('mouseMoved', { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }, { held: true });
+							await frames(1);
+						}
+						await frames(2);
+					};
+					const codes = { Escape: 27, Enter: 13 };
+					const key = async (name, { meta } = {}) => {
+						const event = { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, windowsVirtualKeyCode: codes[name] ?? name.toUpperCase().charCodeAt(0), modifiers: meta ? 4 : 0, unmodifiedText: macChar(name), text: '' };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await sleep(250);
+					};
+					const where = (view) => {
+						const cells = preview.cells(view) ?? {};
+						return `${cells.selected ? `${cells.selected.row},${cells.selected.column}` : '-'}${cells.anchor ? ` from ${cells.anchor.row},${cells.anchor.column}` : ''}`;
+					};
+					const opened = (view) => {
+						const open = preview.openCell(view);
+						return open ? `${open.cell.row},${open.cell.column}` : null;
+					};
+					// The open cell's text, the note's text of that cell, its caret, and whether it has the keyboard, and whether either
+					// editor is still composing.
+					const state = (view) => {
+						const open = preview.openCell(view);
+						const editor = open?.view;
+						return { at: where(view), open: opened(view), cell: editor?.state.doc.toString() ?? null, note: open?.texts().source ?? null, caret: editor?.state.selection.main.head ?? null, focused: !!editor?.hasFocus, composing: view.composing || view.compositionStarted || !!editor?.composing };
+					};
+					const centreOf = async (el) => {
+						let last = null;
+						for (let i = 0; i < 20; i++) {
+							const r = el.getBoundingClientRect();
+							const p = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+							if (last && Math.abs(last.x - p.x) < 0.5 && Math.abs(last.y - p.y) < 0.5) return p;
+							last = p;
+							await frames(2);
+						}
+						return last;
+					};
+					const cellMiddle = async (model, row, column) => {
+						const el = model.cellElement({ row, column });
+						return el ? centreOf(el) : null;
+					};
+					const tableAt = (view, heading, nth = 0) => {
+						const start = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						return models(view).filter((model) => model.from > start)[nth];
+					};
+					const scrollToTable = async (view, model, offset = 0) => {
+						for (let i = 0; i < 2; i++) {
+							view.scrollDOM.scrollTop = view.lineBlockAt(model.from).top + offset;
+							await sleep(400);
+							await frames(3);
+						}
+					};
+					const leaveAll = async (view) => {
+						for (let i = 0; i < 3; i++) await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					// The note as it was, with the caret out of the table first: on a selected table the edit guard stops a write.
+					const putBack = async (view, text) => {
+						await leaveAll(view);
+						if (view.state.doc.toString() !== text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+						await sleep(300);
+					};
+					const lineOf = (view, start) => view.state.doc.toString().split('\n').find((line) => line.startsWith(start)) ?? null;
+					const settingsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+					let view;
+					try {
+						// Own 175 (step 1): a click on Basil and Mint typed: the cell opens reading Mint, the caret after it. Escape
+						// selects it, and one Cmd+Z puts Basil back, selected.
+						view = await open('Two report tables');
+						await sleep(300);
+						let model = tableAt(view, null);
+						const text = view.state.doc.toString();
+						await leaveAll(view);
+						await click(await cellMiddle(model, 2, 0));
+						const mint = { before: where(view) };
+						await realType('Mint');
+						await sleep(200);
+						Object.assign(mint, state(view), { row: lineOf(view, '| Mint ') });
+						await key('Escape');
+						mint.escaped = { at: where(view), open: opened(view) };
+						await key('z', { meta: true });
+						await sleep(300);
+						mint.undone = { same: view.state.doc.toString() === text, at: where(view), open: opened(view) };
+						check('Own 175: a click on Basil, then Mint typed: the cell opens reading Mint, with the caret after it and the keyboard, and the note\'s row reads Mint', mint.before === '2,0' && mint.open === '2,0' && mint.cell === 'Mint' && mint.note === 'Mint' && mint.caret === 4 && mint.focused && mint.row === '| Mint   | Balcony | Needs sun                 |', mint);
+						check('Own 175: Escape selects Mint, not open, and one Cmd+Z puts Basil back, selected', mint.escaped.at === '2,0' && !mint.escaped.open && mint.undone.same && mint.undone.at === '2,0' && !mint.undone.open, mint);
+						await putBack(view, text);
+
+						// Own 176 (step 2): Option+E then E on Cactus gives é; Japanese input on Fern composes 日本 in the cell, and the
+						// next key types after it.
+						await click(await cellMiddle(model, 3, 0));
+						await realCompose({ key: 'Dead', code: 'KeyE', altKey: true }, ['´'], 'é');
+						await sleep(200);
+						const accent = state(view);
+						await putBack(view, text);
+						model = tableAt(view, null);
+						await click(await cellMiddle(model, 1, 0));
+						await realCompose({ key: 'n', code: 'KeyN' }, ['n', 'に', 'にh', 'にほ', 'にほn', 'にほん', '日本'], '日本');
+						await sleep(200);
+						const japanese = state(view);
+						await realType('x');
+						japanese.then = preview.openCell(view)?.view.state.doc.toString() ?? null;
+						japanese.table = view.state.doc.toString().slice(model.from, model.to).split('\n').length;
+						await putBack(view, text);
+						check('Own 176: Option+E then E on Cactus: the cell opens reading é, the composition ended', accent.open === '3,0' && accent.cell === 'é' && accent.note === 'é' && !accent.composing && accent.focused, accent);
+						check('Own 176: Japanese input on Fern composes 日本 in the cell, ends, and the next key types after it; the table keeps its rows', japanese.open === '1,0' && japanese.cell === '日本' && japanese.note === '日本' && !japanese.composing && japanese.then === '日本x' && japanese.table === 5, japanese);
+
+						// Own 177 (step 3): [[Wat typed on Office starts a link, with its suggestions; Enter puts the link alone in the cell.
+						model = tableAt(view, null);
+						await click(await cellMiddle(model, 3, 1));
+						await realType('[[Wat');
+						await sleep(400);
+						const link = { suggesting: app.workspace.editorSuggest?.isShowingSuggestion?.() ?? null, typed: preview.openCell(view)?.view.state.doc.toString() ?? null };
+						await key('Enter');
+						await sleep(300);
+						Object.assign(link, state(view));
+						await putBack(view, text);
+						check('Own 177: [[Wat typed on Office starts a link with its suggestions, and Enter leaves the link alone in the cell, with no Office', link.suggesting === true && link.typed?.startsWith('[[Wat') && link.note === '[[Watering schedule]]', link);
+
+						// Own 178 (step 4): Enter on Balcony opens it with the caret after its text, as before, and typing adds to it.
+						model = tableAt(view, null);
+						await click(await cellMiddle(model, 2, 1));
+						await key('Enter');
+						const entered = state(view);
+						await realType(' east');
+						entered.then = state(view);
+						await putBack(view, text);
+						check('Own 178: Enter on Balcony opens it with the caret after Balcony, and typing east adds to it', entered.open === '2,1' && entered.caret === 7 && entered.cell === 'Balcony' && entered.then.cell === 'Balcony east' && entered.then.note === 'Balcony east', entered);
+
+						// Own 179 (step 5): text with no keydown, as the emoji picker sends it, replaces Kitchen.
+						model = tableAt(view, null);
+						await click(await cellMiddle(model, 1, 1));
+						await cdp.sendCommand('Input.insertText', { text: '🌵' });
+						await sleep(300);
+						const emoji = state(view);
+						await putBack(view, text);
+						check('Own 179: text with no keydown, as the emoji picker sends it, replaces Kitchen and opens it', emoji.open === '1,1' && emoji.cell === '🌵' && emoji.note === '🌵' && emoji.focused, emoji);
+
+						// Own 181 (step 7): a range from Fern to Office, then Z: Office, the cell moved to last, reads Z, and the range ends.
+						model = tableAt(view, null);
+						const fern = await cellMiddle(model, 1, 0);
+						const office = await cellMiddle(model, 3, 1);
+						await press(fern);
+						await glide(fern, office);
+						await release(office);
+						const range = { dragged: where(view) };
+						await realType('Z');
+						await sleep(200);
+						Object.assign(range, state(view), { ranged: model.boxes.filter((box) => box.isConnected).reduce((n, box) => n + box.querySelectorAll('td.is-selected, th.is-selected').length, 0), fern: lineOf(view, '| Fern ') !== null });
+						await putBack(view, text);
+						check('Own 181: typing Z on a range from Fern to Office replaces Office, the cell moved to last, and ends the range', range.dragged === '3,1 from 1,0' && range.open === '3,1' && range.cell === 'Z' && range.note === 'Z' && range.ranged === 0 && range.fern, range);
+
+						// Own 182 (step 8): the second table selected whole by a press beside its cells: x starts a paragraph below it.
+						// With Click to select a cell off, Mon opened by a click, then Escape, then Wed typed: Mon reads Wed.
+						const days = tableAt(view, null, 1);
+						const daysTable = days.boxes[0].querySelector('table').getBoundingClientRect();
+						const beside = { x: daysTable.right + 30, y: daysTable.top + daysTable.height / 2 };
+						await click(beside);
+						const whole = { selected: view.state.selection.main.from === days.from && view.state.selection.main.to === days.to, at: where(view) };
+						await realType('x');
+						await sleep(200);
+						const after = view.state.doc.toString();
+						whole.below = after.slice(0, days.to) === text.slice(0, days.to) && after.slice(days.to).startsWith('\n\nx\n');
+						whole.open = opened(view);
+						await putBack(view, text);
+						check('Own 182: on the second table selected whole, x starts a paragraph below it, as before', whole.selected && whole.at === '-' && whole.below && !whole.open, whole);
+						await settingsTab?.setControlValue('clickSelects', false);
+						await sleep(200);
+						model = tableAt(view, null, 1);
+						await click(await cellMiddle(model, 1, 0));
+						const off = { clicked: opened(view) };
+						await key('Escape');
+						off.escaped = { at: where(view), open: opened(view) };
+						await realType('Wed');
+						await sleep(200);
+						Object.assign(off, state(view));
+						await putBack(view, text);
+						await settingsTab?.setControlValue('clickSelects', true);
+						await sleep(200);
+						off.back = { setting: preview.clickSelects(), saved: (await plugin.loadData())?.clickSelects ?? true };
+						check('Own 182: with Click to select a cell off, Mon opened by a click, Escape, then Wed typed: Mon reads Wed', off.clicked === '1,0' && off.escaped.at === '1,0' && !off.escaped.open && off.open === '1,0' && off.cell === 'Wed' && off.note === 'Wed', off);
+						check('Own 182: the setting is back on, and saved so', off.back.setting === true && off.back.saved === true, off.back);
+
+						// Own 180 (step 6): in Plants, Kind typed on the header cell Name keeps the freeze mark, and the rows still pin.
+						view = await open('Frozen tables');
+						await sleep(500);
+						const frozenText = view.state.doc.toString();
+						let plants = tableAt(view, 'Plants');
+						await scrollToTable(view, plants, -60);
+						await leaveAll(view);
+						await scrollToTable(view, plants, -60);
+						const pinnedBefore = plants.pins.room.rows;
+						await click(await cellMiddle(plants, 0, 0));
+						const kind = { before: where(view) };
+						await realType('Kind');
+						await sleep(200);
+						Object.assign(kind, state(view));
+						await leaveAll(view);
+						plants = tableAt(view, 'Plants');
+						await scrollToTable(view, plants, 300);
+						kind.header = view.state.doc.lineAt(plants.from).text.split('|')[1]?.trim();
+						kind.pinned = [pinnedBefore, plants.pins.room.rows];
+						await putBack(view, frozenText);
+						check('Own 180: Kind typed on the Plants header cell Name keeps the freeze mark before it, and the header and Plant 1 still pin', kind.before === '0,0' && kind.open === '0,0' && kind.note === '%%freeze 2 1%% Kind' && kind.header === '%%freeze 2 1%% Kind' && kind.pinned[0] > 0 && kind.pinned[1] === kind.pinned[0], kind);
+
+						// Deep in Frozen table 2000 by 12, x typed on a cell of the second pinned row opens it where it's pinned, reading x,
+						// and the rows on screen stay where they were.
+						view = await open('Frozen table 2000 by 12');
+						await sleep(1500);
+						const bigFrozenText = view.state.doc.toString();
+						const deep = models(view)[0];
+						await leaveAll(view);
+						await scrollToTable(view, deep, 16000);
+						const area = deep.dragArea(400);
+						const columns = deep.columnLayout();
+						const x = columns ? columns.left + (columns.columns[2].start + columns.columns[2].end) / 2 : null;
+						let rowOne = null;
+						if (area?.rows && x !== null) {
+							const ys = [];
+							for (let y = area.rows.top + 1; y < area.rows.bottom; y += 2) if (deep.cellAtPoint(x, y)?.row === 1) ys.push(y);
+							if (ys.length) rowOne = { x, y: ys[Math.floor(ys.length / 2)] };
+						}
+						const pinnedCell = { found: !!rowOne };
+						if (rowOne) {
+							await click(rowOne);
+							pinnedCell.selected = where(view);
+							const paneMiddle = view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientHeight * 0.7;
+							const watched = document.elementFromPoint(x, paneMiddle)?.closest('tr');
+							const watchedTop = watched?.getBoundingClientRect().top;
+							const top = view.scrollDOM.scrollTop;
+							await realType('x');
+							await sleep(300);
+							await frames(3);
+							Object.assign(pinnedCell, state(view));
+							const r = preview.openCell(view)?.view.dom.getBoundingClientRect();
+							pinnedCell.there = !!r && r.top >= area.rows.top - 4 && r.top <= area.rows.bottom;
+							pinnedCell.moved = view.scrollDOM.scrollTop - top;
+							pinnedCell.rowMoved = watched?.isConnected ? watched.getBoundingClientRect().top - watchedTop : null;
+						}
+						await putBack(view, bigFrozenText);
+						check('Own 180: deep in Frozen table 2000 by 12, x typed on a cell of the second pinned row opens it where it\'s pinned, reading x, and the note doesn\'t move', pinnedCell.selected === '1,2' && pinnedCell.open === '1,2' && pinnedCell.cell === 'x' && pinnedCell.focused && pinnedCell.there && Math.abs(pinnedCell.moved) < 2 && pinnedCell.rowMoved !== null && Math.abs(pinnedCell.rowMoved) < 2, pinnedCell);
+
+						// Own 183: far from the selected cell, a key opens it emptied, and nothing is typed over the table or composed in the
+						// note; an input method's first key there likewise. CodeMirror can keep the cell's block in the page a while, and
+						// draws it again as the cell opens, which takes the keyboard from its editor in that same task: the key is lost
+						// then, and the cell takes the keyboard back once its block is drawn (`drawn` says which it was).
+						view = await open('Table 2000 by 12');
+						await sleep(1500);
+						const bigText = view.state.doc.toString();
+						let big = models(view)[0];
+						await leaveAll(view);
+						const header = view.state.doc.lineAt(big.from).number;
+						const farAway = async () => {
+							view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(header + 2 + 249).from, { y: 'center' }) });
+							await sleep(500);
+							await frames(3);
+							big = models(view)[0];
+							const at = await cellMiddle(big, 250, 2);
+							if (at) await click(at);
+							const selected = where(view);
+							view.scrollDOM.scrollTop += 60000;
+							await sleep(600);
+							await frames(4);
+							return { selected, drawn: !!big.cellElement({ row: 250, column: 2 })?.isConnected };
+						};
+						const rowText = (doc) => doc.split('\n')[header + 250];
+						const outside = (doc) => {
+							const lines = doc.split('\n');
+							lines.splice(header + 250, 1);
+							return lines.join('\n');
+						};
+						const far = { key: await farAway() };
+						await realType('q');
+						await sleep(800);
+						await frames(3);
+						Object.assign(far.key, state(view), { rest: outside(view.state.doc.toString()) === outside(bigText), row: rowText(view.state.doc.toString()) });
+						await putBack(view, bigText);
+						far.compose = await farAway();
+						await realCompose({ key: 'k', code: 'KeyK' }, ['k'], 'か');
+						await sleep(800);
+						await frames(3);
+						Object.assign(far.compose, state(view), { rest: outside(view.state.doc.toString()) === outside(bigText) });
+						await realType('z');
+						far.compose.then = preview.openCell(view)?.view.state.doc.toString() ?? null;
+						await putBack(view, bigText);
+						check('Own 183: far from the selected cell, a key opens the cell emptied, the key in it or lost, with the keyboard, and nothing else in the note changes', far.key.selected === '250,2' && far.key.open === '250,2' && (far.key.cell === '' || far.key.cell === 'q') && far.key.focused && far.key.rest && !far.key.composing, far.key);
+						check('Own 183: an input method\'s first key there composes nothing in the note, and the cell then takes typing', far.compose.selected === '250,2' && far.compose.open === '250,2' && !far.compose.composing && far.compose.rest && typeof far.compose.then === 'string' && far.compose.then.endsWith('z'), far.compose);
+
+						// Own 184: a key on a selected cell of Table 2000 by 12 against Enter there: each key's round trip through the
+						// window's debugger, and the handlers' own work, from the keydown's capture on the window to its end there, and for
+						// the typed key on to its input's end.
+						view = await open('Table 2000 by 12');
+						await sleep(1000);
+						big = models(view)[0];
+						await leaveAll(view);
+						await scrollToTable(view, big, -20);
+						const timed = { type: [], enter: [], typeWork: [], enterWork: [] };
+						let workStart = 0;
+						let workEnd = 0;
+						const startWork = () => (workStart = performance.now());
+						const endWork = () => (workEnd = performance.now());
+						window.addEventListener('keydown', startWork, true);
+						window.addEventListener('keydown', endWork);
+						window.addEventListener('input', endWork);
+						const typeKey = { key: 'q', code: 'KeyQ', text: 'q', unmodifiedText: 'q', windowsVirtualKeyCode: 81 };
+						const enterKey = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, unmodifiedText: '\r', text: '' };
+						for (let i = 0; i < 6; i++) {
+							for (const kind of ['type', 'enter']) {
+								view.dispatch({ selection: { anchor: 0 } });
+								await sleep(200);
+								// Undo can scroll a long table to its end.
+								await scrollToTable(view, big, -20);
+								const at = await cellMiddle(big, 2 + i, 2);
+								if (!at) continue;
+								await click(at);
+								const event = kind === 'type' ? typeKey : enterKey;
+								const started = performance.now();
+								workStart = workEnd = 0;
+								await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: kind === 'type' ? 'keyDown' : 'rawKeyDown' });
+								timed[kind].push(performance.now() - started);
+								if (workEnd > workStart && workStart) timed[`${kind}Work`].push(workEnd - workStart);
+								await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+								await sleep(300);
+								await key('Escape');
+								if (kind === 'type') await key('z', { meta: true });
+								await sleep(200);
+							}
+						}
+						window.removeEventListener('keydown', startWork, true);
+						window.removeEventListener('keydown', endWork);
+						window.removeEventListener('input', endWork);
+						const median = (list) => (list.length ? Math.round([...list].sort((a, b) => a - b)[Math.floor(list.length / 2)] * 100) / 100 : null);
+						const speed = { type: median(timed.type), enter: median(timed.enter), typeWork: median(timed.typeWork), enterWork: median(timed.enterWork), samples: [timed.type.length, timed.enter.length, timed.typeWork.length, timed.enterWork.length] };
+						const unchanged = view.state.doc.toString() === bigText;
+						await putBack(view, bigText);
+						results.push({ name: 'Own 184 a key on a selected cell of Table 2000 by 12, against Enter, the median of 6 (ms)', ok: true, detail: speed });
+						check('Own 184: typing on a selected cell of Table 2000 by 12 costs at most 50 ms more than Enter there, well under a second, and Undo put each back', speed.type !== null && speed.enter !== null && speed.type <= speed.enter + 50 && speed.type < 1000 && unchanged, { speed, unchanged });
+
+						view = await open('Two report tables');
+						await sleep(300);
+						check('Own 185: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						if (((await plugin.loadData())?.clickSelects ?? true) !== (savedBefore?.clickSelects ?? true)) await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
 						preview.setClickSelects(false);
 						preview.use(false);
 						await sleep(300);

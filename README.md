@@ -113,6 +113,7 @@ What's planned, broadly. The order and the details may change.
 **After that:**
 
 - **Edit from a selected cell:** Backspace, Delete, Cut and Paste act on the cell, with nothing to open first.
+- **Type over a selected cell:** typing replaces its text, as in a spreadsheet. Enter still opens it to add to its text.
 - **Move rows and columns** from a selected cell, without opening the cells for edit.
 - **Select a range of cells** with Shift and the arrows.
 - **Format a selected cell or a range:** Bold, italic and the other formatting commands act on the cells' text, and take formatting off again.

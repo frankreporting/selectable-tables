@@ -251,8 +251,8 @@ Every release gets one set of release notes, written when we're ready to release
 
 The notes read like Obsidian's own, for an average user:
 
-- **One opening sentence** on what the release brings.
-- **Three headings, in this order: New, Improved, Fixed.** Leave out any that's empty.
+- **A headline**, an H2 alone, on what the release brings: short like a news headline, not a sentence, and without the plugin's name or version, which the release already shows.
+- **Three sections under it, each an H3, in this order: New, Improved, Fixed.** Leave out any that's empty.
 - **Short, plain bullets:** one line each, on what the user will notice, in their words. Name keys and buttons, not internals: no issue numbers, function names or Obsidian's internals, and no reasons they don't need.
 
 Linear's release pipeline *Better Markdown Tables*, the plugin's name from the relaunch on, holds the release being built: each push to `master` that changes what ships in the plugin adds its issues to the open release (`.github/workflows/linear-release.yml`, whose paths say what counts). Its access key is the repository's `LINEAR_ACCESS_KEY` secret, and lives nowhere else. Run that workflow by hand, with a tag or commit to sync from, when the open release has to be filled again from scratch; it's a dry run unless that box is unticked.
@@ -260,8 +260,8 @@ Linear's release pipeline *Better Markdown Tables*, the plugin's name from the r
 To release:
 
 1. Draft the notes on the open release in Linear. List its issues with `list_issues` by `release`, read each and its PR, and write the notes with `save_release_note` (`pipeline`, `releases: [<release>]`), not the pipeline's generated ones. Send Brian the link. He edits them there, and his words are the notes. Wait for his OK.
-2. Read them back with `get_release_note`, add them unchanged to `CHANGELOG.md` as `## <version> (<date>)`, bump the version, and merge that.
-3. Tag the release. The release workflow takes the version's section of `CHANGELOG.md` (`scripts/release-notes.mjs`) and builds a draft on GitHub with those notes. A version with no section makes no draft, and the run says why.
+2. Read them back with `get_release_note` and add them to `CHANGELOG.md` under `## <version> (<date>)`, their words unchanged and each heading one level lower, since the version's heading is the H2 there: the headline as `### …`, the sections as `#### New`, `#### Improved` and `#### Fixed`. Bump the version, and merge that.
+3. Tag the release. The release workflow takes the version's section of `CHANGELOG.md` (`scripts/release-notes.mjs`), lifts each heading back one level, and builds a draft on GitHub with those notes. A version with no section, or whose section doesn't open with its one headline, makes no draft, and the run says why.
 4. Publish the draft with `gh release edit <version> --draft=false`. Obsidian's plugin page links to it, and update checkers show it. Publishing runs the Linear workflow: it names the Linear release by its version, links it to the GitHub release and marks it complete, and the next merge that changes the plugin starts a new one. That needs a person's token, as `gh` has: a release published by a workflow's own token starts no workflow. If the run fails, complete the Linear release with `save_release` (stage completed, the version, the link).
 
 ## Working in Obsidian

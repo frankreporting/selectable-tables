@@ -24,8 +24,9 @@ jobs:
             - name: Check the tag matches the version
               run: node scripts/check-version.mjs "$GITHUB_REF_NAME"
 
-            # The notes Brian approved, from the version's section of CHANGELOG.md. A version with
-            # no section stops here, so no draft goes out without its notes.
+            # The notes Brian approved, from the version's section of CHANGELOG.md, each heading
+            # lifted a level so they open with an H2 headline. A version with no section, or one
+            # that doesn't open with its headline, stops here, so no draft goes out without its notes.
             - name: Take the version's notes from CHANGELOG.md
               run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
 

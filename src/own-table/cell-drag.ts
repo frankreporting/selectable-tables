@@ -131,7 +131,8 @@ function enter(view: EditorView, table: Span, anchor: Cell, head: Cell, focus = 
 	if (open && open.note === view && !escapeCell(open.view)) return false;
 	const { from, to } = table;
 	const { main } = view.state.selection;
-	if (main.from !== from || main.to !== to) view.dispatch({ selection: wholeTable({ from, to }, false), userEvent: 'select.pointer' });
+	// CodeMirror puts a pointer's selection in the page even without focus, which focuses the note: a tap's is a plain one.
+	if (main.from !== from || main.to !== to) view.dispatch({ selection: wholeTable({ from, to }, false), userEvent: focus ? 'select.pointer' : 'select' });
 	// The press's own default is prevented, so the keyboard comes to the note here, for Copy, Escape and the arrows.
 	if (focus && !view.hasFocus) view.contentDOM.focus({ preventScroll: true });
 	const cells = view.plugin(cellSelection);

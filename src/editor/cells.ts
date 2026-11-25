@@ -236,8 +236,10 @@ class CellSelection implements PluginValue, Cells {
 	 */
 	private readonly onLeave = (event: Event) => {
 		if (!this.selected) return;
-		// Shift with a press on a cell of the same table extends a range from the selected cell, on the plugin's own table.
-		if (event.type === 'pointerdown' && (event as PointerEvent).shiftKey && this.drawing && this.start !== null) {
+		// On the plugin's own table, a press on a cell of the same table leaves the cell to the table, which writes its own
+		// edits: Shift with it extends a range from the selected cell, a click selects the cell pressed or opens the cell
+		// already selected, and a drag makes a range.
+		if (event.type === 'pointerdown' && this.drawing && this.start !== null) {
 			const at = this.view.state.facet(ownTables)?.cellAt(this.view, event.target as Element);
 			if (at?.table()?.from === this.start) return;
 		}

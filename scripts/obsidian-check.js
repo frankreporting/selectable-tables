@@ -9231,6 +9231,7 @@
 					let view;
 					try {
 						config.nativeMenus = false;
+						app.updateUseNativeMenu();
 						// Own 157 (step 1): a click on Basil selects it, with no caret in it, and the arrows move from it.
 						view = await open('Two report tables');
 						await sleep(300);
@@ -9391,18 +9392,15 @@
 
 						// Own 163 (step 7): the settings tab holds one switch, on, with its description; turned off by a click, a click on
 						// Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before.
-						app.setting.open();
-						app.setting.openTabById('selectable-tables');
-						await sleep(500);
-						const tab = document.querySelector('.modal.mod-settings .vertical-tab-content');
-						const items = Array.from(tab?.querySelectorAll('.setting-item') ?? []);
-						const toggle = items[0]?.querySelector('.checkbox-container');
-						const setting = { count: items.length, name: items[0]?.querySelector('.setting-item-name')?.textContent, desc: items[0]?.querySelector('.setting-item-description')?.textContent, on: toggle?.classList.contains('is-enabled') };
-						if (toggle) await click(await centreOf(toggle));
-						await sleep(400);
-						setting.after = { on: toggle?.classList.contains('is-enabled'), setting: preview.clickSelects(), saved: (await plugin.loadData())?.clickSelects };
-						app.setting.close();
-						await sleep(300);
+						// Obsidian 1.15 opens Settings in a popout window, which would show on the screen: the tab's own definitions and
+						// its control are read and set instead, as its toggle sets them. How it's drawn is the hand check's (step 7).
+						const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+						const definitions = tab?.getSettingDefinitions?.() ?? [];
+						const control = definitions[0]?.control;
+						const setting = { count: definitions.length, name: definitions[0]?.name, desc: definitions[0]?.desc, type: control?.type, on: control ? tab.getControlValue(control.key) : null };
+						if (control) await tab.setControlValue(control.key, false);
+						await sleep(200);
+						setting.after = { on: control ? tab.getControlValue(control.key) : null, setting: preview.clickSelects(), saved: (await plugin.loadData())?.clickSelects };
 						view = await open('Two report tables');
 						await sleep(300);
 						model = tableAt(view, null);
@@ -9423,7 +9421,7 @@
 						await leaveAll(view);
 						preview.setClickSelects(true);
 						await plugin.saveData({ ...(await plugin.loadData()), clickSelects: savedBefore?.clickSelects });
-						check('Own 163: the settings tab holds one switch, Click to select a cell, on, with its description, and a click turns it off and saves it', setting.count === 1 && setting.name === 'Click to select a cell' && setting.desc === 'A click selects a cell, and a double-click opens it. Turn it off to open a cell with one click, as in Obsidian.' && setting.on && setting.after.on === false && setting.after.setting === false && setting.after.saved === false, setting);
+						check('Own 163: the settings tab holds one switch, Click to select a cell, a toggle, on, with its description, and turned off it\'s off and saved', setting.count === 1 && setting.name === 'Click to select a cell' && setting.desc === 'A click selects a cell, and a double-click opens it. Turn it off to open a cell with one click, as in Obsidian.' && setting.type === 'toggle' && setting.on === true && setting.after.on === false && setting.after.setting === false && setting.after.saved === false, setting);
 						check('Own 163: with it off, a click on Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before', off.click === '1,0' && off.drag.at === '1,1 from 1,0' && !off.drag.open && off.drag.ranged === 2, off);
 
 						// Own 164 (step 8): a phone's layout: a tap on Basil selects it, its row's and column's handles show, and the note
@@ -9481,8 +9479,13 @@
 								window.addEventListener('click', t.clickEnd);
 								try {
 									for (let i = 0; i < 8; i++) {
-										await leaveAll(view);
-										await click(await cellMiddle(table, 2 + i, 1 + (i % 3)));
+										// The caret out of the table, which closes an open cell: Escape on a long selected table scrolls to its end.
+										view.dispatch({ selection: { anchor: 0 } });
+										await sleep(200);
+										await frames(2);
+										const at = await cellMiddle(table, 2 + i, 1 + (i % 3));
+										if (!at) throw new Error(`Own 165: row ${2 + i} of ${name} isn't drawn (${opened(view)}, ${where(view)})`);
+										await click(at);
 									}
 								} finally {
 									window.removeEventListener('pointerdown', t.downStart, true);
@@ -9494,7 +9497,8 @@
 								timedClick[`${name}, ${on ? 'selects' : 'opens'}`] = spans.length ? Math.round(spans[Math.floor(spans.length / 2)] * 100) / 100 : null;
 							}
 							preview.setClickSelects(true);
-							await leaveAll(view);
+							view.dispatch({ selection: { anchor: 0 } });
+							await sleep(200);
 						}
 						results.push({ name: 'Own 165 a click\'s own work, the median of 8 (ms)', ok: true, detail: timedClick });
 						check('Own 165: selecting a cell with a click costs no more than opening one did', ['Table 50 by 8', 'Table 2000 by 12'].every((name) => timedClick[`${name}, selects`] !== null && timedClick[`${name}, selects`] <= Math.max(timedClick[`${name}, opens`] ?? 0, 5)), timedClick);
@@ -9505,11 +9509,7 @@
 					} finally {
 						if (hadNative) config.nativeMenus = nativeBefore;
 						else delete config.nativeMenus;
-						try {
-							app.setting.close();
-						} catch {
-							// Not open.
-						}
+						app.updateUseNativeMenu();
 						view = await open('Watering schedule');
 						await sleep(300);
 						for (const name of touched) {

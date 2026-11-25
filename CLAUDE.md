@@ -5,7 +5,7 @@ An Obsidian plugin (`selectable-tables`) that makes a Live Preview table one blo
 ## Where things live
 
 - **Repos:** `frankreporting/selectable-tables` is public. The private `frankreporting/selectable-tables-dev` (the `dev` remote) holds the pull requests and history from before it went public on 10/29. Commits use Brian's GitHub no-reply address; never his own address.
-- **Backlog:** the Linear team **Selectable Tables** (key `STA`). Plans and test plans are Linear documents on their issue. There are no area labels yet: every issue runs alone, except a spike (see *Parallel work* in the global `CLAUDE.md`).
+- **Backlog:** the Linear team **Selectable Tables** (key `STA`). Plans and test plans are Linear documents on their issue. Every issue carries one label of the *Area* group: *Plugin* (what ships in the plugin, its tests, the test vault and the check scripts), *Dev tooling* (the workflows, `CHANGELOG.md`, the release scripts, the release pipeline in Linear, and changes only to `CLAUDE.md` or `AGENTS.md`), or *Several areas*. Each label's description lists its files. Issues in different areas run side by side, and a spike runs beside anything (see *Parallel work* in the global `CLAUDE.md`).
 - **Code:** `src/`. `main.ts` registers the editor extension and passes on Obsidian's `css-change` and `editor-menu`; `src/editor/decide.ts` holds every key decision and the edit guard's rule, `layout.ts` reads the editor's layout, `cells.ts` holds the selected cell, `freeze-mark.ts` reads and writes the mark that freezes a table, `freeze-write.ts` works out what a freeze command writes, `freeze-commands.ts` adds those commands, and the same items to a cell's right-click menu, `freeze.ts` marks a note's frozen tables for `styles.css`, `theme-paint.ts` reads the theme's colors behind their cells, `width-copy.ts` keeps an open cell's column at its width, and `extension.ts` wires them to keys. `src/own-table/` is the plugin's own table, in preview builds only (see *The plugin's own table* below), and `src/preview.ts` its switch and its settings tab.
 - **Tests:** `test/*.test.ts`, bundled by `scripts/test.mjs` with esbuild and run by Node's test runner. Tested code must not import `obsidian` as a value (the package is types only), so keep decisions in modules that take plain CodeMirror state.
 - **Test vault:** `test-vault/Selectable Tables Test`, invented notes only. `npm run test-vault` builds a preview and copies the plugin in; `--to <plugin folder>` on `scripts/install-test-vault.mjs` copies it elsewhere, such as the main clone's test vault from a worktree. *Table 50 by 8* and *Table 2000 by 12* are written by `scripts/make-table-notes.mjs`; git keeps the first, and `npm run test-vault` writes the second, about 860 KB, when it's missing.
@@ -255,13 +255,14 @@ The notes read like Obsidian's own, for an average user:
 - **Three headings, in this order: New, Improved, Fixed.** Leave out any that's empty.
 - **Short, plain bullets:** one line each, on what the user will notice, in their words. Name keys and buttons, not internals: no issue numbers, function names or Obsidian's internals, and no reasons they don't need.
 
+Linear's release pipeline *Selectable Tables* holds the release being built: each push to `master` that changes what ships in the plugin adds its issues to the open release (`.github/workflows/linear-release.yml`, whose paths say what counts). Its access key is the repository's `LINEAR_ACCESS_KEY` secret, and lives nowhere else. Run that workflow by hand, with a tag or commit to sync from, when the open release has to be filled again from scratch; it's a dry run unless that box is unticked. When the plugin is renamed, Brian renames the pipeline; the key and the workflows stay.
+
 To release:
 
-1. Draft the notes in `.dev/release-notes.md` in the main clone, which git ignores, from what merged since the last tag (`git log <tag>..master` and those PRs' descriptions). Keep anything already in that file.
-2. Open that file in Zed for Brian (`zed <path>`; he's asked for this each time, so it needs no asking first). He edits it there and saves, and his words are the notes. Wait for his OK.
-3. Add them to `CHANGELOG.md` as `## <version> (<date>)`, bump the version, and merge that.
-4. Tag the release. The release workflow builds a draft on GitHub with no notes.
-5. Paste the same notes into that draft, and publish. Obsidian's plugin page links to it, and update checkers show it. Then empty `.dev/release-notes.md`.
+1. Draft the notes on the open release in Linear. List its issues with `list_issues` by `release`, read each and its PR, and write the notes with `save_release_note` (`pipeline`, `releases: [<release>]`), not the pipeline's generated ones. Send Brian the link. He edits them there, and his words are the notes. Wait for his OK.
+2. Read them back with `get_release_note`, add them unchanged to `CHANGELOG.md` as `## <version> (<date>)`, bump the version, and merge that.
+3. Tag the release. The release workflow takes the version's section of `CHANGELOG.md` (`scripts/release-notes.mjs`) and builds a draft on GitHub with those notes. A version with no section makes no draft, and the run says why.
+4. Publish the draft with `gh release edit <version> --draft=false`. Obsidian's plugin page links to it, and update checkers show it. Publishing runs the Linear workflow: it names the Linear release by its version, links it to the GitHub release and marks it complete, and the next merge that changes the plugin starts a new one. That needs a person's token, as `gh` has: a release published by a workflow's own token starts no workflow. If the run fails, complete the Linear release with `save_release` (stage completed, the version, the link).
 
 ## Working in Obsidian
 

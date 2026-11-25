@@ -9898,9 +9898,10 @@
 						const bigText = view.state.doc.toString();
 						const big = () => models(view)[0];
 						// Escape on a long selected table scrolls to its end, so the table's top is brought back before each press.
+						// A margin above it, so the header's column grips, which sit above the header, are in the pane.
 						const toTop = async () => {
 							big().scrollSideways(-big().sideways().scroll);
-							view.dispatch({ effects: view.constructor.scrollIntoView(big().from, { y: 'start' }) });
+							view.dispatch({ effects: view.constructor.scrollIntoView(big().from, { y: 'start', yMargin: 80 }) });
 							await sleep(500);
 							await frames(3);
 						};

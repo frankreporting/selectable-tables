@@ -3900,37 +3900,91 @@
 					check('Own 52: with a cell open the note\'s editor answers for it, Bold bolds in the cell, Toggle checkbox leaves the row alone, and the answers come off as it closes', answered && bolded && checkboxQuiet && released, { answered, bolded, checkboxQuiet, released });
 					await restore(view, mdText);
 
-					// The keys in an open cell, as Obsidian's own cell has them.
+					// The keys in an open cell (STA-9): the arrows and the jump keys stay in its text, and stop at its ends; Enter, Tab
+					// and Shift+Tab move between cells, each with its text selected, and do nothing at the table's ends.
 					view = await open('Cell moves');
 					const cellsText = view.state.doc.toString();
 					const seed = models(view)[0];
 					const steps = [];
 					await openText(view, 'Tomato');
 					steps.push(where(view));
-					for (const [name, mods] of [['ArrowRight'], ['ArrowLeft'], ['ArrowDown'], ['ArrowUp'], ['Tab'], ['Tab', { shift: true }], ['Enter'], ['Escape'], ['Enter'], ['Enter'], ['ArrowRight', { meta: true }], ['ArrowLeft', { meta: true }]]) {
+					const stepKeys = [['ArrowRight'], ['ArrowRight', { meta: true }], ['ArrowUp'], ['ArrowLeft'], ['ArrowLeft', { meta: true }], ['ArrowDown'], ['PageUp'], ['PageDown'], ['ArrowUp', { meta: true }], ['ArrowDown', { meta: true }], ['Home', { meta: true }], ['End', { meta: true }], ['ArrowUp', { ctrl: true }], ['ArrowDown', { ctrl: true }], ['PageUp', { shift: true }], ['PageDown', { shift: true }], ['Tab'], ['Tab', { shift: true }], ['Enter'], ['Enter'], ['Tab'], ['Tab'], ['Escape']];
+					const scrollBefore = view.scrollDOM.scrollTop;
+					let scrollMoved = 0;
+					for (const [name, mods] of stepKeys) {
 						await key(name, mods);
 						steps.push(where(view) ?? `selected ${outlined(view)}`);
+						// The jump keys stay in the cell's text and leave the note where it is.
+						if (steps.length <= 17) scrollMoved = Math.max(scrollMoved, Math.abs(view.scrollDOM.scrollTop - scrollBefore));
 					}
-					// Enter on the last row, a fresh press, adds a row below and opens its cell (STA-97).
-					check('Own 53: ← → ↑ ↓ at a text\'s edges, Tab, Shift+Tab and Enter move between cells as Obsidian\'s cell does, and Cmd+← and Cmd+→ at the edges too', steps.join(' | ') === '3,1 6 | 3,2 0 | 3,1 6 | 4,1 0 | 3,1 0 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | selected 4,1 | 4,1 10 | 5,1 0 | 5,2 0 | 5,1 0', steps.join(' | '));
-					await key('Escape');
+					const stepsWant = '3,1 6 | 3,1 6 | 3,1 6 | 3,1 0 | 3,1 0 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 6-0 | 3,1 6 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | 4,1 0-10 | 4,2 0-11 | 4,2 0-11 | selected 4,2';
+					const unchanged = view.state.doc.toString() === cellsText;
+					check('Own 53: in an open cell ← → ↑ ↓, Cmd+← → ↑ ↓, Page Up and Down, Cmd+Home and End and Ctrl+↑ ↓ stay in its text and stop at its ends, with Shift selecting, the note still; Tab, Shift+Tab and Enter move with the text selected, and do nothing at the table\'s end', steps.join(' | ') === stepsWant && scrollMoved <= 1 && unchanged, { got: steps.join(' | '), scrollMoved, unchanged });
 					await key('Escape');
 					await restore(view, cellsText);
 					await frames(3);
-					// Out of the table at its four edges, to the start of the line beyond.
-					const aboveSeed = view.state.doc.lineAt(models(view)[0].from).number - 1;
+					// At the table's four edges the keys stay in the cell, where they leave a cell of Obsidian's table. Shift+Tab on
+					// the header's first cell does nothing.
 					const belowSeed = view.state.doc.lineAt(models(view)[0].to).number + 1;
-					const leaves = [];
-					for (const [text, name, toStart] of [['Tray', 'ArrowUp', true], ['Tray', 'ArrowLeft', true], ['Water twice', 'ArrowDown', false], ['Water twice', 'ArrowRight', false]]) {
+					const stays = [];
+					for (const [text, name, toStart, mods] of [['Tray', 'ArrowUp', true], ['Tray', 'ArrowLeft', true], ['Tray', 'Tab', true, { shift: true }], ['Water twice', 'ArrowDown', false], ['Water twice', 'ArrowRight', false], ['Water twice', 'PageDown', false]]) {
 						await openText(view, text);
 						const c = oc(view);
 						if (toStart) c?.view.dispatch({ selection: { anchor: 0 } });
 						await settle();
-						await key(name);
-						const line = view.state.doc.lineAt(view.state.selection.main.head);
-						leaves.push(`${name}:${!oc(view) && view.hasFocus && view.state.selection.main.empty && view.state.selection.main.head === line.from ? line.number : 'no'}`);
+						const before = where(view);
+						await key(name, mods);
+						stays.push(`${mods ? 'Shift+' : ''}${name}:${oc(view) === c && oc(view)?.view.hasFocus && where(view) === before ? 'stays' : `no (${where(view)})`}`);
+						await key('Escape');
+						await key('Escape');
 					}
-					check('Own 53: at the table\'s edges the keys leave it, to the start of the line above or below, with the note\'s keyboard', leaves.join(' ') === `ArrowUp:${aboveSeed} ArrowLeft:${aboveSeed} ArrowDown:${belowSeed} ArrowRight:${belowSeed}`, leaves.join(' '));
+					check('Own 53: at the table\'s edges ↑ ← Shift+Tab and ↓ → Page Down stay in the open cell, with its keyboard', stays.every((each) => each.endsWith(':stays')), stays.join(' '));
+					// Shift+Enter is a line break, and ↑ and ↓ move between the text's lines, then to its start and end.
+					await openText(view, 'Tomato');
+					await key('Enter', { shift: true });
+					await realType('mist');
+					const lines = [];
+					const doc = () => oc(view)?.view.state.doc;
+					const lineAtCaret = () => {
+						const c = oc(view);
+						return c ? `${c.view.state.doc.lineAt(c.view.state.selection.main.head).number}:${c.view.state.selection.main.head}` : 'closed';
+					};
+					const twoLines = doc()?.lines === 2 && doc()?.toString() === 'Tomato\nmist';
+					for (const name of ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown']) {
+						await key(name);
+						lines.push(lineAtCaret());
+					}
+					const [lineUp, lineTop, lineDown, lineBottom] = lines;
+					const linesOk = twoLines && lineUp.startsWith('1:') && lineUp !== '1:0' && lineTop === '1:0' && lineDown.startsWith('2:') && lineBottom === '2:11';
+					await key('z', { meta: true });
+					await key('Escape');
+					await key('Escape');
+					check('Own 53: after Shift+Enter, ↑ and ↓ move between the open cell\'s two lines, then to its start and end', linesOk, { twoLines, lines });
+					await restore(view, cellsText);
+					// With the switch off, Obsidian's own cell keeps its keys: → at the text's end goes to the next cell, and Page Down
+					// closes the cell and selects the column's bottom cell. Only the plugin's cell keeps them in its text.
+					preview.use(false);
+					await sleep(500);
+					const stockCell = (text) => Array.from(view.contentDOM.querySelectorAll('.cm-table-widget td')).find((td) => td.textContent.trim() === text) ?? null;
+					stockCell('Tomato')?.scrollIntoView({ block: 'center' });
+					await sleep(300);
+					if (stockCell('Tomato')) await clickAt(endOf(stockCell('Tomato')));
+					await sleep(300);
+					const stockOpened = openAt(view);
+					await key('End');
+					await key('ArrowRight');
+					await sleep(250);
+					const stockNext = openAt(view);
+					await key('PageDown');
+					await sleep(250);
+					const stockJump = { open: !!openCell(view), at: at(view) };
+					check('Own 53: with the switch off, Obsidian\'s own cell keeps its keys: → at the text\'s end goes to the next cell, and Page Down closes the cell and selects the column\'s bottom cell', stockOpened === '3,1' && stockNext === '3,2' && !stockJump.open && stockJump.at === '4,2', { stockOpened, stockNext, stockJump });
+					await key('Escape');
+					await key('Escape');
+					preview.use(true);
+					await sleep(500);
+					view = await open('Cell moves');
+					await restore(view, cellsText);
 					// The cell Tab leaves, in the same row, is drawn with its new text.
 					await openText(view, 'Tomato');
 					await realType('z');
@@ -3960,7 +4014,7 @@
 					await key('Escape');
 					await restore(view, cellsText);
 
-					// Tab held runs along the rows and stops at the table's last cell; a fresh Tab or Enter there adds a row.
+					// Tab held runs along the rows and stops at the table's last cell; a fresh Tab or Enter there does nothing.
 					await tableUnder(view, 'Tall table');
 					const tall = models(view).find((model) => view.state.doc.sliceString(model.from, model.from + 7) === '| Row |');
 					const tallLines = view.state.doc.lines;
@@ -3968,8 +4022,6 @@
 					for (let i = 0; i < tall.count * 3 + 6; i++) await key('Tab', { repeat: i > 0 });
 					const lastCell = `${tall.count},2`;
 					const heldStops = where(view)?.startsWith(lastCell) && view.state.doc.lines === tallLines;
-					const tallRows = tall.count;
-					// A fresh press there adds a row and opens its first cell, and Enter on that new last row adds another (STA-97).
 					await key('Tab');
 					await sleep(300);
 					await frames(3);
@@ -3978,9 +4030,10 @@
 					await sleep(300);
 					await frames(3);
 					const entered = { at: where(view), lines: view.state.doc.lines };
-					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, adding no row; a fresh Tab there adds a row and opens its first cell, and a fresh Enter on that last row adds another', heldStops && tabbed.lines === tallLines + 1 && !!tabbed.at?.startsWith(`${tallRows + 1},0`) && entered.lines === tallLines + 2 && !!entered.at?.startsWith(`${tallRows + 2},0`), { heldStops, lastCell, tabbed, entered, tallLines });
+					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, and a fresh Tab or Enter there does nothing: no row is added, and the cell stays open', heldStops && tabbed.lines === tallLines && !!tabbed.at?.startsWith(lastCell) && entered.lines === tallLines && !!entered.at?.startsWith(lastCell), { heldStops, lastCell, tabbed, entered, tallLines });
 					await key('Escape');
 					await key('Escape');
+					await restore(view, cellsText);
 
 					// Escape in two steps, Enter back in; clicking out.
 					await openText(view, 'Tomato');
@@ -4194,6 +4247,20 @@
 					await key('Escape');
 					preview.forcePlain(false);
 					check('Own 62: forced, cells open in the plain editor, its Markdown shown as text, written to the note, drawn once it closes, with Toggle checkbox leaving the row alone and Undo working', plain && !plain.editor.borrowed && plainShown === 'Tomato **b**' && plainAnswer && plainQuiet && drawnBold && plainUndo, { borrowed: plain?.editor.borrowed, plainShown, plainAnswer, plainQuiet, drawnBold, plainUndo });
+					await restore(view, cellsText);
+					// The plain editor has the same keys: they stay in its text, and Enter and Tab stop at the table's end (STA-9).
+					preview.forcePlain(true);
+					await openText(view, 'Tomato');
+					const plainKeys = [where(view)];
+					for (const [name, mods] of [['ArrowRight'], ['ArrowUp'], ['ArrowLeft'], ['PageDown'], ['PageUp'], ['ArrowDown', { meta: true }], ['Tab'], ['Enter'], ['Enter'], ['Tab']]) {
+						await key(name, mods);
+						plainKeys.push(where(view));
+					}
+					const plainStays = !oc(view)?.editor.borrowed && plainKeys.join(' | ') === '3,1 6 | 3,1 6 | 3,1 0 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,2 0-5 | 4,2 0-11 | 4,2 0-11 | 4,2 0-11' && view.state.doc.toString() === cellsText;
+					await key('Escape');
+					await key('Escape');
+					preview.forcePlain(false);
+					check('Own 62: in the plain editor too, the arrows and Page Up and Down stay in the cell\'s text, and Enter and Tab stop at the table\'s end', plainStays, plainKeys.join(' | '));
 					await restore(view, cellsText);
 					// Each private piece the borrowed editor needs, taken away in turn, is named.
 					const ownerNow = app.workspace.activeLeaf.view;
@@ -4946,13 +5013,14 @@
 					for (let i = 0; i < 8 && view.state.doc.toString() !== bigText; i++) await key('z', { meta: true });
 					await leave();
 					await restore(view, bigText);
-					// Deep down, between pinned cells: a press on Row 1, ↑ to the header, Tab, then ↓ back to Row 1, each opening in
-					// place with the note still; ↓ out of the pinned rows goes to Row 2 at the table's top, as with the switch off.
+					// Deep down, between pinned cells: a press on the pinned header, Tab along it, Enter down to Row 1, then Shift+Tab and
+					// Tab along Row 1, each opening in place with the note still (an open cell moves only by these, STA-9); Enter out of the
+					// pinned rows goes to Row 2 at the table's top, as with the switch off.
 					await toRow(view, big, 820);
 					const keysScroll = view.scrollDOM.scrollTop;
-					const rowOneCopy = crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[1]?.cells[2];
-					const rowOneTop = rowOneCopy?.getBoundingClientRect().top;
-					if (rowOneCopy) await pointAt(middle(rowOneCopy, -8));
+					const rowOneTop = crossing()?.querySelector('.selectable-tables-copy-table table')?.rows[1]?.cells[2]?.getBoundingClientRect().top;
+					const headCopy = copyCell(2);
+					if (headCopy) await pointAt(middle(headCopy, -6));
 					await sleep(300);
 					await frames(4);
 					const openAt = () => {
@@ -4961,26 +5029,20 @@
 						return { cell: c ? `${c.cell.row},${c.cell.column}` : null, top: td ? Math.round(td.getBoundingClientRect().top * 100) / 100 : null, scroll: Math.round(view.scrollDOM.scrollTop - keysScroll), shows: !!c && shows(c.view.contentDOM) };
 					};
 					const pinnedMoves = [['press', openAt()]];
-					const until = async (name, cell) => {
-						for (let i = 0; i < 3 && openAt().cell !== cell; i++) {
-							await key(name);
-							await sleep(300);
-							await frames(4);
-						}
-						pinnedMoves.push([name, openAt()]);
-					};
-					await until('ArrowUp', '0,2');
-					await key('Tab');
+					for (const [name, mods] of [['Tab'], ['Enter'], ['Tab', { shift: true }], ['Tab']]) {
+						await key(name, mods);
+						await sleep(300);
+						await frames(4);
+						pinnedMoves.push([`${mods ? 'Shift+' : ''}${name}`, openAt()]);
+					}
+					const pinTop = pinOf(view);
+					const inPlace = pinnedMoves.every(([, m], index) => m.shows && Math.abs(m.scroll) <= 1 && Math.abs(m.top - (m.cell?.startsWith('0,') ? pinTop : rowOneTop)) <= 1 && m.cell === ['0,2', '0,3', '1,3', '1,2', '1,3'][index]);
+					await key('Enter');
 					await sleep(300);
 					await frames(4);
-					pinnedMoves.push(['Tab', openAt()]);
-					await until('ArrowDown', '1,3');
-					const pinTop = pinOf(view);
-					const inPlace = pinnedMoves.every(([, m], index) => m.shows && Math.abs(m.scroll) <= 1 && Math.abs(m.top - (m.cell.startsWith('0,') ? pinTop : rowOneTop)) <= 1 && m.cell === ['1,2', '0,2', '0,3', '1,3'][index]);
-					await until('ArrowDown', '2,3');
 					const out = openAt();
 					const firstTable = big.boxes[0].querySelector(':scope > .table-wrapper > table');
-					check('Own 86: deep down, a press on Row 1 and ↑, Tab and ↓ between the pinned cells each open in place with the note still; ↓ out of them goes to Row 2 at the table\'s top', inPlace && out.cell === '2,3' && out.shows && Math.abs(firstTable.getBoundingClientRect().top - paneOf(view).top) <= 120, { pinnedMoves, out, rowOneTop, pinTop, tableTop: firstTable.getBoundingClientRect().top });
+					check('Own 86: deep down, a press on the pinned header, then Tab, Enter, Shift+Tab and Tab between the pinned cells each open in place with the note still; Enter out of them goes to Row 2 at the table\'s top', inPlace && out.cell === '2,3' && out.shows && Math.abs(firstTable.getBoundingClientRect().top - paneOf(view).top) <= 120, { pinnedMoves, out, rowOneTop, pinTop, tableTop: firstTable.getBoundingClientRect().top });
 					await leave();
 					await restore(view, bigText);
 					// With the header cell open at the table's top, scrolled on within the first block past where its rows are
@@ -5863,7 +5925,7 @@
 						await leaveAll(view);
 						await restore(view, reportText);
 
-						// Tab and Enter add a row on a fresh press at the table's end, and never on a held key.
+						// Tab and Enter at the table's end do nothing, tapped or held: no key adds a row (Brian, 11/24).
 						const rowsNow = () => view.state.doc.toString().split('\n').filter((line) => line.startsWith('|')).length;
 						const linesBefore = rowsNow();
 						await scrollTo(view, null);
@@ -5874,8 +5936,6 @@
 						await sleep(300);
 						await frames(3);
 						const tapped = { open: openAtNow(view), rows: rowsNow() - linesBefore, hasFocus: oc(view)?.view.hasFocus };
-						await key('z', { meta: true });
-						await sleep(300);
 						await leaveAll(view);
 						await restore(view, reportText);
 						await scrollTo(view, null);
@@ -5888,12 +5948,12 @@
 						await key('Enter');
 						await sleep(300);
 						await frames(3);
-						const entered = { open: openAtNow(view), rows: rowsNow() - linesBefore };
+						const entered = { open: openAtNow(view), rows: rowsNow() - linesBefore, hasFocus: oc(view)?.view.hasFocus };
 						for (let i = 0; i < 5; i++) await key('Enter', { repeat: true });
 						const enterHeld = { open: openAtNow(view), rows: rowsNow() - linesBefore };
-						check('Own 79: tapping Tab through the cells stops at the last, and one more tap adds a row and opens its first cell, with the keyboard', tapAtEnd.open === '3,2' && tapAtEnd.rows === 0 && tapped.open === '4,0' && tapped.rows === 1 && tapped.hasFocus, { tapAtEnd, tapped });
+						check('Own 79: tapping Tab through the cells stops at the last, and one more tap does nothing: no row, the cell still open with the keyboard', tapAtEnd.open === '3,2' && tapAtEnd.rows === 0 && tapped.open === '3,2' && tapped.rows === 0 && tapped.hasFocus, { tapAtEnd, tapped });
 						check('Own 79: holding Tab stops at the last cell and adds nothing', held.open === '3,2' && held.rows === 0, held);
-						check('Own 79: Enter on the last row adds a row below and opens its cell in the same column; held, it adds no more', entered.open === '4,1' && entered.rows === 1 && enterHeld.rows === 1, { entered, enterHeld });
+						check('Own 79: Enter on the last row does nothing, tapped or held: no row, the cell still open', entered.open === '3,1' && entered.rows === 0 && entered.hasFocus && enterHeld.open === '3,1' && enterHeld.rows === 0, { entered, enterHeld });
 						await leaveAll(view);
 						await restore(view, reportText);
 

@@ -404,15 +404,6 @@ export function selectWhole(view: EditorView, table: Span & { readonly grid: Gri
 	view.plugin(cellSelection)?.selectRange(wholeEnd(table.grid, first, what), first, undefined, false);
 }
 
-/**
- * A fresh press of Tab on a table's last cell, or of Enter on its last row, in an open cell: a row is added, below the
- * cell's, and its cell opens, the first one for Tab, as Obsidian has it. A held key's repeats never come here.
- */
-export function addRowFrom(open: OwnCell, firstColumn: boolean): void {
-	const { note } = open;
-	runEdit(note, 'row-after', { open: true, ...(firstColumn ? { column: 0 } : {}) });
-}
-
 /** Whether a cell is the note's open cell. */
 function isOpen(view: EditorView, { row, column }: Cell): boolean {
 	const open = openCells.get(view);

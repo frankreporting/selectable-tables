@@ -1,6 +1,6 @@
-import { redo, undo } from '@codemirror/commands';
-import { Annotation, EditorSelection, type Extension, type SelectionRange, Transaction, type TransactionSpec } from '@codemirror/state';
-import { Direction, EditorView, type KeyBinding, type ViewUpdate } from '@codemirror/view';
+import { cursorDocEnd, cursorDocStart, redo, selectDocEnd, selectDocStart, undo } from '@codemirror/commands';
+import { Annotation, EditorSelection, type Extension, Transaction, type TransactionSpec } from '@codemirror/state';
+import { EditorView, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { type App, editorInfoField, MarkdownView, Notice } from 'obsidian';
 import { writesCell, writesTable } from '../editor/decide';
 import { type OwnCell, openCells } from '../editor/layout';
@@ -17,8 +17,8 @@ import { timed } from './profile';
  * cell's caret, so commands act there. Each change to the note from anywhere else comes back into the cell.
  */
 
-/** Where the caret goes in a cell that opens: its text's start or end, all of it, its last line's start, or a click. */
-export type At = 'start' | 'end' | 'all' | 'last-line' | Click | { note: { anchor: number; head: number } };
+/** Where the caret goes in a cell that opens: its text's start or end, all of it, or a click. */
+export type At = 'start' | 'end' | 'all' | Click | { note: { anchor: number; head: number } };
 
 /** On an open cell's drawn text, hidden by the preview's styles.css while its editor shows. */
 const HIDDEN_CLASS = 'selectable-tables-open-text';
@@ -33,8 +33,6 @@ export interface CellSetup {
 	plain: () => Extension;
 	/** Escape in the cell: closes it and selects it, in two steps back to the table. */
 	escape: (view: EditorView) => void;
-	/** A fresh press of Tab at the table's last cell, or Enter on its last row: a row is added below, and its cell opens. */
-	addRow?: (cell: OwnCell, firstColumn: boolean) => void;
 	/**
 	 * A paste of Obsidian's table data (`obsidian/table`, its JSON) into the cell: the cells are pasted from it on, as in
 	 * Obsidian's own cell. Says whether it was cells; anything else is the editor's own paste.
@@ -79,8 +77,6 @@ export class OpenCell implements OwnCell {
 	private closed = false;
 	/** A change from elsewhere waits while a composition runs in the cell. */
 	private waiting = false;
-	/** Whether the key being handled is a held key's repeat, read as each key comes in, before its bindings run. */
-	private repeat = false;
 	/**
 	 * Whether the cell's editor has the keyboard, kept by its focus events: an editor whose element a rewrite took out
 	 * of the page no longer says it has the focus, and the note should take it then.
@@ -237,7 +233,6 @@ export class OpenCell implements OwnCell {
 		let selection: EditorSelection;
 		if (at === 'start') selection = EditorSelection.single(0);
 		else if (at === 'all') selection = EditorSelection.single(0, length);
-		else if (at === 'last-line') selection = EditorSelection.single(view.moveToLineBoundary(EditorSelection.cursor(length), false, true).from);
 		else if (at === 'end') selection = EditorSelection.single(length);
 		else if ('note' in at) selection = this.fromNote(at.note) ?? EditorSelection.single(length);
 		else {
@@ -264,48 +259,29 @@ export class OpenCell implements OwnCell {
 
 	// The cell's keys ---------------------------------------------------------------------------------------------------
 
-	/** As Obsidian's own cell has them, read from 1.15.1. Suggestions, while they show, take them first. */
+	/**
+	 * An open cell keeps the arrows and the jump keys in its text: they stop at its ends, and never leave the cell. Moving
+	 * around the table is the selected cell's, after Escape. Enter goes to the cell below, and Tab and Shift+Tab to the next
+	 * and previous cell, each with its text selected, as Obsidian's cell has them (read from 1.15.1), and at the table's ends
+	 * they do nothing: no key adds a row (Brian, 11/24). Suggestions, while they show, take the keys first.
+	 */
 	private keys(): KeyBinding[] {
 		const live = (run: (view: EditorView) => boolean) => (view: EditorView) => !this.closed && !suggesting(this.setup.app) && run(view);
-		const caret = (view: EditorView): SelectionRange | null => {
-			const { ranges, main } = view.state.selection;
-			return ranges.length === 1 && main.empty ? main : null;
-		};
-		// ← and → follow the text's direction: at the start of right-to-left text, → is the way back.
-		const side = (view: EditorView, key: 'left' | 'right'): 'start' | 'end' => {
-			const rtl = view.textDirectionAt(view.state.selection.main.head) === Direction.RTL;
-			return (key === 'left') !== rtl ? 'start' : 'end';
-		};
-		const edge = (view: EditorView, toward: 'start' | 'end') => {
-			const range = caret(view);
-			if (!range || range.head !== (toward === 'start' ? 0 : view.state.doc.length)) return false;
-			return this.step(toward === 'start' ? 'previous' : 'next', toward === 'start' ? 'end' : 'start', false);
-		};
-		// On the text's first or last line as drawn, as Obsidian's cell checks: ↑ or ↓ would stay on the same line.
-		const line = (view: EditorView, down: boolean) => {
-			const range = caret(view);
-			if (!range) return false;
-			const moved = view.moveVertically(range, down);
-			const from = view.coordsAtPos(range.from);
-			const to = view.coordsAtPos(moved.from);
-			if (from && to && from.top !== to.top) return false;
-			return this.step(down ? 'down' : 'up', down ? 'start' : 'last-line', false);
-		};
+		// The jump keys go to the text's start or end, where CodeMirror's own Page Up and Down would move by a page and scroll
+		// the note. The plugin's own binding for them, at a higher precedence, stands aside in this cell.
+		const toStart = { run: live(cursorDocStart), shift: live(selectDocStart) };
+		const toEnd = { run: live(cursorDocEnd), shift: live(selectDocEnd) };
 		return [
-			{
-				any: (_, event) => {
-					this.repeat = event.repeat;
-					return false;
-				},
-			},
-			{ key: 'ArrowLeft', run: live((view) => edge(view, side(view, 'left'))) },
-			{ key: 'ArrowRight', run: live((view) => edge(view, side(view, 'right'))) },
-			{ key: 'Mod-ArrowLeft', run: live((view) => edge(view, side(view, 'left'))) },
-			{ key: 'Mod-ArrowRight', run: live((view) => edge(view, side(view, 'right'))) },
-			{ key: 'ArrowUp', run: live((view) => line(view, false)) },
-			{ key: 'ArrowDown', run: live((view) => line(view, true)) },
-			{ key: 'Tab', run: live(() => this.step('next', 'all', true)), shift: live(() => this.step('previous', 'all', true)) },
-			{ key: 'Enter', run: live(() => this.step('down', 'all', true)) },
+			{ key: 'PageUp', ...toStart },
+			{ key: 'Mod-Home', ...toStart },
+			{ mac: 'Cmd-ArrowUp', ...toStart },
+			{ mac: 'Ctrl-ArrowUp', ...toStart },
+			{ key: 'PageDown', ...toEnd },
+			{ key: 'Mod-End', ...toEnd },
+			{ mac: 'Cmd-ArrowDown', ...toEnd },
+			{ mac: 'Ctrl-ArrowDown', ...toEnd },
+			{ key: 'Tab', run: live(() => this.step('next')), shift: live(() => this.step('previous')) },
+			{ key: 'Enter', run: live(() => this.step('down')) },
 			{ key: 'Escape', run: live((view) => (this.setup.escape(view), true)) },
 			{ key: 'Mod-z', run: () => undo(this.note), preventDefault: true },
 			{ key: 'Mod-y', mac: 'Mod-Shift-z', run: () => redo(this.note), preventDefault: true },
@@ -314,29 +290,22 @@ export class OpenCell implements OwnCell {
 		];
 	}
 
-	/**
-	 * To the next cell that way, or out of the table at its edge, to the start of the line beyond, as Obsidian's cell
-	 * goes. At the table's end, a fresh press of Tab or Enter adds a row, and a held key's repeat stays, so holding Tab to
-	 * go through the cells never adds one.
-	 */
-	private step(way: 'next' | 'previous' | 'up' | 'down', at: At, stay: boolean): boolean {
+	/** To the next or previous cell, or the one below, with its text selected. At the table's ends the cell stays open. */
+	private step(way: 'next' | 'previous' | 'down'): boolean {
 		let { row, column } = this.cell;
 		const rows = this.model.count;
 		const columns = this.model.grid.columns(row);
 		if (way === 'next') {
 			if (column + 1 < columns) column++;
 			else if (row < rows) [row, column] = [row + 1, 0];
-			else return stay ? this.addRow(true) : this.leave(true);
+			else return true;
 		} else if (way === 'previous') {
 			if (column > 0) column--;
 			else if (row > 0) [row, column] = [row - 1, columns - 1];
-			else return stay || this.leave(false);
-		} else if (way === 'up') {
-			if (row > 0) row--;
-			else return stay || this.leave(false);
+			else return true;
 		} else if (row < rows) row++;
-		else return stay ? this.addRow(false) : this.leave(true);
-		OpenCell.open(this.setup, this.model, { row, column }, at);
+		else return true;
+		OpenCell.open(this.setup, this.model, { row, column }, 'all');
 		return true;
 	}
 
@@ -344,24 +313,6 @@ export class OpenCell implements OwnCell {
 	private pasteCells(event: ClipboardEvent): boolean {
 		const json = event.clipboardData?.getData('obsidian/table');
 		return !this.closed && !!json && !!this.setup.pasteCells?.(this, json);
-	}
-
-	/** A row added below the last, on a fresh press: Tab's opens at its first cell, Enter's in the same column. */
-	private addRow(firstColumn: boolean): boolean {
-		if (!this.repeat) this.setup.addRow?.(this, firstColumn);
-		return true;
-	}
-
-	/** Out of the table: the caret at the start of the line beyond it, and the note's keyboard. */
-	private leave(after: boolean): boolean {
-		const { note, model } = this;
-		const { doc } = note.state;
-		const number = after ? doc.lineAt(model.to).number + 1 : doc.lineAt(model.from).number - 1;
-		if (number < 1 || number > doc.lines) return true;
-		this.close();
-		note.contentDOM.focus({ preventScroll: true });
-		note.dispatch({ selection: EditorSelection.cursor(doc.line(number).from), scrollIntoView: true });
-		return true;
 	}
 
 	// Writing to the note -----------------------------------------------------------------------------------------------

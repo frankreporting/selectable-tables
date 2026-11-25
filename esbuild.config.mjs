@@ -26,6 +26,8 @@ const previewOnly = {
 
 /** A class only the renderer uses. A release build that holds it would make the private change. */
 const RENDERER_MARK = 'selectable-tables-row';
+/** The preview's one setting, which a release has no settings tab for until the plugin's table ships. */
+const SETTING_MARK = 'Click to select a cell';
 
 const context = await esbuild.context({
 	banner: {
@@ -61,8 +63,13 @@ const context = await esbuild.context({
 
 if (prod) {
 	await context.rebuild();
-	if (!preview && readFileSync('main.js', 'utf8').includes(RENDERER_MARK)) {
+	const built = readFileSync('main.js', 'utf8');
+	if (!preview && built.includes(RENDERER_MARK)) {
 		console.error('The release build holds the preview renderer. It must leave it out.');
+		process.exit(1);
+	}
+	if (!preview && built.includes(SETTING_MARK)) {
+		console.error("The release build holds the preview's settings tab. It must leave it out.");
 		process.exit(1);
 	}
 	console.log(preview ? "Built a preview, with the plugin's own table." : "Built a release, without the plugin's own table.");

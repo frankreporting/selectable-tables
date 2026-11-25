@@ -1299,8 +1299,9 @@ export class Model implements Span, DrawnTable, DragTable {
 		const colgroup = table.createEl('colgroup');
 		const thead = index === 0 ? table.createEl('thead') : null;
 		const tbody = table.createEl('tbody');
-		// A press on a cell opens it, with the caret where it landed, and a press beside the cells selects the whole
-		// table. The browser moves no caret and starts no selection: the press's default is prevented, apart from a
+		// A click on a cell selects it, and a double-click opens it with the caret where it landed, or with the setting
+		// *Click to select a cell* off, a click opens it (cell-drag.ts, `clickCell`); a press beside the cells selects the
+		// whole table. The browser moves no caret and starts no selection: the press's default is prevented, apart from a
 		// link's, the table's own scrollbar's, and the open cell's editor's.
 		const onScrollbar = (event: MouseEvent) => event.target === dom && (event.offsetX >= dom.clientWidth || event.offsetY >= dom.clientHeight);
 		const inEditor = (target: Element) => {
@@ -1314,7 +1315,10 @@ export class Model implements Span, DrawnTable, DragTable {
 		const hold = (event: MouseEvent) => {
 			if (!leftAlone(event)) event.preventDefault();
 		};
+		// Whether the last press was a finger's, for its click: a tap doesn't focus the note, which would show a keyboard.
+		let touched = false;
 		dom.addEventListener('pointerdown', (event) => {
+			touched = event.pointerType === 'touch';
 			// A drag handle drags its row or column, or shows its menu at a click.
 			const grip = gripOf(event.target as Element);
 			if (grip && dom.contains(grip.grip)) {
@@ -1352,6 +1356,7 @@ export class Model implements Span, DrawnTable, DragTable {
 				return;
 			}
 			event.preventDefault();
+			if (tableControls()?.clickCell(this, event, cell, touched)) return;
 			this.open(this, cell, { x: event.clientX, y: event.clientY, visible: visibleAt(el as HTMLTableCellElement, event.clientX, event.clientY) });
 		});
 		// A picture that loads changes its row's height, and can widen its column, as in Obsidian's table, where the

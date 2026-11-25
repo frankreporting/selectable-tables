@@ -5,7 +5,7 @@ import { type Grid, sameCell, selectedTable } from '../editor/decide';
 import { escapeCell, wholeTable } from '../editor/extension';
 import { openCells, viewLayout } from '../editor/layout';
 import type { Cell, Span } from '../editor/table-text';
-import { type DragArea, type Extent, landing, lookAt, overPinned, zoneScroll } from './drag-sums';
+import { clickOpens, type DragArea, type Extent, landing, lookAt, overPinned, zoneScroll } from './drag-sums';
 import { profile, timed } from './profile';
 
 /**
@@ -13,9 +13,11 @@ import { profile, timed } from './profile';
  * (read from 1.15.1's cell `pointerdown`, `getClosestCell` and `selectCells`), on the range the Shift+arrows build (cells.ts,
  * `selectRange`): the pointer moves the range's far corner, the cell moved to last.
  *
- * A press that stays in one cell still opens it when it's let go: the range starts only once the pointer reaches another
- * cell. From then on, a frame loop finds the cell drawn under the pointer, a pinned copy's being its real cell, kept to the
- * table's part on the screen so a pointer past its edge takes the nearest cell, and scrolls the note near the pane's bottom
+ * A press that stays in one cell is a click, which selects the cell or opens it (`clickCell`): the range starts only once
+ * the pointer reaches another cell. With the setting *Click to select a cell* on, the default, a press in the open cell
+ * stays in its text, where its editor selects text however far the pointer goes. From then on, a frame loop finds the
+ * cell drawn under the pointer, a pinned copy's being its real cell, kept to the table's part on the screen so a pointer
+ * past its edge takes the nearest cell, and scrolls the note near the pane's bottom
  * or just under the pinned rows, and the table near its sides, as a dragged handle does (drag.ts). The table may be drawn
  * as blocks of 100 rows with only the rows near the pane in the page, so the range is a pair of cells, not cells in the
  * page, and the cell under the pointer is found among what's drawn on the screen. Let go, the range stays, and the click
@@ -41,6 +43,20 @@ export interface CellDragTable extends Span {
 let current: CellDrag | null = null;
 
 /**
+ * The setting *Click to select a cell*, set by preview.ts from the plugin's data: a click on a cell selects it, and a
+ * double-click opens it. Off, a click opens a cell, as in Obsidian.
+ */
+let clickSelects = true;
+
+export function setClickSelects(on: boolean): void {
+	clickSelects = on;
+}
+
+export function clickSelectsCells(): boolean {
+	return clickSelects;
+}
+
+/**
  * A press on a cell of the plugin's table, with the left button of a mouse or a pen: a drag across cells, if the pointer
  * reaches another one. `inOpenCell` is a press in the open cell's own text, where the editor selects text until then. With
  * Shift, the range runs at once from the selected cell, the range's first cell, or the open cell, to the one pressed.
@@ -49,8 +65,26 @@ export function pressCell(table: CellDragTable, event: PointerEvent, cell: Cell,
 	const view = table.view;
 	if (!view || !event.isPrimary || event.button !== 0 || event.pointerType === 'touch') return;
 	current?.end();
+	// The open cell's text is the text layer: a drag from it, or from the cell's space around it, never makes a range.
+	if (clickSelects && isOpen(view, table, cell)) return;
 	const anchor = event.shiftKey && !inOpenCell ? anchorIn(view, table) : null;
 	current = new CellDrag(table, view, event, within(table.grid, cell), anchor);
+}
+
+/**
+ * A click on a cell that no drag took: with the setting on, it selects the cell, as a drag's way in does, unless it
+ * opens it (`clickOpens`). Nothing scrolls, so a double-click's second press lands on the same cell. A tap gives the
+ * note no focus, which would bring up a phone's keyboard: the tap that opens the cell does. Says whether it selected
+ * the cell; false leaves the click to open it.
+ */
+export function clickCell(table: CellDragTable, event: MouseEvent, cell: Cell, touch: boolean): boolean {
+	const view = table.view;
+	if (!view) return false;
+	const cells = view.plugin(cellSelection);
+	const selectedAlone = !!cells?.selected && !cells.anchor && sameCell(cells.selected, cell) && selectedTable(view.state, viewLayout(view))?.from === table.from;
+	if (clickOpens({ selects: clickSelects, count: event.detail, open: isOpen(view, table, cell), selectedAlone })) return false;
+	current?.end();
+	return enter(view, table, cell, cell, !touch);
 }
 
 /** Four quick clicks on a cell, as in Obsidian's table: every cell of the table is selected. */
@@ -73,6 +107,12 @@ function within(grid: Grid, { row, column }: Cell): Cell {
 	return { row: r, column: Math.max(0, Math.min(grid.columns(r) - 1, column)) };
 }
 
+/** Whether a cell of this table is the note's open cell. */
+function isOpen(view: EditorView, table: Span, cell: Cell): boolean {
+	const open = openCells.get(view);
+	return !!open && open.note === view && open.table()?.from === table.from && sameCell(open.cell, cell);
+}
+
 /** Where Shift with a press extends from on this table: the range's first cell, the selected cell, or the open one. */
 function anchorIn(view: EditorView, table: Span): Cell | null {
 	const cells = view.plugin(cellSelection);
@@ -84,16 +124,16 @@ function anchorIn(view: EditorView, table: Span): Cell | null {
 /**
  * Selects the range from `anchor` to `head`: an open cell closes first, as Escape closes it, and the table is selected
  * whole, in one step, the range's way in, as for a selected cell. Nothing scrolls: the pointer is on the cell already.
- * Says whether the range is there.
+ * The note takes the keyboard unless `focus` is false. Says whether the range is there.
  */
-function enter(view: EditorView, table: Span, anchor: Cell, head: Cell): boolean {
+function enter(view: EditorView, table: Span, anchor: Cell, head: Cell, focus = true): boolean {
 	const open = openCells.get(view);
 	if (open && open.note === view && !escapeCell(open.view)) return false;
 	const { from, to } = table;
 	const { main } = view.state.selection;
 	if (main.from !== from || main.to !== to) view.dispatch({ selection: wholeTable({ from, to }, false), userEvent: 'select.pointer' });
 	// The press's own default is prevented, so the keyboard comes to the note here, for Copy, Escape and the arrows.
-	if (!view.hasFocus) view.contentDOM.focus({ preventScroll: true });
+	if (focus && !view.hasFocus) view.contentDOM.focus({ preventScroll: true });
 	const cells = view.plugin(cellSelection);
 	if (!cells) return false;
 	cells.selectRange(anchor, head, undefined, false);

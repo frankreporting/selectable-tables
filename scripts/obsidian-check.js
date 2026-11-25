@@ -2628,11 +2628,16 @@
 		// window.__checkShadesOnly instead, only the section on its frozen tables' shadows, with
 		// window.__checkRangesOnly instead, only the section on its ranges of cells, with
 		// window.__checkCellDragsOnly instead, only the section on dragging across its cells, with
-		// window.__checkCellEditsOnly instead, only the section on clearing, cutting and pasting its cells, and with
-		// window.__checkFormattingOnly instead, only the section on formatting its cells.
+		// window.__checkCellEditsOnly instead, only the section on clearing, cutting and pasting its cells, with
+		// window.__checkFormattingOnly instead, only the section on formatting its cells, and with
+		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks.
 		// The note texts are put back as they were, and so is the switch.
 		const preview = app.plugins.plugins['selectable-tables']?.preview;
 		if (preview) {
+			// Every section but the clicks', which tests the setting Click to select a cell, runs with it off: they test a click
+			// opening a cell, as it did before the setting (STA-112). It's put back as it was at the end.
+			const clicksWere = preview.clickSelects();
+			preview.setClickSelects(false);
 			const frames = async (n = 2) => {
 				for (let i = 0; i < n; i++) await new Promise((resolve) => requestAnimationFrame(resolve));
 			};
@@ -3771,7 +3776,7 @@
 				}
 				}
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -4318,7 +4323,7 @@
 					await sleep(300);
 				}
 
-				if ((!window.__checkCellsOnly || window.__checkFrozenCellsOnly) && !window.__checkEditsOnly) {
+				if ((!window.__checkCellsOnly || window.__checkFrozenCellsOnly) && !window.__checkEditsOnly && !window.__checkClicksOnly) {
 					// --- Cells of the plugin's frozen tables (STA-92): selecting, opening and freezing cells where frozen rows and
 					// columns pin, on a computer. Real keys and presses through the window's debugger. Run alone with
 					// window.__checkOwnOnly, __checkCellsOnly and __checkFrozenCellsOnly all true.
@@ -6046,7 +6051,7 @@
 						await sleep(300);
 					}
 				}
-				if ((!window.__checkCellsOnly || window.__checkDragsOnly) && !window.__checkEditsOnly) {
+				if ((!window.__checkCellsOnly || window.__checkDragsOnly) && !window.__checkEditsOnly && !window.__checkClicksOnly) {
 					// --- Drag handles and + buttons on the plugin's table (STA-98): Obsidian's grips on each row and column and its
 					// + buttons, rebuilt, each against Obsidian's own table with the switch off. Real presses and pointer moves
 					// through the window's debugger. Run alone with window.__checkOwnOnly, __checkCellsOnly and __checkDragsOnly all
@@ -6676,7 +6681,7 @@
 						await sleep(300);
 					}
 				}
-				if ((!window.__checkCellsOnly || window.__checkShadesOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly) {
+				if ((!window.__checkCellsOnly || window.__checkShadesOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkClicksOnly) {
 					// --- Shadows under the pinned rows and beside the frozen columns of the plugin's frozen tables (STA-41), on a
 					// computer: each fades by an opacity animation on a timeline the scroll drives. Their opacities come from
 					// computed styles, which follow the timelines, the joins from where each block's shadow lies inside its block,
@@ -7022,7 +7027,7 @@
 						await sleep(300);
 					}
 				}
-				if ((!window.__checkCellsOnly || window.__checkRangesOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly) {
+				if ((!window.__checkCellsOnly || window.__checkRangesOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkClicksOnly) {
 					// --- A range of cells on the plugin's table (STA-14): Shift with an arrow or a jump grows it from the selected
 					// cell, it's drawn with Obsidian's classes for its own range on the rows in the page and on the pinned copies, and
 					// Copy puts it on the clipboard as Obsidian copies its own range. Real keys and presses through the window's
@@ -7464,7 +7469,7 @@
 						await sleep(300);
 					}
 				}
-				if ((!window.__checkCellsOnly || window.__checkCellDragsOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly) {
+				if ((!window.__checkCellsOnly || window.__checkCellDragsOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkClicksOnly) {
 					// --- Dragging across cells on the plugin's table (STA-35): a press that reaches another cell selects a range,
 					// through frozen rows and columns and across blocks of rows, with the note scrolling at the pane's edges and the
 					// table sliding at its sides; Shift with a press extends, and four clicks select every cell. Real presses, pointer
@@ -7997,7 +8002,7 @@
 						await sleep(300);
 					}
 				}
-				if ((!window.__checkCellsOnly || window.__checkCellEditsOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly) {
+				if ((!window.__checkCellsOnly || window.__checkCellEditsOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkClicksOnly) {
 					// --- Clearing, cutting and pasting a selected cell or a range of cells on the plugin's table (STA-117): Backspace
 					// and Delete empty it, or delete a range's rows or columns, Cut copies then does the same, and Paste writes text into
 					// a cell or cells copied from a table over the cells there, each against Obsidian's own range doing the same with
@@ -8660,7 +8665,7 @@
 						await sleep(300);
 					}
 				}
-				if ((!window.__checkCellsOnly || window.__checkFormattingOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly) {
+				if ((!window.__checkCellsOnly || window.__checkFormattingOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkClicksOnly) {
 					// --- Formatting on a selected cell or a range of cells of the plugin's table, and in its open cell (STA-16): Bold,
 					// Italic and the rest act on the cells' text, add and take off as Obsidian's own range does, keep a table Obsidian
 					// wrote lined up and a freeze mark where it is, and the line commands still leave a selected cell alone. Each is
@@ -9104,8 +9109,423 @@
 						await sleep(300);
 					}
 				}
+				if ((!window.__checkCellsOnly || window.__checkClicksOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly) {
+					// --- Clicks on the plugin's table (STA-112): with the setting Click to select a cell on, its default, a click
+					// selects a cell and a double-click opens it, a click on the cell already selected opens it, and a drag in an open
+					// cell selects only its text. Off, a click opens a cell, as before. Real presses, releases and keys through the
+					// window's debugger, and taps under a phone's layout. The sections before this one run with the setting off. Run
+					// alone with window.__checkOwnOnly, __checkCellsOnly and __checkClicksOnly all true.
+					preview.use(true);
+					preview.setClickSelects(true);
+					await sleep(400);
+					const touched = ['Two report tables', 'Frozen tables', 'Table 50 by 8', 'Table 2000 by 12', 'Frozen table 2000 by 12'];
+					const onDiskBefore = {};
+					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
+					const plugin = app.plugins.plugins['selectable-tables'];
+					const savedBefore = await plugin.loadData();
+					const config = app.vault.config;
+					const hadNative = Object.hasOwn(config, 'nativeMenus');
+					const nativeBefore = config.nativeMenus;
+					const round = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+					const modifiers = (o) => (o.meta ? 4 : 0) | (o.shift ? 8 : 0);
+					const mouse = (type, p, o = {}) => cdp.sendCommand('Input.dispatchMouseEvent', { type, ...round(p), button: o.button ?? (type === 'mouseMoved' && !o.held ? 'none' : 'left'), buttons: type === 'mouseReleased' || (type === 'mouseMoved' && !o.held) ? 0 : o.button === 'right' ? 2 : 1, clickCount: type === 'mouseMoved' ? 0 : (o.count ?? 1), modifiers: modifiers(o) });
+					const press = async (p, o = {}) => {
+						await mouse('mouseMoved', p);
+						await mouse('mousePressed', p, o);
+						await frames(2);
+					};
+					const release = async (p, o = {}) => {
+						await mouse('mouseReleased', p, o);
+						await sleep(350);
+						await frames(2);
+					};
+					const click = async (p, o = {}) => {
+						await press(p, o);
+						await release(p, o);
+					};
+					// A real double-click: two presses and releases at one place, the second with a click count of 2.
+					const doubleClick = async (p) => {
+						await mouse('mouseMoved', p);
+						await mouse('mousePressed', p, { count: 1 });
+						await mouse('mouseReleased', p, { count: 1 });
+						await sleep(60);
+						await mouse('mousePressed', p, { count: 2 });
+						await mouse('mouseReleased', p, { count: 2 });
+						await sleep(400);
+						await frames(2);
+					};
+					const glide = async (from, to, o = {}, steps = 6) => {
+						for (let i = 1; i <= steps; i++) {
+							await mouse('mouseMoved', { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }, { ...o, held: true });
+							await frames(1);
+						}
+						await frames(2);
+					};
+					const codes = { Escape: 27, ArrowRight: 39 };
+					const key = async (name, o = {}) => {
+						const event = { key: name, code: name, windowsVirtualKeyCode: codes[name] ?? 0, modifiers: modifiers(o), unmodifiedText: macChar(name), text: '' };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await sleep(200);
+					};
+					const leaveAll = async (view) => {
+						for (let i = 0; i < 3; i++) await key('Escape');
+						view.dispatch({ selection: { anchor: 0 } });
+						await sleep(150);
+					};
+					const tableAt = (view, heading) => {
+						const start = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						return models(view).find((model) => model.from > start);
+					};
+					const centreOf = async (el) => {
+						let last = null;
+						for (let i = 0; i < 20; i++) {
+							const r = el.getBoundingClientRect();
+							const p = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+							if (last && Math.abs(last.x - p.x) < 0.5 && Math.abs(last.y - p.y) < 0.5) return p;
+							last = p;
+							await frames(2);
+						}
+						return last;
+					};
+					const cellMiddle = async (model, row, column) => {
+						const el = model.cellElement({ row, column });
+						return el ? centreOf(el) : null;
+					};
+					// A point in a cell's drawn text, `fraction` of the way along its first word, and how many characters come before it.
+					const inText = (model, row, column, fraction) => {
+						const el = model.cellElement({ row, column });
+						const node = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP) }).nextNode();
+						if (!node) return null;
+						const range = document.createRange();
+						range.selectNodeContents(node);
+						const r = range.getBoundingClientRect();
+						const p = { x: r.left + r.width * fraction, y: r.top + r.height / 2 };
+						const at = document.caretRangeFromPoint(p.x, p.y);
+						return { ...p, offset: at && at.startContainer === node ? at.startOffset : null };
+					};
+					const where = (view) => {
+						const cells = preview.cells(view) ?? {};
+						return `${cells.selected ? `${cells.selected.row},${cells.selected.column}` : '-'}${cells.anchor ? ` from ${cells.anchor.row},${cells.anchor.column}` : ''}`;
+					};
+					const opened = (view) => {
+						const open = preview.openCell(view);
+						return open ? `${open.cell.row},${open.cell.column}` : null;
+					};
+					const ranged = (model) => model.boxes.filter((box) => box.isConnected).reduce((n, box) => n + box.querySelectorAll('td.is-selected, th.is-selected').length, 0);
+					const scrollToTable = async (view, model, offset = 0) => {
+						for (let i = 0; i < 2; i++) {
+							view.scrollDOM.scrollTop = view.lineBlockAt(model.from).top + offset;
+							await sleep(400);
+							await frames(3);
+						}
+					};
+					const menusShown = () => Array.from(document.querySelectorAll('.menu'));
+					const titlesOf = (menu) => Array.from(menu?.querySelectorAll('.menu-item') ?? []).map((item) => item.querySelector('.menu-item-title')?.textContent ?? '');
+					const closeMenus = async () => {
+						for (let i = 0; i < 3 && menusShown().length; i++) {
+							menusShown().pop()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+							await sleep(200);
+						}
+					};
+					let view;
+					try {
+						config.nativeMenus = false;
+						// Own 157 (step 1): a click on Basil selects it, with no caret in it, and the arrows move from it.
+						view = await open('Two report tables');
+						await sleep(300);
+						let model = tableAt(view, null);
+						const text = view.state.doc.toString();
+						await leaveAll(view);
+						await click(await cellMiddle(model, 2, 0));
+						const basil = { at: where(view), open: opened(view), editors: model.boxes[0].querySelectorAll('.cm-editor').length, focused: view.hasFocus, outlined: model.cellElement({ row: 2, column: 0 })?.classList.contains('selectable-tables-cell') };
+						await key('ArrowRight');
+						await key('ArrowRight');
+						basil.after = where(view);
+						check('Own 157: a click on Basil selects it, outlined, with no cell open and the keyboard in the note, and → twice selects Needs sun', basil.at === '2,0' && !basil.open && basil.editors === 0 && basil.focused && basil.outlined && basil.after === '2,2' && view.state.doc.toString() === text, basil);
+
+						// Own 158 (step 2): a double-click on Balcony opens it with the caret where it landed; Escape selects it again; a
+						// click on Kitchen selects it, and a second click a moment later opens it.
+						const balconyAt = inText(model, 2, 1, 0.6);
+						await doubleClick(balconyAt);
+						const balcony = { open: opened(view), caret: preview.openCell(view)?.view.state.selection.main.head, offset: balconyAt?.offset };
+						await key('Escape');
+						balcony.escaped = { at: where(view), open: opened(view) };
+						const kitchenAt = await cellMiddle(model, 1, 1);
+						await click(kitchenAt);
+						const kitchen = { first: { at: where(view), open: opened(view) } };
+						await sleep(700);
+						await click(kitchenAt);
+						kitchen.second = { open: opened(view) };
+						check('Own 158: a double-click on Balcony opens it with the caret where it landed, and Escape selects it again', balcony.open === '2,1' && typeof balcony.offset === 'number' && balcony.offset > 0 && balcony.caret === balcony.offset && balcony.escaped.at === '2,1' && !balcony.escaped.open, balcony);
+						check('Own 158: a click on Kitchen selects it, and a second click a moment later opens it', kitchen.first.at === '1,1' && !kitchen.first.open && kitchen.second.open === '1,1', kitchen);
+						await leaveAll(view);
+
+						// Own 159 (step 3): in the open Needs sun, a drag across "sun", on onto Leave dry and past the table's bottom,
+						// selects only text in Needs sun: no range, and the cell stays open.
+						await doubleClick(await cellMiddle(model, 2, 2));
+						const needsOpen = opened(view);
+						const editor = preview.openCell(view)?.view;
+						let drag = { needsOpen };
+						if (editor) {
+							const line = editor.contentDOM.querySelector('.cm-line');
+							const range = document.createRange();
+							const node = document.createTreeWalker(line, NodeFilter.SHOW_TEXT).nextNode();
+							const sun = node.textContent.indexOf('sun');
+							range.setStart(node, sun);
+							range.setEnd(node, sun + 1);
+							const r = range.getBoundingClientRect();
+							const from = { x: r.left + 1, y: r.top + r.height / 2 };
+							const leaveDry = await cellMiddle(model, 3, 2);
+							const below = { x: leaveDry.x, y: model.boxes[0].getBoundingClientRect().bottom + 30 };
+							await press(from);
+							await glide(from, { x: from.x + 24, y: from.y }, {}, 3);
+							await glide({ x: from.x + 24, y: from.y }, leaveDry, {}, 4);
+							drag.onLeaveDry = { at: where(view), open: opened(view), ranged: ranged(model) };
+							await glide(leaveDry, below, {}, 3);
+							await release(below);
+							const sel = editor.state.selection.main;
+							drag = { ...drag, at: where(view), open: opened(view), ranged: ranged(model), text: editor.state.sliceDoc(sel.from, sel.to), same: preview.openCell(view)?.view === editor };
+						}
+						check('Own 159: in the open Needs sun, a drag across sun, onto Leave dry and past the table\'s bottom selects only its text, makes no range, and the cell stays open', drag.needsOpen === '2,2' && drag.onLeaveDry?.open === '2,2' && drag.onLeaveDry.ranged === 0 && drag.open === '2,2' && drag.same && drag.ranged === 0 && drag.at === '-' && drag.text?.startsWith('sun'), drag);
+
+						// Own 160 (step 4): with Needs sun open, a click on Office closes it and selects Office; a click on the line between
+						// the tables takes the outline off and puts the caret on that line.
+						await click(await cellMiddle(model, 3, 1));
+						const office = { at: where(view), open: opened(view) };
+						const between = view.state.doc.toString().indexOf('A short line between the tables.');
+						const betweenNode = view.domAtPos(between + 5).node;
+						const lineEl = (betweenNode.nodeType === Node.TEXT_NODE ? betweenNode.parentElement : betweenNode).closest('.cm-line');
+						const lineRect = lineEl.getBoundingClientRect();
+						await click({ x: lineRect.left + 40, y: lineRect.top + lineRect.height / 2 });
+						const out = { at: where(view), outlined: model.boxes[0].querySelectorAll('.selectable-tables-cell').length, line: view.state.doc.lineAt(view.state.selection.main.head).text, empty: view.state.selection.main.empty };
+						check('Own 160: with Needs sun open, a click on Office closes it and selects Office, not open', office.at === '3,1' && !office.open, office);
+						check('Own 160: a click on the line between the tables takes the outline off, with the caret on that line', out.at === '-' && out.outlined === 0 && out.empty && out.line === 'A short line between the tables.', out);
+
+						// Own 161 (step 5): as before: a drag from Fern to Office is a range of six; a click on Fern selects it alone; Shift
+						// +click on Balcony runs the range from Fern; a right-click on Mon selects it and shows Row, Column and Sort; four
+						// quick clicks on Park loop select every cell; a click on the link in Fern's row opens that note.
+						const fern = await cellMiddle(model, 1, 0);
+						const officeAt = await cellMiddle(model, 3, 1);
+						await press(fern);
+						await glide(fern, officeAt);
+						await release(officeAt);
+						const kept = { dragged: where(view), ranged: ranged(model) };
+						await click(fern);
+						kept.clicked = { at: where(view), open: opened(view), ranged: ranged(model) };
+						await click(await cellMiddle(model, 2, 1), { shift: true });
+						kept.shifted = { at: where(view), ranged: ranged(model) };
+						const second = models(view)[1];
+						const mon = await cellMiddle(second, 1, 0);
+						await press(mon, { button: 'right' });
+						await mouse('mouseReleased', mon, { button: 'right' });
+						await sleep(400);
+						kept.menu = { at: where(view), second: !!second.cell && !model.cell, items: titlesOf(menusShown()[0]) };
+						await closeMenus();
+						const park = await cellMiddle(second, 1, 1);
+						for (let count = 1; count <= 4; count++) {
+							await mouse('mouseMoved', park);
+							await mouse('mousePressed', park, { count });
+							await mouse('mouseReleased', park, { count });
+							await sleep(60);
+						}
+						await sleep(400);
+						kept.every = { at: where(view), open: opened(view), ranged: ranged(second) };
+						await leaveAll(view);
+						const link = model.cellElement({ row: 1, column: 2 })?.querySelector('a');
+						if (link) await click(await centreOf(link));
+						await sleep(600);
+						kept.link = app.workspace.getActiveFile()?.basename;
+						check('Own 161: a drag from Fern to Office still makes a range of six', kept.dragged === '3,1 from 1,0' && kept.ranged === 6, kept);
+						check('Own 161: a click on Fern, in the range, selects it alone, and Shift+click on Balcony runs the range from Fern', kept.clicked.at === '1,0' && !kept.clicked.open && kept.clicked.ranged === 0 && kept.shifted.at === '2,1 from 1,0' && kept.shifted.ranged === 4, kept);
+						check('Own 161: a right-click on Mon selects it and shows Row, Column and Sort', kept.menu.at === '1,0' && kept.menu.second && ['Row', 'Column'].every((title) => kept.menu.items.includes(title)) && kept.menu.items.some((title) => /^Sort/.test(title)), kept.menu);
+						check('Own 161: four quick clicks on Park loop select every cell of the second table, and a click on the link in Fern\'s row opens that note', kept.every.at === '2,2 from 0,0' && !kept.every.open && kept.every.ranged === 9 && kept.link === 'Watering schedule', { every: kept.every, link: kept.link });
+
+						// Own 162 (step 6): deep in Frozen table 2000 by 12, a click on a pinned header cell selects it where it's pinned
+						// without moving the note, and a double-click opens it there; in Plants slid sideways, a double-click on Plant 4,
+						// in the frozen Name column, opens it where it shows.
+						view = await open('Frozen table 2000 by 12');
+						await sleep(1500);
+						const deep = models(view)[0];
+						await scrollToTable(view, deep, 16000);
+						const area = deep.dragArea(400);
+						const columns = deep.columnLayout();
+						const headerAt = area?.rows && columns ? { x: columns.left + (columns.columns[3].start + columns.columns[3].end) / 2, y: area.rows.top + 6 } : null;
+						const pinned = { cell: headerAt ? deep.cellAtPoint(headerAt.x, headerAt.y) : null };
+						if (headerAt) {
+							const top = view.scrollDOM.scrollTop;
+							await click(headerAt);
+							pinned.selected = { at: where(view), open: opened(view), moved: view.scrollDOM.scrollTop - top };
+							// Back to the table selected, so the double-click's first click selects the cell again.
+							await key('Escape');
+							await doubleClick(headerAt);
+							await sleep(400);
+							await frames(4);
+							const editorEl = preview.openCell(view)?.view.dom;
+							const r = editorEl?.getBoundingClientRect();
+							pinned.opened = { open: opened(view), moved: view.scrollDOM.scrollTop - top, there: !!r && r.top >= area.rows.top - 4 && r.top <= area.rows.bottom };
+						}
+						await leaveAll(view);
+						view = await open('Frozen tables');
+						await sleep(500);
+						const plants = tableAt(view, 'Plants');
+						await scrollToTable(view, plants, -60);
+						plants.scrollSideways(150);
+						await sleep(300);
+						await frames(3);
+						const plantsArea = plants.dragArea(400);
+						const plant4 = plants.cellElement({ row: 4, column: 1 });
+						const plant4At = plant4 && plantsArea?.strip !== null ? { x: plantsArea.strip - 20, y: (await centreOf(plant4)).y } : null;
+						const strip = { cell: plant4At ? plants.cellAtPoint(plant4At.x, plant4At.y) : null };
+						if (plant4At) {
+							await doubleClick(plant4At);
+							await frames(3);
+							const hit = document.elementFromPoint(plant4At.x, plant4At.y);
+							strip.open = opened(view);
+							strip.there = !!hit?.closest('.cm-editor') && hit.closest('.cm-editor') === preview.openCell(view)?.view.dom;
+						}
+						await leaveAll(view);
+						check('Own 162: deep in Frozen table 2000 by 12, a click on a pinned header cell selects it without moving the note', !!headerAt && pinned.cell?.row === 0 && pinned.selected?.at === `0,${pinned.cell.column}` && !pinned.selected.open && Math.abs(pinned.selected.moved) < 1, pinned);
+						check('Own 162: a double-click on it opens it where it\'s pinned, with the note where it was', !!headerAt && pinned.opened?.open === `0,${pinned.cell?.column}` && pinned.opened.there && Math.abs(pinned.opened.moved) < 2, pinned);
+						check('Own 162: in Plants slid sideways, a double-click on Plant 4 in the frozen Name column opens it where it shows', strip.cell?.row === 4 && strip.cell.column === 0 && strip.open === '4,0' && strip.there, strip);
+
+						// Own 163 (step 7): the settings tab holds one switch, on, with its description; turned off by a click, a click on
+						// Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before.
+						app.setting.open();
+						app.setting.openTabById('selectable-tables');
+						await sleep(500);
+						const tab = document.querySelector('.modal.mod-settings .vertical-tab-content');
+						const items = Array.from(tab?.querySelectorAll('.setting-item') ?? []);
+						const toggle = items[0]?.querySelector('.checkbox-container');
+						const setting = { count: items.length, name: items[0]?.querySelector('.setting-item-name')?.textContent, desc: items[0]?.querySelector('.setting-item-description')?.textContent, on: toggle?.classList.contains('is-enabled') };
+						if (toggle) await click(await centreOf(toggle));
+						await sleep(400);
+						setting.after = { on: toggle?.classList.contains('is-enabled'), setting: preview.clickSelects(), saved: (await plugin.loadData())?.clickSelects };
+						app.setting.close();
+						await sleep(300);
+						view = await open('Two report tables');
+						await sleep(300);
+						model = tableAt(view, null);
+						await leaveAll(view);
+						const fernAgain = await cellMiddle(model, 1, 0);
+						await click(fernAgain);
+						const off = { click: opened(view) };
+						const fernText = preview.openCell(view)?.view.contentDOM.querySelector('.cm-line');
+						if (fernText) {
+							const r = fernText.getBoundingClientRect();
+							const from = { x: r.left + 2, y: r.top + r.height / 2 };
+							const kitchenAgain = await cellMiddle(model, 1, 1);
+							await press(from);
+							await glide(from, kitchenAgain);
+							await release(kitchenAgain);
+						}
+						off.drag = { at: where(view), open: opened(view), ranged: ranged(model) };
+						await leaveAll(view);
+						preview.setClickSelects(true);
+						await plugin.saveData({ ...(await plugin.loadData()), clickSelects: savedBefore?.clickSelects });
+						check('Own 163: the settings tab holds one switch, Click to select a cell, on, with its description, and a click turns it off and saves it', setting.count === 1 && setting.name === 'Click to select a cell' && setting.desc === 'A click selects a cell, and a double-click opens it. Turn it off to open a cell with one click, as in Obsidian.' && setting.on && setting.after.on === false && setting.after.setting === false && setting.after.saved === false, setting);
+						check('Own 163: with it off, a click on Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before', off.click === '1,0' && off.drag.at === '1,1 from 1,0' && !off.drag.open && off.drag.ranged === 2, off);
+
+						// Own 164 (step 8): a phone's layout: a tap on Basil selects it, its row's and column's handles show, and the note
+						// doesn't take the keyboard; a second tap opens it, with the keyboard in the cell.
+						const body = document.body;
+						const wasMobile = body.classList.contains('is-mobile');
+						const tap = {};
+						try {
+							body.classList.add('is-mobile');
+							await cdp.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+							await leaveAll(view);
+							view.contentDOM.blur();
+							await sleep(150);
+							const basilAt = round(await cellMiddle(model, 2, 0));
+							const tapAt = async (p) => {
+								await cdp.sendCommand('Input.synthesizeTapGesture', { ...p, gestureSourceType: 'touch' });
+								await sleep(500);
+								await frames(2);
+							};
+							await tapAt(basilAt);
+							const shows = (el) => !!el && getComputedStyle(el).display !== 'none';
+							tap.first = { at: where(view), open: opened(view), focused: view.hasFocus, rowHandle: shows(model.cellElement({ row: 2, column: 0 })?.querySelector('.table-row-drag-handle')), columnHandle: shows(model.cellElement({ row: 0, column: 0 })?.querySelector('.table-col-drag-handle')), otherRow: shows(model.cellElement({ row: 1, column: 0 })?.querySelector('.table-row-drag-handle')) };
+							await sleep(600);
+							await tapAt(basilAt);
+							tap.second = { open: opened(view), focused: !!preview.openCell(view)?.view.hasFocus };
+						} finally {
+							await cdp.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
+							if (!wasMobile) body.classList.remove('is-mobile');
+							await leaveAll(view);
+						}
+						check('Own 164: on a phone, a tap on Basil selects it, with its row\'s and column\'s handles, and gives the note no keyboard; a second tap opens it, with the keyboard in the cell', tap.first?.at === '2,0' && !tap.first.open && !tap.first.focused && tap.first.rowHandle && tap.first.columnHandle && !tap.first.otherRow && tap.second?.open === '2,0' && tap.second.focused, tap);
+
+						// Own 165: a click's own work, selecting a cell against opening it with the setting off, on Table 50 by 8 and
+						// Table 2000 by 12: the press's and the click's handlers, timed from window listeners around them.
+						const timedClick = {};
+						for (const name of ['Table 50 by 8', 'Table 2000 by 12']) {
+							view = await open(name);
+							await sleep(name === 'Table 50 by 8' ? 500 : 1500);
+							const table = models(view)[0];
+							await scrollToTable(view, table, -20);
+							for (const on of [true, false]) {
+								preview.setClickSelects(on);
+								const spans = [];
+								let started = 0;
+								let work = 0;
+								const t = {
+									downStart: () => (started = performance.now()),
+									downEnd: () => (work = performance.now() - started),
+									clickStart: () => (started = performance.now()),
+									clickEnd: () => spans.push(work + performance.now() - started),
+								};
+								window.addEventListener('pointerdown', t.downStart, true);
+								window.addEventListener('pointerdown', t.downEnd);
+								window.addEventListener('click', t.clickStart, true);
+								window.addEventListener('click', t.clickEnd);
+								try {
+									for (let i = 0; i < 8; i++) {
+										await leaveAll(view);
+										await click(await cellMiddle(table, 2 + i, 1 + (i % 3)));
+									}
+								} finally {
+									window.removeEventListener('pointerdown', t.downStart, true);
+									window.removeEventListener('pointerdown', t.downEnd);
+									window.removeEventListener('click', t.clickStart, true);
+									window.removeEventListener('click', t.clickEnd);
+								}
+								spans.sort((a, b) => a - b);
+								timedClick[`${name}, ${on ? 'selects' : 'opens'}`] = spans.length ? Math.round(spans[Math.floor(spans.length / 2)] * 100) / 100 : null;
+							}
+							preview.setClickSelects(true);
+							await leaveAll(view);
+						}
+						results.push({ name: 'Own 165 a click\'s own work, the median of 8 (ms)', ok: true, detail: timedClick });
+						check('Own 165: selecting a cell with a click costs no more than opening one did', ['Table 50 by 8', 'Table 2000 by 12'].every((name) => timedClick[`${name}, selects`] !== null && timedClick[`${name}, selects`] <= Math.max(timedClick[`${name}, opens`] ?? 0, 5)), timedClick);
+
+						view = await open('Frozen tables');
+						await sleep(300);
+						check('Own 166: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						if (hadNative) config.nativeMenus = nativeBefore;
+						else delete config.nativeMenus;
+						try {
+							app.setting.close();
+						} catch {
+							// Not open.
+						}
+						view = await open('Watering schedule');
+						await sleep(300);
+						for (const name of touched) {
+							const file = app.vault.getAbstractFileByPath(`${name}.md`);
+							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
+						}
+						preview.setClickSelects(false);
+						const savedNow = await plugin.loadData();
+						if (savedNow?.clickSelects !== savedBefore?.clickSelects) await plugin.saveData({ ...savedNow, clickSelects: savedBefore?.clickSelects });
+						preview.use(false);
+						await sleep(300);
+					}
+				}
 			} finally {
 				preview.skew(0);
+				preview.setClickSelects(clicksWere);
 				preview.use(false);
 				await sleep(300);
 			}

@@ -3925,6 +3925,7 @@
 					await frames(3);
 					// At the table's four edges the keys stay in the cell, where they leave a cell of Obsidian's table. Shift+Tab on
 					// the header's first cell does nothing.
+					const belowSeed = view.state.doc.lineAt(models(view)[0].to).number + 1;
 					const stays = [];
 					for (const [text, name, toStart, mods] of [['Tray', 'ArrowUp', true], ['Tray', 'ArrowLeft', true], ['Tray', 'Tab', true, { shift: true }], ['Water twice', 'ArrowDown', false], ['Water twice', 'ArrowRight', false], ['Water twice', 'PageDown', false]]) {
 						await openText(view, text);

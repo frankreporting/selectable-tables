@@ -1,5 +1,5 @@
 import type { Extension } from '@codemirror/state';
-import { addIcon, type App, Notice, type Plugin, PluginSettingTab, removeIcon } from 'obsidian';
+import { addIcon, type App, Notice, type Plugin, PluginSettingTab, removeIcon, type SettingDefinitionItem } from 'obsidian';
 import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
 import { cellFormatter, forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
@@ -45,16 +45,9 @@ interface Saved {
 const CLICK_SELECTS = 'clickSelects';
 
 /**
- * A toggle in Obsidian's declarative settings (1.13 on), which settings search finds. The `obsidian` package this repo
- * pins, 1.12.3, doesn't declare them yet.
+ * The plugin's settings tab, in a preview build: how a click on a cell of the plugin's table works. Obsidian draws it
+ * from its declarative settings (1.13 on), which settings search finds.
  */
-interface ToggleDefinition {
-	name: string;
-	desc: string;
-	control: { type: 'toggle'; key: string; defaultValue: boolean };
-}
-
-/** The plugin's settings tab, in a preview build: how a click on a cell of the plugin's table works. */
 class PreviewSettings extends PluginSettingTab {
 	constructor(
 		app: App,
@@ -65,7 +58,7 @@ class PreviewSettings extends PluginSettingTab {
 		super(app, plugin);
 	}
 
-	getSettingDefinitions(): ToggleDefinition[] {
+	getSettingDefinitions(): SettingDefinitionItem[] {
 		return [
 			{
 				name: 'Click to select a cell',
@@ -87,14 +80,6 @@ class PreviewSettings extends PluginSettingTab {
 		this.app.workspace.updateOptions();
 		this.saved.clickSelects = on;
 		await this.save();
-	}
-
-	/**
-	 * Never called: Obsidian draws the tab from the definitions above. The 1.12.3 typings this repo pins make it abstract,
-	 * so it stays, and lint warns about it, until the typings are updated.
-	 */
-	display(): void {
-		this.containerEl.empty();
 	}
 }
 

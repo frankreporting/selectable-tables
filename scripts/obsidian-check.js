@@ -9431,9 +9431,11 @@
 						}
 						off.drag = { at: where(view), open: opened(view), ranged: ranged(model) };
 						await leaveAll(view);
-						preview.setClickSelects(true);
-						app.workspace.updateOptions();
-						await plugin.saveData({ ...(await plugin.loadData()), clickSelects: savedBefore?.clickSelects });
+						// Back on through the tab, as its toggle does, so the plugin's own copy of its settings is on again too: put
+						// back only in the file and the flag, it stayed off there, the plugin's next save wrote it off, and the vault
+						// was left opening cells with a click (Brian's recheck, 11/25).
+						if (control) await tab.setControlValue(control.key, true);
+						else preview.setClickSelects(true);
 						check('Own 163: the settings tab holds one switch, Click to select a cell, a toggle, on, with its description, and turned off it\'s off and saved', setting.count === 1 && setting.name === 'Click to select a cell' && setting.desc === 'A click selects a cell, and a double-click opens it. Turn it off to open a cell with one click, as in Obsidian.' && setting.type === 'toggle' && setting.on === true && setting.after.on === false && setting.after.setting === false && setting.after.saved === false, setting);
 						check('Own 163: with it off, a click on Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before', off.click === '1,0' && off.drag.at === '1,1 from 1,0' && !off.drag.open && off.drag.ranged === 2, off);
 						check('Own 163: with it off, the pointer over a cell is Obsidian\'s text cursor again', off.pointer === 'text', off.pointer);
@@ -9530,9 +9532,9 @@
 							const file = app.vault.getAbstractFileByPath(`${name}.md`);
 							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
 						}
+						const settingsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+						if (((await plugin.loadData())?.clickSelects ?? true) !== (savedBefore?.clickSelects ?? true)) await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
 						preview.setClickSelects(false);
-						const savedNow = await plugin.loadData();
-						if (savedNow?.clickSelects !== savedBefore?.clickSelects) await plugin.saveData({ ...savedNow, clickSelects: savedBefore?.clickSelects });
 						preview.use(false);
 						await sleep(300);
 					}

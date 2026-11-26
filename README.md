@@ -1,6 +1,8 @@
-# Selectable Tables
+# Better Markdown Tables
 
-An Obsidian plugin that enhances how you interact with Markdown tables. Treats tables as selectable blocks, the same way Obsidian treats an image. Now you can use arrow keys to select and navigate tables and cells without touching or viewing the raw Markdown, which gives you smoother note and table nav. You hit `Enter` to drop into a cell for editing. The plugin also adds the ability to freeze rows and columns. For now, all of this works only in Live Preview.
+*Formerly Selectable Tables.*
+
+An Obsidian plugin that makes Markdown tables in Live Preview fast and easy to work with, like a spreadsheet. It draws each table itself, so a table of thousands of rows scrolls and takes typing as smoothly as a short one. Select a cell and move with the arrow keys without opening anything, type to replace a cell, select a range of cells, freeze the first rows and columns, and move, add, sort and format rows, columns and cells. You hit `Enter` to drop into a cell for editing.
 
 ![Demo with the keys shown on screen: holding ↓ passes the tables, → selects one, the arrows and jump keys move between cells without opening them, and Enter opens a cell](docs/demo.gif)
 
@@ -11,42 +13,52 @@ One of the original objectives was to make scrolling notes with large tables a l
 ## Install
 
 1. In Obsidian, open **Settings → Community plugins**. If you see **Exit Restricted mode**, select it.
-2. Select **Browse** and search for **Selectable Tables**.
+2. Select **Browse** and search for **Better Markdown Tables**.
 3. Select **Install**, then **Enable**.
 
-Requires Obsidian 1.14.4 or later.
+Requires Obsidian 1.15.1 or later. On an older Obsidian, the plugin stays on version 0.2.3, as Selectable Tables.
 
-## Keys
+## Where it works
 
-It works on every table Obsidian draws as a table in Live Preview. Source mode, Reading view, and tables inside callouts or list items (which Obsidian doesn't draw as tables in the editor) are left as they are.
+Every table in a note's Live Preview, on a computer, a phone or a tablet. Everywhere else, Obsidian draws its tables as it does without the plugin, and none of what follows applies there:
+
+- Source mode and Reading view.
+- Canvas cards, hover previews, and other editors outside a note's tab.
+- Tables inside callouts or list items, which Obsidian doesn't draw as tables in the editor.
+
+Other plugins that work with the tables Obsidian draws in Live Preview won't find them in a note, since the plugin draws its own there.
+
+## Large tables
+
+Only the rows near the screen are drawn, and the rest stand in at their size, so a note with a long table opens, scrolls and takes typing as fast as one without. Columns keep their widths as you scroll. On a computer, a table wider than the note scrolls sideways with a scrollbar of its own, which stays at the bottom of the pane while the table's end is out of view. A trackpad's sideways swipe over the table moves it too.
+
+## Selecting and moving
 
 **Next to a table** (the caret on the line just above or just below it):
 
 | Key | What happens |
 | -- | -- |
-| ↓ from the line above, ↑ from the line below | The caret passes the table and lands on the line beyond it, at the same horizontal position. No cell opens. |
-| → at the end of the line above, ← at the start of the line below | Selects the whole table, the way ← and → select an image: tinted and framed with the thick border Obsidian draws around selected cells. |
-| Delete at the end of the line above | Selects the whole table, the way Backspace at the start of the line below does. |
-| Any other key move that would land in the table: Option+→ or Option+← next to it, Option+↑ or Option+↓, or Cmd+↑ or Cmd+↓ when the table starts or ends the note | Selects the whole table. No cell opens. Page Up and Page Down still pass a table. |
+| ↓ from the line above, ↑ from the line below | Selects the whole table. The next press goes on to the line beyond, at the same place across. Hold the key down to pass tables without stopping. |
+| → at the end of the line above, ← at the start of the line below | Selects the whole table, the way ← and → select an image. |
+| Backspace at the start of the line below | Selects the whole table. A second Backspace removes it. |
+| Any other key move that would land in the table, such as Option with an arrow | Selects the whole table. No cell opens. Page Up and Page Down pass it. |
 | Shift with an arrow | The selection takes the whole table at once. |
-| ↓ or ↑ with no line beyond the table (it starts or ends the note, or sits right below the properties) | Left to Obsidian, as without the plugin. Obsidian keeps a blank line around the tables it makes, so this only happens in notes written elsewhere. |
+
+**With the mouse:** a click on a cell selects it, and a double-click opens it, with the caret where you clicked. A click on the cell already selected opens it too. A click beside the cells selects the whole table. Drag across cells to select a range, and four quick clicks select every cell. To open a cell with one click, as in Obsidian, turn off **Click to select a cell** in the plugin's settings.
 
 **With a table selected:**
 
 | Key | What happens |
 | -- | -- |
-| ↓, →, Page Down, or Option with ↓ or → | The caret goes to the start of the line below. |
-| ↑, ←, Page Up, or Option with ↑ or ← | The caret goes to the end of the line above. |
-| Home, End, Cmd+←, Cmd+→, with or without Shift | Nothing happens. |
-| Cmd+↑, Cmd+↓ | The note's start or end. |
+| ↓, →, Page Down | The caret goes to the start of the line below. |
+| ↑, ←, Page Up | The caret goes to the end of the line above. |
 | Enter | Selects the first cell, or the cell you just left with Escape. |
 | Escape | The caret goes back to the side you selected the table from. |
-| Backspace, Delete, Cut | Remove the table, undoable. |
+| Backspace, Delete, Cut | Remove the table, undoable. Paste replaces it. |
 | Copy | Copies the table's Markdown. |
-| Typing | Starts a new paragraph below the table, with a blank line on each side, and what you type goes there. The table doesn't change, and one undo takes it all back. |
-| Tab, Shift+Enter | Nothing happens, so a stray key can't change the table. Paste replaces it, undoable. |
+| Typing | Starts a new paragraph below the table, and what you type goes there. The table doesn't change, and one undo takes it all back. |
 
-**With a cell selected:** it keeps showing its rendered text, with the tint and thick border Obsidian draws around selected cells. Nothing opens as you move, so the table keeps its size.
+**With a cell selected:** it keeps showing its rendered text, framed as Obsidian frames selected cells. Nothing opens as you move, so the table keeps its size.
 
 | Key | What happens |
 | -- | -- |
@@ -54,21 +66,27 @@ It works on every table Obsidian draws as a table in Live Preview. Source mode, 
 | Home, End, Cmd+←, Cmd+→ | The first or last cell of the row. |
 | Page Up, Page Down, Cmd+↑, Cmd+↓ | The top or bottom cell of the column. |
 | Tab, Shift+Tab | The next or previous cell, wrapping between rows. It stops on the last and first cells, and adds no rows. |
-| Enter | Opens the cell, with the caret at the end of its text. From there, Obsidian's table editor works as always. On a table Obsidian didn't write, such as a hand-typed one, the frame turns red and nothing opens. Click a cell to edit it: that usually tidies the table, and Enter works from then on. |
+| Shift with an arrow | Grows a range of cells. Shift with any of the jumps above stretches it to the table's edge. On Windows and Linux, so does Ctrl+Shift with an arrow. |
+| Enter | Opens the cell, with the caret at the end of its text. |
+| Typing | Replaces the cell's text, as in a spreadsheet. An accent key, such as Option+E, or an input method's first key only opens the cell, emptied: type it again there. |
+| Backspace, Delete | Empty the cell, or every cell of a range. A range across whole rows or columns deletes them. |
+| Cut, Copy, Paste | Copy puts a range on the clipboard as a table, as Obsidian's own table copies one. Paste writes text into the cell, or fills cells copied from a table in from the selected one, adding rows and columns to fit. |
+| Bold, Italic and the other formatting commands | Format the cell's text, or every cell of a range, and take the formatting off again. |
 | Escape | Back to the selected table. |
-| Copy | Copies the cell's Markdown, the way the cell's editor shows it, without a freeze comment. |
-| Typing | Starts a new paragraph below the table, as on a selected table. |
-| Backspace, Delete, Cut, Paste, Option with an arrow, Shift with an arrow or any of the keys above | Nothing happens. Editor commands leave the table alone too. |
 
-**In a cell**, Escape closes the cell and selects it. Page Up, Page Down, Cmd+↑ and Cmd+↓ close it and select the top or bottom cell of its column, so the note doesn't jump away from the table; press Enter to open that cell. Every other key works as Obsidian has it, and clicking a cell still edits it directly. An open cell keeps its width: only its height changes, so the columns stay put until you close it. An empty cell still grows as you type.
+**In an open cell,** you edit with Obsidian's own editor, links, suggestions and all. The arrow keys stay in the cell's text: ← and → stop at its ends, and ↑ and ↓ go to its start or end from its first or last line. Tab and Shift+Tab go to the next and previous cell, and Enter to the cell below, each with its text selected. At the table's ends they do nothing, so no key adds a row. Shift+Enter is a line break. Escape closes the cell and selects it.
 
-With Vim mode on, Vim's own keys come first: in normal mode, j, k and the arrows still step into tables.
+With Vim mode on, Vim's own keys come first in normal mode.
 
-Typing with an input method (IME), or an accent such as Option+E, works the same way: the text lands in the new paragraph below the table.
+## Rows, columns and cells
+
+Right-click a cell for Obsidian's **Row**, **Column** and **Sort** items, which add, move, duplicate and delete rows and columns, align columns and sort the table, then the freeze items below. Right-click inside a range of cells for **Cut**, **Copy**, **Paste**, **Format**, **Align**, **Clear cells** and **Delete cells**. The command palette has the same edits as Obsidian's table commands.
+
+Hover over a table for Obsidian's drag handles: drag one to move its row or column, or click it to select the row or column. The **+** buttons below and beside the table add a row or a column.
 
 ## Freeze rows and columns
 
-A long or wide table can keep the initial rows and columns in view as you scroll, just like in a spreadsheet. Any number of tables in a note can freeze. This works in Live Preview, on the desktop, on phones and on tablets. **Note:** A device too old to pin rows, such as an iPhone or iPad before iOS 26, leaves the table to scroll as usual.
+A long or wide table can keep its first rows and columns in view as you scroll, as in a spreadsheet. Any number of tables in a note can freeze. While cells pass under them, a soft shadow shows where the frozen rows and columns end. **On phones and tablets, a frozen table scrolls as usual for now: its rows and columns don't pin there.**
 
 To freeze, right-click a cell and choose one of these, or select or open a cell and run one from the command palette (Cmd+P):
 
@@ -91,39 +109,44 @@ The comment doesn't show, and it stays with the table's text, so it copies, sync
 - `%%freeze 0 0%%`, or no comment, freezes nothing. Deleting the column that holds the comment ends the freeze.
 - A table can freeze up to 9 columns.
 - Rows taller than half the pane, or columns as wide as the table, stop pinning until there's room, so there's always somewhere to scroll.
-- A cell you select, open or type in snaps back into view if it was partially hidden by a frozen cell.
-- Tested in both light and dark mode on Obsidian's default theme, Baseline, Minimal, Things, Catppuccin, Prism and Blue Topaz.
-- A theme that centers tables, such as Baseline with **Table width** on **Auto (Center)**, still centers a table that fits. A wider one starts at the left edge, so you can scroll to every column. This holds for every table, frozen or not.
+- Frozen rows pin a little below the top of the pane, so the header's drag handles stay in reach.
+- A cell you select, open or type in comes back into view if a frozen row or column covers it.
 
-### Known issues:
+## Themes
 
-- On iPhone, as the keyboard opens or closes with the caret in a frozen table, its frozen rows can flicker for a moment, and the caret can drift inside its cell until you type.
-- On iPhone and iPad, in themes that round table cells, such as Baseline, rows scrolling under a frozen header can show at its rounded corners.
-- Dragging to select cells doesn't work yet with a frozen table and can result in the wrong cells selected.
-- On a phone or tablet, a long press on a cell doesn't offer the freeze items yet. Run them from the command palette there.
+The plugin's table carries Obsidian's own classes for a table, so a theme's look lands on it as on Obsidian's. It's checked against the 20 most downloaded themes and Baseline. A theme's own table settings, such as row numbers, aren't followed yet.
+
+A theme that centers tables, such as Baseline with **Table width** on **Auto (Center)**, still centers a table that fits. A wider one starts at the left edge, so you can scroll to every column.
+
+## How the plugin changes Obsidian
+
+Obsidian gives plugins no way to draw tables in its place, so the plugin changes a few things inside Obsidian that plugins usually leave alone. Each is checked before it's used, so an Obsidian update that changes one has the plugin step aside, as below, rather than fail.
+
+- **It hides tables from Obsidian's own table drawing.** Each note's editor gets a copy of Obsidian's Markdown language that marks table rows with a class of the plugin's own, so Obsidian builds no table there and the plugin draws its own. *If the copy can't be made,* every table is Obsidian's own again, without the plugin's keys or freezing, and a notice says so once.
+- **It borrows Obsidian's own Markdown editor for a cell,** the one Obsidian's table cells use, with the same Markdown language Obsidian gives them. While a cell is open, the note answers Obsidian's questions about which editor is active and whether the caret is in a table cell for that cell, so Obsidian's commands reach it. It also asks whether suggestions are showing, so they take the arrow keys first. *If any piece is missing,* cells open in a plain editor until Obsidian restarts, where Markdown shows as text until you leave the cell, and a notice says so.
+- **It hands Obsidian's formatting commands to selected cells.** While the plugin draws a note's tables, Bold, Italic, Highlight, Comment, Clear formatting and the rest pass a selected cell or range to Obsidian's own formatting, run on the cells' text. *If that can't run,* nothing changes, and a notice says so once.
+- **A range's right-click menu** cuts, copies and pastes through the app's window, as Obsidian's own menu does, and reads Obsidian's syntax tree to tick the formatting a range already has. *Without them,* Cut, Copy and Paste are left out of the menu, and nothing is ticked.
+- **A paste into a cell reads Settings › Editor › Auto convert HTML.** *Without it,* pasted HTML is converted.
+- **The right-click menu's Row, Column and Sort items are submenus,** as in Obsidian's own menu. *Without submenus,* their items follow a heading in the menu itself.
+
+## Known issues
+
+- On phones and tablets, frozen rows and columns don't pin yet.
+- Canvas cards and hover previews show Obsidian's own tables, without the plugin's keys or freezing.
+- A very fast flick through a long table can show blank strips for a moment, before its rows are drawn.
+- Typing an accent or an input method's first key on a selected cell only opens it.
 
 ## Roadmap
 
 What's planned, broadly. The order and the details may change.
 
-**Next:**
-
-- **Finish freezing rows and columns:** make drags work, and freeze in Reading view too. Make it possible to keep a wide table's sideways scrollbar in view even if the bottom of the table is below the viewport.
-
-**After that:**
-
-- **Edit from a selected cell:** Backspace, Delete, Cut and Paste act on the cell, with nothing to open first.
-- **Type over a selected cell:** typing replaces its text, as in a spreadsheet. Enter still opens it to add to its text.
-- **Move rows and columns** from a selected cell, without opening the cells for edit.
-- **Select a range of cells** with Shift and the arrows.
-- **Format a selected cell or a range:** Bold, italic and the other formatting commands act on the cells' text, and take formatting off again.
-
-**Still being worked out:**
-
-- The arrow keys stay in the table while a cell is open, until Escape. Currently you can move through cells freely once you're in "edit mode," and there's nothing stopping you from arrowing out of the table and then having to re-select the table and hit `Enter` again to get back in. 
-- Vim's j and k pass a table in one press, like the arrows.
-- A search result in a table selects its cell instead of opening it.
-- ← and → swap around a table in right-to-left text.
+- **Frozen rows and columns on phones and tablets,** moved sideways by a finger.
+- **The plugin's table in canvas cards and hover previews.**
+- **Frozen rows and columns in Reading view.**
+- **Resize columns and rows** by dragging their edges.
+- **Select every cell with Cmd+A,** and a range of cells with a finger.
+- **Type accents and input methods** straight into a selected cell.
+- **Follow a theme's own table settings,** such as row numbers.
 
 ## Feedback and bugs
 
@@ -149,7 +172,7 @@ npm run lint        # ESLint with Obsidian's plugin rules
 npm run test-vault  # build, then copy the plugin into the test vault
 ```
 
-Open the folder as a vault in Obsidian (**Open another vault → Open folder as vault**), turn on community plugins when asked, and enable **Selectable Tables** in **Settings → Community plugins**. Obsidian keeps its own state in the vault's `.obsidian` folder; git ignores all of it except `app.json` and `community-plugins.json`.
+Open the folder as a vault in Obsidian (**Open another vault → Open folder as vault**), turn on community plugins when asked, and enable **Better Markdown Tables** in **Settings → Community plugins**. Obsidian keeps its own state in the vault's `.obsidian` folder; git ignores all of it except `app.json` and `community-plugins.json`.
 
 `scripts/make-long-note.mjs` regenerates the vault's **Long note**, which is used only for timing.
 

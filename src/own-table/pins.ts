@@ -234,10 +234,16 @@ interface PinRead {
 	carry: Map<number, { from: number; to: number }>;
 }
 
+/**
+ * A small table of copied cells in a box of its own. The table sits in a `.table-wrapper`, as the real table does, so a
+ * theme's rules that tell a note's table from other tables by the box holding it land on the copy as on the real one:
+ * Baseline's Row lines and Column lines draw a line under and beside each cell of a table outside one, which doubled
+ * the copies' lines and made each short row a pixel taller, so the frozen columns drifted from their rows.
+ */
 function part(parent: HTMLElement, cls: string, holding: boolean): Part {
 	const box = parent.createDiv(cls);
 	box.setAttribute('aria-hidden', 'true');
-	const table = box.createEl('table', { cls: 'table-editor' });
+	const table = box.createDiv('table-wrapper').createEl('table', { cls: 'table-editor' });
 	table.toggleClass(HOLDS_CELL_CLASS, holding);
 	const colgroup = table.createEl('colgroup');
 	const thead = table.createEl('thead');

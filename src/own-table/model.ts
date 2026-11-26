@@ -10,6 +10,7 @@ import { type Cell, rowCells, type Span } from '../editor/table-text';
 import { fitColumns, measureCell, type Metrics, rowHeight, type Words } from './estimate';
 import { Bar, SLIDE_VARIABLE, SLIDES_CLASS, TIMELINE_VARIABLE, usesBars } from './bar';
 import { blockCount, blockHeight, blockOf, blockRows, blockSpans, bodyLayout, topInBlock } from './blocks';
+import { domOf, looseDiv } from './dom';
 import { BOX_CLASS, BOX_ID } from './boxes';
 import { covers, Heights, type RowRange, type Visible, wanted } from './heights';
 import { measure, measureContent } from './metrics';
@@ -137,7 +138,7 @@ const skewed = (height: number, row: number) => (skew ? height * (1 + skew * Mat
 
 /** An empty element like `from`, with its attributes, made in `owner` and added to `parent` if given. */
 function copyOf<T extends Element>(from: T, owner: Document, parent?: Element): T {
-	const copy = owner.createElement(from.localName) as unknown as T;
+	const copy = domOf(owner).createEl(from.localName as keyof HTMLElementTagNameMap) as unknown as T;
 	for (const { name, value } of Array.from(from.attributes)) copy.setAttribute(name, value);
 	parent?.append(copy);
 	return copy;
@@ -145,10 +146,9 @@ function copyOf<T extends Element>(from: T, owner: Document, parent?: Element): 
 
 /** A cell's box, as Obsidian's own table puts one in each cell. An empty one holds a line break, as Obsidian's does. */
 function cellBox(owner: Document, content: Node[] = []): HTMLDivElement {
-	const box = owner.createElement('div');
-	box.className = 'table-cell-wrapper';
+	const box = domOf(owner).createDiv({ cls: 'table-cell-wrapper' });
 	if (content.length) box.append(...content);
-	else box.append(owner.createElement('br'));
+	else box.createEl('br');
 	return box;
 }
 
@@ -444,7 +444,7 @@ export class Model implements Span, DrawnTable, DragTable {
 		if (!view) return [];
 		const { markdown, rows, alignment } = copyRange(view.state.doc.sliceString(this.from, this.to).split('\n'), anchor, head);
 		const scratch = activeDocument.implementation.createHTMLDocument('');
-		const holder = scratch.createElement('div');
+		const holder = looseDiv(scratch);
 		const component = new Component();
 		component.load();
 		void MarkdownRenderer.render(this.app, markdown, holder, view.state.field(editorInfoField, false)?.file?.path ?? '', component);
@@ -1734,7 +1734,7 @@ export class Model implements Span, DrawnTable, DragTable {
 		// renders in a document of its own, and only the cells' contents move into cells made here, in the page's
 		// document, with the rendered cells' attributes. The rendered cells and their iterators stay behind.
 		const scratch = activeDocument.implementation.createHTMLDocument('');
-		const holder = scratch.createElement('div');
+		const holder = looseDiv(scratch);
 		// The rows' embeds and post-processors' children, kept until the last of these rows leaves.
 		const batch: Batch = { component: new Component(), rows: 0 };
 		this.component.addChild(batch.component);

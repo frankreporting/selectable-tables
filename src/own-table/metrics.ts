@@ -205,7 +205,7 @@ export function availableWidth(view: EditorView): number {
 	return view.contentDOM.clientWidth - px(content.paddingLeft) - px(content.paddingRight);
 }
 
-const context = activeDocument.createElement('canvas').getContext('2d');
+const context = createEl('canvas').getContext('2d');
 const widths = new Map<string, number>();
 
 /** Text widths from a canvas, kept by font and word: the same words come back in every row. */

@@ -2,6 +2,7 @@ import { setIcon, setTooltip } from 'obsidian';
 import type { Cell, Span } from '../editor/table-text';
 import type { CellDragTable } from './cell-drag';
 import type { DragTable } from './drag';
+import { domOf } from './dom';
 
 /**
  * Obsidian's drag handles and + buttons, on the plugin's own table, as its table widget makes them (read from 1.15.1's
@@ -29,8 +30,7 @@ function templatesFor(doc: Document): { row: HTMLElement; column: HTMLElement } 
 	let made = templates.get(doc);
 	if (made) return made;
 	const grip = (cls: string, icon: string) => {
-		const el = doc.createElement('div');
-		el.className = cls;
+		const el = domOf(doc).createDiv({ cls });
 		setIcon(el, icon);
 		// Obsidian's swipes on a phone, which open the sidebars, leave a handle's drag alone.
 		el.dataset.ignoreSwipe = 'true';

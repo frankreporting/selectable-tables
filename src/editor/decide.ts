@@ -35,6 +35,8 @@ export type Action =
 	| { type: 'edit'; cell: Cell }
 	/** Empties a selected cell or a range of cells of the plugin's own table, or deletes the range's rows or columns: Delete is `forward`. */
 	| { type: 'clear'; forward: boolean }
+	/** A key that types on a selected cell of the plugin's own table: the cell opens emptied, and the key's text goes into it. */
+	| { type: 'replace'; cell: Cell }
 	/**
 	 * A key that types starts a new paragraph below the table: the text from `from` to `to` becomes `insert`,
 	 * which adds the line breaks the paragraph needs, and the caret goes to `pos`, in the note after that.
@@ -423,6 +425,29 @@ export function typeBelow({ state, layout }: TableContext): Action | null {
 	}
 	const pos = state.changes(change).apply(doc).line(last + 2).from;
 	return { type: 'below', ...change, pos };
+}
+
+/**
+ * A key that types on a selected cell of the plugin's own table replaces the cell's text, as a spreadsheet does (Brian,
+ * 11/24): the cell opens emptied, a header cell keeping its freeze mark, and the key's text goes into it. On a range of
+ * cells, it's the cell moved to last, the one Enter opens, and the range ends. A table selected whole, and Obsidian's
+ * table, still start a paragraph below the table.
+ */
+export function typeOn(context: TableContext): Action | null {
+	const { state, layout, cells } = context;
+	if (layout.ownTables && cells.selected && selectedTable(state, layout)) return { type: 'replace', cell: cells.selected };
+	return typeBelow(context);
+}
+
+/**
+ * Whether a key starts an accent or an input method's composition rather than typing a character itself: a dead key, such
+ * as Option+E, or an input method's first key, whose key code is 229 everywhere and whose `key` is its real letter on a
+ * Mac, `Process` on Windows and Linux, and `Unidentified` on Android. On a Mac the text box has to hold the keyboard before
+ * such a key: moved during it, macOS drops the accent half made, and the cell's editor goes on composing for good (Brian's
+ * hand check, 11/25).
+ */
+export function composes({ key, keyCode }: { key: string; keyCode: number }): boolean {
+	return keyCode === 229 || key === 'Dead' || key === 'Process' || key === 'Unidentified';
 }
 
 /** The parts of a key event that say whether it types. */

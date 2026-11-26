@@ -378,8 +378,8 @@ export class Model implements Span, DrawnTable, DragTable {
 		public to: number,
 		/** Selects the table whole. */
 		private readonly select: (model: Model) => void,
-		/** Opens a cell for editing, at a click in it, or at its text's end. */
-		private readonly open: (model: Model, cell: Cell, at: Click | null) => void,
+		/** Opens a cell for editing, at a click in it, at its text's end, or emptied for typing over; says whether it opened now. */
+		private readonly open: (model: Model, cell: Cell, at: Click | 'replace' | null, focus?: boolean) => boolean,
 	) {
 		this.component.load();
 	}
@@ -418,7 +418,11 @@ export class Model implements Span, DrawnTable, DragTable {
 	}
 
 	markCell(cell: Cell | null, anchor: Cell | null = null): void {
+		const kept = this.keptRow();
 		this.cell = cell;
+		// The selected cell's row is kept in the page while its block is, so typing on it opens it at once (`keptRow`).
+		const keep = this.keptRow();
+		if (keep !== kept && keep >= 0 && !this.rendered.has(keep)) this.schedule();
 		this.range = cell && anchor && !sameCell(cell, anchor) ? boundsOf(anchor, cell) : null;
 		if (this.range) this.rangeDrawn = true;
 		if (!cell) this.showing = null;
@@ -484,6 +488,10 @@ export class Model implements Span, DrawnTable, DragTable {
 	/** Opens a cell for editing, with the caret at the end of its text: Enter on the selected cell. */
 	openCell(cell: Cell): void {
 		this.open(this, cell, null);
+	}
+
+	typeOver(cell: Cell, focus = true): boolean {
+		return this.open(this, cell, 'replace', focus);
 	}
 
 	/**
@@ -688,13 +696,24 @@ export class Model implements Span, DrawnTable, DragTable {
 		this.schedule(true);
 	}
 
-	/** The body row kept in the page away from the rows drawn: the open cell's, or a pinned cell's about to open. */
+	/** The body row kept in the page away from the rows drawn: the open cell's, a pinned cell's about to open, or the selected cell's. */
 	private heldRow(): { index: number; tr: HTMLTableRowElement } | null {
 		const open = this.rowOfOpen();
 		if (open !== null) return open > 0 && this.openRow ? { index: open - 1, tr: this.openRow } : null;
-		const coming = this.coming;
-		const tr = coming && coming.row > 0 ? this.rendered.get(coming.row - 1) : undefined;
-		return coming && tr ? { index: coming.row - 1, tr } : null;
+		const index = this.keptRow();
+		const tr = index >= 0 ? this.rendered.get(index) : undefined;
+		return tr ? { index, tr } : null;
+	}
+
+	/**
+	 * The body row drawn wherever the pane is, besides the open cell's, or -1: a pinned cell's about to open, or else the
+	 * selected cell's. Typing on a selected cell opens its editor inside the key's own event, so the key types there, which
+	 * needs the cell drawn: a pinned row's real row sits at the table's top, far from where it shows deep in a long table,
+	 * and CodeMirror keeps that block in the page while the table is selected, since the note's selection starts there.
+	 */
+	private keptRow(): number {
+		const cell = this.coming ?? this.cell;
+		return cell && cell.row > 0 && cell.row <= this.count ? cell.row - 1 : -1;
 	}
 
 	/**
@@ -1950,7 +1969,8 @@ export class Model implements Span, DrawnTable, DragTable {
 		if (!visible || !view || this.stale) return;
 		this.placeBox(null);
 		const whole = this.count <= WHOLE;
-		if (!force && !this.dirty.size && (whole ? this.drawn.first === 0 && this.drawn.end === this.count : covers(this.heights, this.drawn, visible, MARGIN))) return;
+		const coming = this.keptRow();
+		if (!force && !this.dirty.size && (coming < 0 || this.rendered.has(coming)) && (whole ? this.drawn.first === 0 && this.drawn.end === this.count : covers(this.heights, this.drawn, visible, MARGIN))) return;
 		const { first, end } = whole ? { first: 0, end: this.count } : wanted(this.heights, visible, OVER);
 		// The row at the pane's top stays still while rows above it take their real heights. CodeMirror keeps the top
 		// of the block it anchors on still, and moves the note for any change in the blocks above it, so the anchor is
@@ -1962,7 +1982,6 @@ export class Model implements Span, DrawnTable, DragTable {
 			anchor = range.end > range.first ? Math.max(range.first, Math.min(range.end - 1, anchor)) : -1;
 		}
 		const anchorTop = anchor >= 0 ? topInBlock(this.heights, anchor, this.headHeight) : 0;
-		const coming = this.coming && this.coming.row > 0 && this.coming.row <= this.count ? this.coming.row - 1 : -1;
 		for (const [row, tr] of this.rendered) {
 			const changed = this.dirty.has(row);
 			// The open cell's row stays, wherever the pane is, and its other cells are drawn again in it.
@@ -1970,7 +1989,7 @@ export class Model implements Span, DrawnTable, DragTable {
 				if (changed && row < this.count) this.patchOpen(row, tr);
 				continue;
 			}
-			// So does the row of a pinned cell about to open.
+			// So does the row of a pinned cell about to open, or else of the selected cell.
 			if (row === coming && !changed) continue;
 			if (row >= first && row < end && !changed) continue;
 			tr.remove();

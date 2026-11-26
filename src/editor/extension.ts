@@ -2,10 +2,10 @@ import { EditorSelection, EditorState, Extension, Prec, SelectionRange, Transact
 import { EditorView, KeyBinding, keymap, ViewPlugin } from '@codemirror/view';
 import { type Editor, editorEditorField, editorInfoField, editorLivePreviewField, Notice, Platform } from 'obsidian';
 import { cellFollowsCaret, cellSelected, cellSelection, TABLE_CLASS } from './cells';
-import { Action, arrow, backspace, blankLinesAbove, caretInTable, clearCells, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typesText, writesCell } from './decide';
+import { Action, arrow, backspace, blankLinesAbove, caretInTable, clearCells, Context, copied, deleteForward, Direction, enter, escape, Landing, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, stay, stopsEdit, tab, typeBelow, typeOn, typesText, writesCell, composes } from './decide';
 import { frozenTables } from './freeze';
 import { inOwnCell, openCells, type OwnCell, ownSpans, ownTables, viewLayout } from './layout';
-import type { Span } from './table-text';
+import type { Cell, Span } from './table-text';
 
 /** On the editor while a table is selected; styles.css hides the caret then, as Obsidian does for images. */
 export const SELECTED_CLASS = 'selectable-tables-selected';
@@ -175,6 +175,8 @@ function run(view: EditorView, action: Action | null): boolean {
 		case 'clear':
 			cellEdits?.clear(view, action.forward);
 			return true;
+		case 'replace':
+			return typeOver(view, action.cell) !== null;
 		case 'refuse':
 			view.plugin(cellSelection)?.refuse();
 			new Notice('This table can\'t open from the keyboard. Click a cell to edit it.');
@@ -188,6 +190,59 @@ function run(view: EditorView, action: Action | null): boolean {
 			view.dispatch({ changes: { from: action.from, to: action.to, insert: action.insert }, selection: EditorSelection.cursor(action.pos), scrollIntoView: true });
 			return true;
 	}
+}
+
+/**
+ * Typing on a selected cell of the plugin's own table: the cell opens emptied, as a spreadsheet's does, and its editor takes
+ * the keyboard right away, inside the key's own event, so the browser types the key in the cell (`now`). A cell whose row
+ * isn't in the page opens once it's drawn (`later`), and the key is lost. With `focus` false, the editor takes the keyboard
+ * later (`handOver`), and the key is lost too. Null where it isn't the plugin's table after all.
+ */
+function typeOver(view: EditorView, cell: Cell, focus = true): 'now' | 'later' | null {
+	const table = selectedTable(view.state, viewLayout(view));
+	const own = table && view.state.facet(ownTables)?.table(view, table.from);
+	if (!own) return null;
+	view.plugin(cellSelection)?.opening();
+	return own.typeOver(cell, focus) && focus && openCells.get(view)?.view.hasFocus ? 'now' : 'later';
+}
+
+/**
+ * The note lets the keyboard go, so what a key or an input method sends lands nowhere: not focused, and with no selection
+ * left in the page, since text an input method commits with nothing focused still goes in at the page's selection, which
+ * a blur leaves in the note.
+ */
+function letKeyboardGo(view: EditorView): void {
+	view.contentDOM.blur();
+	view.dom.ownerDocument.getSelection()?.removeAllRanges();
+}
+
+/**
+ * Gives the note's open cell the keyboard once the key with `code` comes up, or after a moment without its keyup: an accent
+ * key's or an input method's first key is over by then, macOS has dropped what it started with nowhere to put it, and the
+ * cell's editor starts with no composition. A cell whose row wasn't drawn opens a frame or two later, so it's waited for.
+ */
+function handOver(view: EditorView, code: string): void {
+	const win = view.dom.ownerDocument.defaultView ?? window;
+	let done = false;
+	let frames = 0;
+	const give = () => {
+		const open = openCells.get(view);
+		if (open?.view.dom.isConnected) {
+			if (!open.view.hasFocus) open.view.focus();
+		} else if (frames++ < 30) win.requestAnimationFrame(give);
+	};
+	const up = (event: KeyboardEvent) => {
+		if (event.code === code) finish();
+	};
+	const finish = () => {
+		if (done) return;
+		done = true;
+		win.removeEventListener('keyup', up, true);
+		win.clearTimeout(timer);
+		give();
+	};
+	win.addEventListener('keyup', up, true);
+	const timer = win.setTimeout(finish, 400);
 }
 
 /**
@@ -388,7 +443,12 @@ function typesBelow(view: EditorView): boolean {
 }
 
 /**
- * A key that types on a selected table or cell starts a new paragraph below the table, and its text goes
+ * A key that types on a selected cell of the plugin's own table replaces the cell's text: the cell opens emptied, and the
+ * key types there (`typeOver`). A cell that can't open in the key's own event, its row not in the page, would leave the key,
+ * or an input method's composition, on the selected table, so the note lets the keyboard go for it. So does an accent key
+ * or an input method's first key, which opens the cell and is lost (`composes`).
+ *
+ * Elsewhere, a key that types on a selected table or cell starts a new paragraph below the table, and its text goes
  * there. The caret moves on the key's keydown, which comes before the text, and the browser then types at
  * the new caret, so Obsidian's own handling of typed text, such as closing brackets, still runs. An input
  * method left alone replaces a selected table with its first letter and puts the rest elsewhere; its
@@ -396,22 +456,52 @@ function typesBelow(view: EditorView): boolean {
  * the composition runs leaves it stuck, and Live Preview stops drawing until it ends. An input method with
  * no keydown is left alone.
  *
- * Text the keydown didn't see, such as from the emoji picker or dictation, goes below the table too, and
- * other text input on a selected table stays stopped, since the browser's caret can't sit across the
+ * Text the keydown didn't see, such as from the emoji picker or dictation, goes where a key's would, into the cell or
+ * below the table, and other text input on a selected table stays stopped, since the browser's caret can't sit across the
  * table. On a selected cell, no other input goes through. Copy gives the cell, not the table underneath
  * it. On the plugin's own table, Cut copies, then empties the cell or deletes the range as Backspace does,
  * and Paste writes over them (`cellEdits`); on Obsidian's table they do nothing.
  */
 const selectedEvents = EditorView.domEventHandlers({
 	keydown(event, view) {
-		if (!event.defaultPrevented && !event.isComposing && typesText(event, APPLE) && typesBelow(view)) run(view, typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells }));
+		if (event.defaultPrevented || event.isComposing || !typesText(event, APPLE) || !typesBelow(view)) return false;
+		const action = typeOn(context(view));
+		// An accent key or an input method's first key opens the cell and is lost: the cell's editor takes the keyboard once
+		// that key is over (`composes`).
+		const accent = composes(event);
+		if (accent && action?.type === 'replace') {
+			// The note lets the keyboard go before the cell opens: holding it, the note would draw the caret the cell gives it,
+			// read it back outside the cell, and close the cell.
+			event.preventDefault();
+			letKeyboardGo(view);
+		}
+		let over: ReturnType<typeof typeOver> = null;
+		try {
+			over = action?.type === 'replace' ? typeOver(view, action.cell, !accent) : null;
+		} catch (error) {
+			// Whatever failed, the key, or an input method's composition, mustn't start on the selected table.
+			over = 'later';
+			console.error(error);
+		}
+		if (over === 'later') {
+			event.preventDefault();
+			letKeyboardGo(view);
+			if (accent) handOver(view, event.code);
+		} else if (!over) run(view, typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells }));
 		return false;
 	},
 	beforeinput(event, view) {
 		const typed = event.inputType === 'insertText' || event.inputType === 'insertReplacementText';
-		if (typed && event.data && typesBelow(view) && run(view, typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells }))) {
-			view.dispatch({ ...view.state.replaceSelection(event.data), scrollIntoView: true, userEvent: 'input.type' });
-			return true;
+		if (typed && event.data && typesBelow(view)) {
+			const action = typeOn(context(view));
+			const over = action?.type === 'replace' ? typeOver(view, action.cell) : null;
+			const cell = over === 'now' ? openCells.get(view)?.view : null;
+			if (cell) cell.dispatch({ ...cell.state.replaceSelection(event.data), scrollIntoView: true, userEvent: 'input.type' });
+			if (over) return true;
+			if (run(view, typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells }))) {
+				view.dispatch({ ...view.state.replaceSelection(event.data), scrollIntoView: true, userEvent: 'input.type' });
+				return true;
+			}
 		}
 		if (cellSelected(view.state)) return event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo';
 		return typed && selectedTables.has(view.state);

@@ -5,7 +5,7 @@ import { cellSelection, TABLE_CLASS } from './cells';
 import { boundsOf, selectedTable, writesTable } from './decide';
 import { escapeCell, noteView, wholeTable } from './extension';
 import { canFreeze } from './freeze';
-import { hasMark, MAX_FROZEN_COLUMNS, readFreeze } from './freeze-mark';
+import { defaultFreeze, freezeOf, hasMark, MAX_FROZEN_COLUMNS } from './freeze-mark';
 import { FreezeCommand, freezeAt, freezeChanges } from './freeze-write';
 import { openCells, ownTables, viewLayout } from './layout';
 import type { Cell, Span } from './table-text';
@@ -93,9 +93,12 @@ function pins(view: EditorView): boolean {
 	return own?.spans(view.state) ? own.pins(view) : canFreeze();
 }
 
-/** Whether a command does anything on a table: Unfreeze needs a mark. */
+/** Whether a command does anything on a table: Unfreeze needs a mark, or a table the default freezes (BMT-140). */
 function offered(command: FreezeCommand, view: EditorView, table: Span): boolean {
-	return command !== 'none' || hasMark(view.state.doc.lineAt(table.from).text);
+	if (command !== 'none') return true;
+	const header = view.state.doc.lineAt(table.from).text;
+	const { rows, columns } = freezeOf(header);
+	return hasMark(header) || rows > 0 || columns > 0;
 }
 
 /**
@@ -109,9 +112,12 @@ function run(view: EditorView, command: FreezeCommand) {
 	const target = found?.open ? targetIn(view) : found;
 	if (!target) return;
 	const { table, cell } = target;
-	const { freeze, clamped } = freezeAt(command, readFreeze(view.state.doc.lineAt(table.from).text), cell);
+	// From what the table shows: its own mark, or the default for a table with none, so a command on a table the default
+	// freezes writes a mark of its own, which keeps that freeze when the default changes. Unfreeze, while a default freezes
+	// tables with no mark, writes `%%freeze 0 0%%`, which keeps the table unfrozen; with none, it takes the mark out.
+	const { freeze, clamped } = freezeAt(command, freezeOf(view.state.doc.lineAt(table.from).text), cell);
 	if (clamped) new Notice(`A table can freeze up to ${MAX_FROZEN_COLUMNS} columns.`);
-	const written = freezeChanges(view.state.doc, table, freeze);
+	const written = freezeChanges(view.state.doc, table, freeze, command === 'none' && defaultFreeze() !== null);
 	if (!written) {
 		new Notice('This table\'s header row can\'t take the freeze mark where it is. Edit the mark by hand.');
 		return;

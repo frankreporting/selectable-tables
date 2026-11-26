@@ -492,6 +492,10 @@ export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, '
 			lookChanged();
 			for (const editor of editors) editor.resize(editor.view, true);
 		},
+		/** The setting *Freeze tables* changed: every table reads its freeze again, and pins what it now freezes (BMT-140). */
+		freezeChanged() {
+			for (const editor of editors) for (const model of editor.view.state.field(tables, false)?.models ?? []) model.refresh();
+		},
 		/** For the check script: an editor's tables, every table found from scratch, and where each parser puts tables. */
 		debug: {
 			models: (view: EditorView) => view.state.field(tables, false)?.models ?? [],

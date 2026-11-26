@@ -2630,7 +2630,8 @@
 		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks, with
 		// window.__checkRangeMenusOnly instead, only the section on a range's right-click menu and the grips' clicks, and with
 		// window.__checkTypingOnly instead, only the section on typing over a selected cell, with window.__checkLinksOnly instead,
-		// only the section on following links from a cell. With window.__checkEarlierOnly
+		// only the section on following links from a cell, with window.__checkDefaultFreezeOnly instead, only the section on
+		// freezing tables by default. With window.__checkEarlierOnly
 		// instead of __checkCellsOnly, only the sections before the cells'. With
 		// window.__checkFallbackOnly instead, only the last section: Obsidian's own tables where the plugin's doesn't draw.
 		// The note texts are put back as they were, and so is the plugin's table.
@@ -3784,7 +3785,7 @@
 				// window.__checkEarlierOnly, with __checkOwnOnly, runs only the sections before the cells'.
 				if (window.__checkEarlierOnly) break ownSections;
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly && !window.__checkTypingOnly && !window.__checkLinksOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly && !window.__checkTypingOnly && !window.__checkLinksOnly && !window.__checkDefaultFreezeOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -10787,6 +10788,176 @@
 						window.open = realWindowOpen;
 						document.removeEventListener('open-link', hearEvent, true);
 						await closeMenus();
+						preview.setClickSelects(false);
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				// --- Freeze tables by default (BMT-140): the settings tab's Freeze tables, read and set through the tab's own
+				// definitions and controls, since Obsidian 1.15 opens Settings in a popout window. A table with no mark of its own
+				// freezes the default; its own mark wins, %%freeze 0 0%% included; Unfreeze and Freeze rows up to here on a table the
+				// default freezes write a mark of its own. Alone with window.__checkOwnOnly, __checkCellsOnly and
+				// __checkDefaultFreezeOnly all true.
+				if (!window.__checkCellsOnly || window.__checkDefaultFreezeOnly) {
+					preview.use(true);
+					preview.setClickSelects(true);
+					await sleep(400);
+					const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+					const FREEZE_KEYS = ['freezeTables', 'freezeRows', 'freezeColumns'];
+					const settingsBefore = Object.fromEntries(FREEZE_KEYS.map((key) => [key, tab?.getControlValue?.(key)]));
+					const setTo = async (key, value) => {
+						await tab?.setControlValue?.(key, value);
+						await sleep(300);
+						await frames(3);
+					};
+					const tableUnder = (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						return models(view).find((model) => model.from > at) ?? null;
+					};
+					// The note scrolled to a heading, or the first table, so the table under it is found and drawn: the parser reads
+					// only so far past the screen.
+					const scrollUnder = async (view, heading) => {
+						for (let i = 0; i < 4; i++) {
+							const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : (tableUnder(view, null)?.from ?? 0);
+							view.dispatch({ effects: view.constructor.scrollIntoView(Math.max(0, at), { y: 'start' }) });
+							await sleep(250);
+							await frames(3);
+						}
+					};
+					// What a table freezes, read once it's drawn: a table out of the page reads its freeze as it comes back.
+					const frozenAt = async (view, heading) => {
+						await scrollUnder(view, heading);
+						const model = tableUnder(view, heading);
+						return model ? `${model.pins.frozen.rows} ${model.pins.frozen.columns}` : null;
+					};
+					const headerAt = (view, heading) => {
+						const model = tableUnder(view, heading);
+						return model ? view.state.doc.lineAt(model.from).text : '';
+					};
+					// A click on a cell, which selects it.
+					const selectCell = async (view, heading, cell) => {
+						await scrollUnder(view, heading);
+						const model = tableUnder(view, heading);
+						model?.showCell(cell);
+						await sleep(300);
+						await frames(2);
+						const r = model?.cellElement(cell)?.getBoundingClientRect();
+						if (!r) return null;
+						const x = r.left + r.width / 2;
+						const y = r.top + r.height / 2;
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+						await sleep(350);
+						const selected = preview.cells(view)?.selected;
+						return selected ? `${selected.row},${selected.column}` : null;
+					};
+					const command = async (id) => {
+						const ran = app.commands.executeCommandById(`selectable-tables:${id}`);
+						await sleep(400);
+						await frames(3);
+						return ran;
+					};
+					// Cmd+Z, a real key through the window's debugger, with the note's keyboard.
+					const undo = async () => {
+						const event = { key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: 4, unmodifiedText: 'z', text: '' };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await sleep(400);
+						await frames(3);
+					};
+					const textBefore = {};
+					try {
+						// Own 202: the settings, off.
+						await setTo('freezeTables', false);
+						const definitions = tab?.getSettingDefinitions?.() ?? [];
+						const byKey = Object.fromEntries(definitions.map((each) => [each.control?.key, each]));
+						const shows = (key) => {
+							const visible = byKey[key]?.visible;
+							return typeof visible === 'function' ? visible() : visible !== false;
+						};
+						const counts = (key) => Object.keys(byKey[key]?.control?.options ?? {}).join('');
+						const offSetting = {
+							toggle: byKey.freezeTables?.name === 'Freeze tables' && byKey.freezeTables.control.type === 'toggle',
+							desc: byKey.freezeTables?.desc,
+							on: tab?.getControlValue('freezeTables'),
+							rows: [byKey.freezeRows?.name, byKey.freezeRows?.control?.type, counts('freezeRows'), shows('freezeRows')],
+							columns: [byKey.freezeColumns?.name, byKey.freezeColumns?.control?.type, counts('freezeColumns'), shows('freezeColumns')],
+						};
+						check('Own 202: the settings tab holds Freeze tables, a toggle, off, with its description, and Freeze rows and Freeze columns, 0 to 9, hidden while it\'s off', offSetting.toggle && offSetting.desc === 'Keeps the first rows and columns of every table in view as you scroll, unless the table has a freeze of its own.' && offSetting.on === false && offSetting.rows.join() === 'Freeze rows,dropdown,0123456789,false' && offSetting.columns.join() === 'Freeze columns,dropdown,0123456789,false', offSetting);
+
+						// Own 203: turned on with Frozen tables open: Sheds, with no mark, freezes 1 and 1; Plants and Tools keep their own.
+						let view = await open('Frozen tables');
+						await sleep(400);
+						textBefore.frozen = view.state.doc.toString();
+						const shedsOff = await frozenAt(view, 'Sheds');
+						await setTo('freezeTables', true);
+						const on = { shedsOff, rows: tab?.getControlValue('freezeRows'), columns: tab?.getControlValue('freezeColumns'), shown: [shows('freezeRows'), shows('freezeColumns')], sheds: await frozenAt(view, 'Sheds'), plants: await frozenAt(view, 'Plants'), tools: await frozenAt(view, 'Tools') };
+						check('Own 203: turned on, Freeze rows and Freeze columns show at 1 and 1, and with Frozen tables open Sheds, which has no mark, freezes 1 and 1 at once, while Plants and Tools keep their own', shedsOff === '0 0' && on.rows === '1' && on.columns === '1' && on.shown.join() === 'true,true' && on.sheds === '1 1' && on.plants === '2 1' && on.tools === '1 2', on);
+
+						// Own 204: Table 2000 by 12, with no mark, freezes 1 and 1, and its header pins as the note scrolls down into it.
+						view = await open('Table 2000 by 12');
+						await sleep(500);
+						textBefore.big = view.state.doc.toString();
+						const bigFrozen = await frozenAt(view, null);
+						const big = tableUnder(view, null);
+						view.scrollDOM.scrollTop += 3000;
+						await sleep(400);
+						await frames(6);
+						const pinsRows = !!big?.pins.pinned.rows;
+						check('Own 204: Table 2000 by 12, with no mark of its own, freezes 1 and 1, and its header row pins as the note scrolls into it', bigFrozen === '1 1' && pinsRows, { bigFrozen, pinsRows });
+
+						// Own 205: Freeze rows set to 2 with it open: it freezes 2 rows at once.
+						await setTo('freezeRows', '2');
+						const two = await frozenAt(view, null);
+						check('Own 205: Freeze rows set to 2 with Table 2000 by 12 open freezes its header and first row at once', two === '2 1', two);
+
+						// Own 206: Unfreeze table on it writes %%freeze 0 0%%, so it stays unfrozen; Undo takes it back.
+						const atOne = await selectCell(view, null, { row: 1, column: 0 });
+						const unfroze = await command('unfreeze-table');
+						const unfrozen = { atOne, unfroze, header: headerAt(view, null).slice(0, 24), frozen: await frozenAt(view, null) };
+						await undo();
+						unfrozen.undone = { mark: headerAt(view, null).includes('%%freeze'), frozen: await frozenAt(view, null) };
+						check('Own 206: Unfreeze table on a table the default freezes writes %%freeze 0 0%%, which keeps it unfrozen, and Undo takes it back', atOne === '1,0' && unfroze !== false && unfrozen.header.includes('%%freeze 0 0%%') && unfrozen.frozen === '0 0' && !unfrozen.undone.mark && unfrozen.undone.frozen === '2 1', unfrozen);
+
+						// Own 207: Freeze rows up to here from row 3 writes a mark of its own, 4 rows and the default's 1 column, which
+						// keeps it when the default changes.
+						const atThree = await selectCell(view, null, { row: 3, column: 0 });
+						await command('freeze-rows');
+						const own = { atThree, header: headerAt(view, null).slice(0, 24), frozen: await frozenAt(view, null) };
+						await setTo('freezeColumns', '3');
+						own.afterDefault = await frozenAt(view, null);
+						await undo();
+						own.undone = { mark: headerAt(view, null).includes('%%freeze'), frozen: await frozenAt(view, null) };
+						check('Own 207: Freeze rows up to here on a table the default freezes writes a mark of its own, which keeps its freeze when the default changes, and Undo takes it back to the default', atThree === '3,0' && own.header.includes('%%freeze 4 1%%') && own.frozen === '4 1' && own.afterDefault === '4 1' && !own.undone.mark && own.undone.frozen === '2 3', own);
+
+						// Own 208: turned off, Table 2000 by 12 stops pinning, Plants keeps its own, and Unfreeze table there takes its mark
+						// out, as before.
+						await setTo('freezeTables', false);
+						const off = { big: await frozenAt(view, null) };
+						view = await open('Frozen tables');
+						await sleep(400);
+						off.plants = await frozenAt(view, 'Plants');
+						off.sheds = await frozenAt(view, 'Sheds');
+						off.at = await selectCell(view, 'Plants', { row: 3, column: 1 });
+						await command('unfreeze-table');
+						off.header = headerAt(view, 'Plants').slice(0, 24);
+						off.unfrozen = await frozenAt(view, 'Plants');
+						await undo();
+						off.undone = await frozenAt(view, 'Plants');
+						check('Own 208: turned off, Table 2000 by 12 freezes nothing, Plants keeps its own freeze, and Unfreeze table on Plants takes its mark out, as before, and Undo puts it back', off.big === '0 0' && off.plants === '2 1' && off.sheds === '0 0' && off.at === '3,1' && !off.header.includes('%%freeze') && off.unfrozen === '0 0' && off.undone === '2 1', off);
+
+						// Own 209: nothing crashed, the drawing matches the text, and both notes are as they were.
+						const frozenView = view;
+						const bigText = (await app.vault.read(app.vault.getAbstractFileByPath('Table 2000 by 12.md')));
+						check('Own 209: nothing crashed, the drawing matches the text, and Frozen tables and Table 2000 by 12 are as they were', crashed(frozenView) === 0 && rowsRight(frozenView).length === 0 && frozenView.state.doc.toString() === textBefore.frozen && bigText === textBefore.big, { crashed: crashed(frozenView), rows: rowsRight(frozenView).slice(0, 5), frozen: frozenView.state.doc.toString() === textBefore.frozen, big: bigText === textBefore.big });
+					} finally {
+						// The settings as they were, the switch first, since turning it on sets 1 and 1.
+						for (const key of FREEZE_KEYS) if (tab && settingsBefore[key] !== undefined && tab.getControlValue(key) !== settingsBefore[key]) await tab.setControlValue(key, settingsBefore[key]);
+						for (const [name, key] of [['Frozen tables.md', 'frozen'], ['Table 2000 by 12.md', 'big']]) {
+							const file = app.vault.getAbstractFileByPath(name);
+							if (file && textBefore[key] !== undefined && (await app.vault.read(file)) !== textBefore[key]) await app.vault.modify(file, textBefore[key]);
+						}
 						preview.setClickSelects(false);
 						preview.use(false);
 						await sleep(300);

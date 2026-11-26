@@ -137,7 +137,9 @@ const SETUP = `(async () => {
 	const hook = plugin?.debug ?? plugin?.preview;
 	if (hook) {
 		const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
-		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn(), addsRows: tab?.getControlValue?.('addsRows') };
+		// Every setting on the plugin's tab, in its order, so the run can put back what a check changed.
+		const tabKeys = (tab?.getSettingDefinitions?.() ?? []).map((each) => each.control?.key).filter(Boolean);
+		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn(), tab: tabKeys.map((key) => [key, tab.getControlValue(key)]) };
 		if (!saved.settings.clickSelects) out.warnings.push('a click opens a cell: an earlier run left it so');
 	}
 	// Obsidian draws its own menus for the run, inside the window: a Mac's own menus show on the screen even with the
@@ -206,7 +208,7 @@ const RESTORE = `(async () => {
 	}
 	// The plugin as it was: a click selecting a cell, which the checks turn off to check a click opening one, and whether
 	// the plugin draws tables, which the checks leave to Obsidian as they end. A build from before BMT-137 has a settings tab
-	// for the click, put back through it, so its saved file agrees. And Tab and Enter add a row (BMT-138) through its tab.
+	// for the click, put back through it, so its saved file agrees. And every setting on the tab through it (BMT-138, BMT-140).
 	const plugin = app.plugins.plugins['selectable-tables'];
 	const hook = plugin?.debug ?? plugin?.preview;
 	if (saved?.settings && hook) {
@@ -220,9 +222,11 @@ const RESTORE = `(async () => {
 			app.workspace.updateOptions();
 		}
 		if (differed) done.push('the click setting');
-		if (keys.includes('addsRows') && saved.settings.addsRows !== undefined && tab.getControlValue('addsRows') !== saved.settings.addsRows) {
-			await tab.setControlValue('addsRows', saved.settings.addsRows);
-			done.push('Tab and Enter add a row');
+		// The tab's settings in its order: Freeze tables before its rows and columns, since turning it on sets them to 1.
+		for (const [key, value] of saved.settings.tab ?? []) {
+			if (key === 'clickSelects' || tab?.getControlValue?.(key) === value) continue;
+			await tab.setControlValue(key, value);
+			done.push('the setting ' + key);
 		}
 		if (hook.isOn() !== saved.settings.drawing) {
 			hook.use(saved.settings.drawing);

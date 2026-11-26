@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view';
 import { CELL_CLASS, HOLDS_CELL_CLASS } from '../editor/cells';
 import type { Bounds } from '../editor/decide';
 import { canFreeze } from '../editor/freeze';
-import { type Freeze, readFreeze } from '../editor/freeze-mark';
+import { type Freeze, freezeOf } from '../editor/freeze-mark';
 import type { Cell } from '../editor/table-text';
 import { type Paint, readPaint } from '../editor/theme-paint';
 import { usesBars } from './bar';
@@ -387,7 +387,8 @@ export class Pins {
 	}
 
 	/**
-	 * Reads the mark from the header line, and renders the frozen rows again for the copies if their text changed.
+	 * Reads the mark from the header line, or the default for a table with none (`freezeOf`), and renders the frozen rows
+	 * again for the copies if their text changed.
 	 * Runs on each refresh of the table, which follows any change to its text: a few lines compared.
 	 */
 	refresh(): void {
@@ -395,7 +396,7 @@ export class Pins {
 		const view = host.view;
 		if (!view) return;
 		const [header = ''] = host.lines(0);
-		const freeze = this.able(view) ? frozenIn(readFreeze(header), host.count + 1, host.columns) : NONE;
+		const freeze = this.able(view) ? frozenIn(freezeOf(header), host.count + 1, host.columns) : NONE;
 		if (freeze.rows !== this.freeze.rows || freeze.columns !== this.freeze.columns) {
 			this.freeze = freeze;
 			this.fit = { rows: false, columns: false };

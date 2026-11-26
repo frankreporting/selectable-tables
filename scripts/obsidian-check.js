@@ -10606,7 +10606,7 @@
 						await key('Enter');
 						await sleep(200);
 						const picked = after('picked Cell moves');
-						check('Own 192: picking Cell moves from the menu opens it, and nothing else', JSON.stringify(picked.opened) === JSON.stringify([['note', 'Cell moves', 'Links in cells.md', false]]) && !picked.menus.length && picked.text, picked);
+						check('Own 192: picking Cell moves from the menu with the arrows and Enter opens it, and nothing else: no cell opens, and Balcony\'s link cell stays selected', JSON.stringify(picked.opened) === JSON.stringify([['note', 'Cell moves', 'Links in cells.md', false]]) && !picked.menus.length && picked.text && !picked.open && picked.selected === '3,0', picked);
 
 						// Step 5: a web link, and a menu with a note and a web address.
 						await selectPlant(2);
@@ -10684,11 +10684,18 @@
 						view = await open('Frozen table 2000 by 12');
 						await sleep(800);
 						const frozen = models(view)[0];
+						// Back at its start sideways: earlier checks may have slid it.
+						frozen.scrollSideways(-frozen.sideways().scroll);
 						frozen.showCell({ row: 1000, column: 0 });
 						await sleep(800);
 						await frames(4);
 						const pinnedRow1 = frozen.drawnCell({ row: 1, column: 1 });
-						if (pinnedRow1) await pointAt(middle(pinnedRow1, -6));
+						// Past the cell's link, on its plain word, and inside the pane: the column runs wider than the pane.
+						if (pinnedRow1) {
+							const r = pinnedRow1.getBoundingClientRect();
+							const paneRight = view.scrollDOM.getBoundingClientRect().right - 20;
+							await pointAt({ x: Math.min(r.right - 6, paneRight, r.left + 260), y: r.top + r.height / 2 });
+						}
 						const deepSelected = selectedNow(view);
 						opened.length = 0;
 						const start = performance.now();

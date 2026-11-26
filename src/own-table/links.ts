@@ -62,6 +62,13 @@ function followSelected(app: App, view: EditorView, pane: PaneType | false): boo
 	}
 	const menu = new Menu();
 	for (const link of links) menu.addItem((item) => item.setTitle(menuTitle(link.href)).onClick(() => open(app, link, path, pane)));
+	// While the menu shows, keys are its own. Obsidian's keymap has them first, in the window's capture phase, but they'd go
+	// on to the note, where Escape would leave the cell and Enter open it. This stops them after the keymap. It goes a moment
+	// after the menu closes, so the key that closed it is stopped too.
+	const win = view.dom.ownerDocument.defaultView ?? window;
+	const keep = (event: KeyboardEvent) => event.stopPropagation();
+	win.addEventListener('keydown', keep, true);
+	menu.onHide(() => win.setTimeout(() => win.removeEventListener('keydown', keep, true), 0));
 	const rect = cell.getBoundingClientRect();
 	menu.showAtPosition({ x: rect.left, y: rect.bottom }, view.dom.ownerDocument);
 	return true;

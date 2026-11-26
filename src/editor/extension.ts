@@ -426,7 +426,14 @@ const selectedEvents = EditorView.domEventHandlers({
 	keydown(event, view) {
 		if (event.defaultPrevented || event.isComposing || !typesText(event, APPLE) || !typesBelow(view)) return false;
 		const action = typeOn(context(view));
-		const over = action?.type === 'replace' ? typeOver(view, action.cell) : null;
+		let over: ReturnType<typeof typeOver> = null;
+		try {
+			over = action?.type === 'replace' ? typeOver(view, action.cell) : null;
+		} catch (error) {
+			// Whatever failed, the key, or an input method's composition, mustn't start on the selected table.
+			over = 'later';
+			console.error(error);
+		}
 		if (over === 'later') {
 			event.preventDefault();
 			view.contentDOM.blur();

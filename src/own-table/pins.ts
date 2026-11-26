@@ -726,8 +726,8 @@ export class Pins {
 			// rests at the table's top. A key typed on a selected cell opens it in its own keydown, and the browser's own scroll
 			// to the caret it types, in that same task, took the note up there. The same move, set inline, holds until the
 			// animation runs over it.
-			const scroll = this.host.view?.scrollDOM.scrollTop;
-			if (!tr.hasClass(CARRIED_CLASS) && scroll !== undefined) setStyle(tr, 'transform', `translateY(${px(Math.max(0, Math.min(range.to - range.from, scroll - range.from)))})`);
+			const scroll = tr.hasClass(CARRIED_CLASS) ? undefined : this.host.view?.scrollDOM.scrollTop;
+			if (scroll !== undefined) setStyle(tr, 'transform', `translateY(${px(Math.max(0, Math.min(range.to - range.from, scroll - range.from)))})`);
 			tr.addClass(CARRIED_CLASS);
 		}
 		const first = this.host.pinBlocks[0];

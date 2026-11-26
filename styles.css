@@ -469,12 +469,14 @@ body {
 /*
  * The blocks inside don't scroll, are as wide as their table, and drop the box's sizes. Obsidian sets a table box's side
  * margins with !important, as a reach of `--size-4-4` into the note's margins, so a block sets that size to nothing for
- * itself and passes the box's own on to what it holds. Minimal sets them with !important from a size of its own, which
+ * itself and passes the box's own on to what it holds, and takes the drag handles' size, which Obsidian sets from the
+ * same size, from the box. Minimal sets them with !important from a size of its own, which
  * the blocks set to nothing too (Brian, 11/25). Any other theme that sets them with !important has to leave the
  * plugin's blocks out.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks {
 	--selectable-tables-size-4-4: var(--size-4-4);
+	--selectable-tables-drag-size: var(--table-drag-handle-size);
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own > * {
@@ -483,6 +485,9 @@ body {
 
 .markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own {
 	--size-4-4: 0px;
+
+	/* Obsidian sets the drag handles' size from that size too, on the block itself: it keeps the box's. */
+	--table-drag-handle-size: var(--selectable-tables-drag-size);
 
 	/* Minimal sets the margins with !important from this, for its line width: the same way round it. */
 	--container-table-margin: 0;

@@ -137,7 +137,7 @@ const SETUP = `(async () => {
 	const hook = plugin?.debug ?? plugin?.preview;
 	if (hook) {
 		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn() };
-		if (((await plugin.loadData())?.clickSelects ?? true) !== saved.settings.clickSelects) out.warnings.push('Click to select a cell is ' + (saved.settings.clickSelects ? 'on' : 'off') + ' but saved the other way');
+		if (!saved.settings.clickSelects) out.warnings.push('a click opens a cell: an earlier run left it so');
 	}
 	// Obsidian draws its own menus for the run, inside the window: a Mac's own menus show on the screen even with the
 	// window minimized, where Brian can click them by accident (11/25). Unsaved, and put back afterwards.
@@ -203,16 +203,20 @@ const RESTORE = `(async () => {
 		await app.workspace.changeLayout(saved.layout);
 		done.push('panes');
 	}
-	// The plugin's settings, as they were: the click setting through its tab, as its toggle sets it, so the plugin's own
-	// copy, the saved file and the flag all agree (a check that changed it left the plugin's copy off, 11/25); and whether
-	// the plugin draws tables, which the checks leave to Obsidian as they end.
+	// The plugin as it was: a click selecting a cell, which the checks turn off to check a click opening one, and whether
+	// the plugin draws tables, which the checks leave to Obsidian as they end. A build from before BMT-137 also has a
+	// settings tab for the click, put back through it, so its saved file agrees.
 	const plugin = app.plugins.plugins['selectable-tables'];
 	const hook = plugin?.debug ?? plugin?.preview;
 	if (saved?.settings && hook) {
 		const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
 		const want = saved.settings.clickSelects;
-		const differed = hook.clickSelects() !== want || ((await plugin.loadData())?.clickSelects ?? true) !== want;
+		const differed = hook.clickSelects() !== want;
 		if (tab?.setControlValue) await tab.setControlValue('clickSelects', want);
+		else if (differed) {
+			hook.setClickSelects(want);
+			app.workspace.updateOptions();
+		}
 		if (differed) done.push('the click setting');
 		if (hook.isOn() !== saved.settings.drawing) {
 			hook.use(saved.settings.drawing);

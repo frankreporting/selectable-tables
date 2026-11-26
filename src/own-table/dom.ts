@@ -1,5 +1,9 @@
-/** Obsidian's DOM helpers, which it puts on every window it opens. */
-export type DomHelpers = Pick<typeof globalThis, 'createEl' | 'createDiv' | 'createSpan'>;
+/** Obsidian's DOM helpers, which it puts on every window it opens, typed by the global ones it declares. */
+export interface DomHelpers {
+	createEl: typeof createEl;
+	createDiv: typeof createDiv;
+	createSpan: typeof createSpan;
+}
 
 /**
  * The DOM helpers of the window a node or a document belongs to, so an element is made in that window's document, a

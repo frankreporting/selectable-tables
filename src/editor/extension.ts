@@ -207,6 +207,16 @@ function typeOver(view: EditorView, cell: Cell, focus = true): 'now' | 'later' |
 }
 
 /**
+ * The note lets the keyboard go, so what a key or an input method sends lands nowhere: not focused, and with no selection
+ * left in the page, since text an input method commits with nothing focused still goes in at the page's selection, which
+ * a blur leaves in the note.
+ */
+function letKeyboardGo(view: EditorView): void {
+	view.contentDOM.blur();
+	view.dom.ownerDocument.getSelection()?.removeAllRanges();
+}
+
+/**
  * Gives the note's open cell the keyboard once the key with `code` comes up, or after a moment without its keyup: an accent
  * key's or an input method's first key is over by then, macOS has dropped what it started with nowhere to put it, and the
  * cell's editor starts with no composition. A cell whose row wasn't drawn opens a frame or two later, so it's waited for.
@@ -459,6 +469,12 @@ const selectedEvents = EditorView.domEventHandlers({
 		// An accent key or an input method's first key opens the cell and is lost: the cell's editor takes the keyboard once
 		// that key is over (`composes`).
 		const accent = composes(event);
+		if (accent && action?.type === 'replace') {
+			// The note lets the keyboard go before the cell opens: holding it, the note would draw the caret the cell gives it,
+			// read it back outside the cell, and close the cell.
+			event.preventDefault();
+			letKeyboardGo(view);
+		}
 		let over: ReturnType<typeof typeOver> = null;
 		try {
 			over = action?.type === 'replace' ? typeOver(view, action.cell, !accent) : null;
@@ -469,7 +485,7 @@ const selectedEvents = EditorView.domEventHandlers({
 		}
 		if (over === 'later') {
 			event.preventDefault();
-			view.contentDOM.blur();
+			letKeyboardGo(view);
 			if (accent) handOver(view, event.code);
 		} else if (!over) run(view, typeBelow({ state: view.state, layout: viewLayout(view), cells: noCells }));
 		return false;

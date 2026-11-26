@@ -5,6 +5,8 @@ paths:
   - "src/own-table/cell-write.ts"
   - "src/own-table/formatting.ts"
   - "src/own-table/format-cells.ts"
+  - "src/own-table/links.ts"
+  - "src/own-table/cell-links.ts"
   - "src/own-table/table-edits.ts"
   - "src/editor/table-text.ts"
   - "src/editor/extension.ts"
@@ -42,3 +44,10 @@ Moved here from `CLAUDE.md` on 2026-11-26. This file loads by itself when a sess
 - **Anywhere else,** Obsidian's own method runs: on Obsidian's table, in text, on a table selected whole (STA-6). Commands that change lines, such as Toggle checkbox and lists, are untouched, so the guard still stops them on a selected cell.
 - **Where it differs from Obsidian's table:** a table Obsidian wrote is padded again, as an open cell pads it; Obsidian's range leaves the padding as it was.
 - **How the check script notices:** *Own 146* to *Own 156*: what it relies on, the test plan's steps on *Seeds*, *Plants* and *Spaced by hand*, three sequences of commands on ranges against Obsidian's own range with the switch off, the line commands staying quiet, Bold on 1,999 cells of *Table 2000 by 12*, timed, 40 seeded random steps, and Cmd+B on Obsidian's table with the switch off. `window.__checkFormattingOnly`, with `__checkOwnOnly` and `__checkCellsOnly`, runs only them. *Own 39* and *Own 115* now check that Toggle comment and Bold act on a selected cell and a range.
+
+**Following links (BMT-59).** Obsidian's four link commands on the plugin's table, in `links.ts`, answering the `open-link` event they send (item 19 above), as Bases does, on the note's content in the capture phase:
+
+- **A selected cell:** the event's target is the note's content. Its links are read where the cell is drawn on top (`drawnCell` on the model: a pinned copy where it pins, else its own), `a.internal-link` and `a.external-link`, not inside an embed (`pickLinks` in `cell-links.ts`), with `data-href`, then `href`. One opens at once, a note's through `app.workspace.openLinkText` with the note's path and the event's pane, a web address through `window.open`; several show a `Menu` right below the cell, each item its address cut to 100 characters (`menuTitle`), as in Bases. None, a range of cells, a table selected whole, or a cell whose row isn't in the page: the event is left alone, so nothing happens. The note's text, the selected cell and the open cell are untouched.
+- **An open cell:** the event's target is in the cell's editor. The cell's own `Editor` (*Editing a cell*'s piece 6) finds the link at its caret with `getClickableTokenAt(getCursor())`, reading the cell's own tree, and the note's `MarkdownView.editMode.triggerClickableToken(token, paneType)` opens it, as Obsidian's command does in its own cell. Both private, checked before use: without them, or in the plain editor, nothing happens.
+- **The keys stay Obsidian's:** the commands run from Obsidian's hotkeys, so changed hotkeys work. The plugin binds plain Enter only, so Option+Enter neither opens the cell nor types over it.
+- **How the check script notices:** *Own 186* to *Own 200*, the test plan's steps in *Links in cells* with real keys through the window's debugger, Obsidian drawing its menus, and spies on `openLinkText` and `window.open` that record every open instead of making it: the event's target and pane, Fern in each of the four panes, Balcony's menu under the cell, Escape and a pick, Mint and Porch's web links, nothing on Basil, a tag, a picture, the table selected whole and a range, Yard, Fern's open cell, Beds' pinned header, a pinned cell deep in *Frozen table 2000 by 12*, timed, and Obsidian's own open cell with its tables left to Obsidian. `window.__checkLinksOnly`, with `__checkOwnOnly` and `__checkCellsOnly`, runs only them.

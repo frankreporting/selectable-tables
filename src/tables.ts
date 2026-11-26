@@ -11,6 +11,7 @@ import { clickCell, clickSelectsCells, pressCell, selectEvery, setClickSelects }
 import { setTableControls } from './own-table/grips';
 import { formattingOnCells, giveBackAll, HIGHLIGHTS, swatchIcon } from './own-table/formatting';
 import { rangeItems } from './own-table/range-menu';
+import { followLinks } from './own-table/links';
 
 /** Set on the body by the plugin's stylesheet, styles.css. */
 const STYLED = '--selectable-tables-styled';
@@ -111,6 +112,8 @@ export async function drawTables(plugin: Plugin, extensions: Extension[]): Promi
 	let given = false;
 
 	const keys = selectableTables({ frozen: false });
+	// Obsidian's link commands on a selected cell or an open one (links.ts).
+	const links = followLinks(app);
 	const own = ownTables(
 		app,
 		() => {
@@ -161,7 +164,7 @@ export async function drawTables(plugin: Plugin, extensions: Extension[]): Promi
 		on = drawing;
 		extensions.length = 0;
 		// The freeze items in a table's right-click menu stay, on the plugin's table's cells and its pinned copies.
-		if (drawing) extensions.push(own.extension, keys, tableMenus, formattingOnCells);
+		if (drawing) extensions.push(own.extension, keys, tableMenus, formattingOnCells, links);
 		app.workspace.updateOptions();
 	};
 

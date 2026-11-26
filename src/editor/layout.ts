@@ -37,6 +37,11 @@ export interface DrawnTable {
 	showCell(cell: Cell, toward?: 'up' | 'left'): void;
 	/** Forgets a cell it was about to bring into view: a drag across cells scrolls the note itself. */
 	holdStill(): void;
+	/**
+	 * A cell's element where it's drawn on top, if its row is drawn: a pinned copy where the cell pins, else its own. What
+	 * a link command reads the cell's links from, and puts its menu under.
+	 */
+	drawnCell(cell: Cell): HTMLElement | null;
 	/** Opens a cell for editing, with the caret at the end of its text. */
 	openCell(cell: Cell): void;
 	/**

@@ -2629,7 +2629,8 @@
 		// window.__checkFormattingOnly instead, only the section on formatting its cells, with
 		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks, with
 		// window.__checkRangeMenusOnly instead, only the section on a range's right-click menu and the grips' clicks, and with
-		// window.__checkTypingOnly instead, only the section on typing over a selected cell. With window.__checkEarlierOnly
+		// window.__checkTypingOnly instead, only the section on typing over a selected cell, with window.__checkLinksOnly instead,
+		// only the section on following links from a cell. With window.__checkEarlierOnly
 		// instead of __checkCellsOnly, only the sections before the cells'. With
 		// window.__checkFallbackOnly instead, only the last section: Obsidian's own tables where the plugin's doesn't draw.
 		// The note texts are put back as they were, and so is the plugin's table.
@@ -3783,7 +3784,7 @@
 				// window.__checkEarlierOnly, with __checkOwnOnly, runs only the sections before the cells'.
 				if (window.__checkEarlierOnly) break ownSections;
 
-				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly && !window.__checkTypingOnly) {
+				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly && !window.__checkTypingOnly && !window.__checkLinksOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
 					// borrowed, and every change goes to the note as Obsidian's own cell writes it. Real keys and presses, through
 					// the window's debugger, since the cell's editor is Obsidian's. Run alone with window.__checkCellsOnly = true.
@@ -10473,6 +10474,269 @@
 							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
 						}
 						if (((await plugin.loadData())?.clickSelects ?? true) !== (savedBefore?.clickSelects ?? true)) await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
+						preview.setClickSelects(false);
+						preview.use(false);
+						await sleep(300);
+					}
+				}
+				if ((!window.__checkCellsOnly || window.__checkLinksOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly && !window.__checkTypingOnly) {
+					// --- Following links (BMT-59): Obsidian's four link commands on a selected cell of the plugin's table, and in an
+					// open one, through their default hotkeys as real keys through the window's debugger, in Links in cells. Every
+					// open is recorded by spies on app.workspace.openLinkText and window.open, so no tab, split, window or browser
+					// opens. Obsidian draws its menus. Run alone with window.__checkOwnOnly, __checkCellsOnly and __checkLinksOnly
+					// all true.
+					preview.use(true);
+					preview.setClickSelects(true);
+					await sleep(400);
+					const codes = { Escape: 27, Enter: 13, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36 };
+					const key = async (name, { alt, ctrl, meta, shift } = {}) => {
+						const modifiers = (alt ? 1 : 0) | (ctrl ? 2 : 0) | (meta ? 4 : 0) | (shift ? 8 : 0);
+						const code = codes[name] ?? name.toUpperCase().charCodeAt(0);
+						const event = { key: name, code: name, windowsVirtualKeyCode: code, modifiers, unmodifiedText: macChar(name), text: '' };
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown' });
+						await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+						await settle();
+					};
+					const pointAt = async ({ x, y }) => {
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+						await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+						await sleep(350);
+					};
+					const middle = (el, dx = null) => {
+						const r = el.getBoundingClientRect();
+						return { x: dx === null ? r.left + r.width / 2 : dx < 0 ? r.right + dx : r.left + dx, y: r.top + r.height / 2 };
+					};
+					// The four commands, by their default hotkeys: Obsidian's, since the runner sets custom hotkeys aside.
+					const follow = { same: { alt: true }, tab: { meta: true }, split: { meta: true, alt: true }, window: { meta: true, alt: true, shift: true } };
+					const keysOf = (id) => (app.hotkeyManager.getHotkeys(id) ?? app.hotkeyManager.getDefaultHotkeys(id) ?? []).map((h) => [...h.modifiers].sort().concat(h.key).join('+')).join(' ');
+					const defaults = ['editor:follow-link', 'editor:open-link-in-new-leaf', 'editor:open-link-in-new-split', 'editor:open-link-in-new-window'].map(keysOf);
+					check('Own 186: the four link commands are on their default keys: Option+Enter, Cmd+Enter, Cmd+Option+Enter and Cmd+Option+Shift+Enter', defaults.join() === 'Alt+Enter,Mod+Enter,Alt+Mod+Enter,Alt+Mod+Shift+Enter', defaults);
+					const tableAt = (view, heading) => {
+						const at = heading ? view.state.doc.toString().indexOf(`## ${heading}`) : 0;
+						return models(view).find((model) => model.from > at);
+					};
+					const selectedNow = (view) => {
+						const c = preview.cells(view);
+						return c?.selected ? `${c.selected.row},${c.selected.column}${c.anchor ? ` from ${c.anchor.row},${c.anchor.column}` : ''}` : null;
+					};
+					const menusShown = () => Array.from(document.querySelectorAll('.menu'));
+					const titlesOf = (menu) => Array.from(menu?.querySelectorAll('.menu-item') ?? []).map((item) => item.querySelector('.menu-item-title')?.textContent ?? '');
+					const closeMenus = async () => {
+						for (let i = 0; i < 3 && menusShown().length; i++) {
+							await key('Escape');
+							await sleep(150);
+						}
+					};
+					// Every open, recorded instead of made, and every open-link event the commands send.
+					const opened = [];
+					const realOpenLink = app.workspace.openLinkText;
+					const realWindowOpen = window.open;
+					const sent = [];
+					const hearEvent = (event) => sent.push({ target: event.target, pane: event.detail?.paneType, at: performance.now() });
+					let openedAt = null;
+					app.workspace.openLinkText = async (link, path, pane) => {
+						opened.push(['note', link, path, pane ?? false]);
+						openedAt = performance.now();
+					};
+					window.open = (url) => {
+						opened.push(['web', url]);
+						openedAt = performance.now();
+						return null;
+					};
+					document.addEventListener('open-link', hearEvent, true);
+					const textBefore = {};
+					try {
+						let view = await open('Links in cells');
+						await sleep(400);
+						textBefore.links = view.state.doc.toString();
+						const garden = () => tableAt(view, 'Garden');
+						// Selects a Garden cell from the cell beside it, as the test plan does: a press on Where, then ←.
+						const selectPlant = async (row) => {
+							await key('Escape');
+							await key('Escape');
+							view.dispatch({ selection: { anchor: 0 } });
+							await sleep(150);
+							garden().showCell({ row, column: 1 });
+							await sleep(300);
+							await frames(2);
+							const where = garden().cellElement({ row, column: 1 });
+							if (!where) return null;
+							await pointAt(middle(where, -6));
+							await key('ArrowLeft');
+							return selectedNow(view);
+						};
+						const after = (label) => ({ label, opened: opened.splice(0), menus: menusShown().map(titlesOf), open: !!preview.openCell(view), selected: selectedNow(view), text: view.state.doc.toString() === textBefore.links });
+
+						// Step 1 and 2: one link, in this tab and a new tab, with the event the command sends.
+						const fern = await selectPlant(1);
+						sent.length = 0;
+						await key('Enter', follow.same);
+						const firstEvent = sent[0] ?? null;
+						const same = after('Option+Enter on Fern');
+						check('Own 187: Option+Enter sends open-link to the note\'s content, in this tab, and the plugin answers it', firstEvent?.target === view.contentDOM && firstEvent?.pane === false, { target: firstEvent?.target?.className, pane: firstEvent?.pane });
+						await key('Enter', follow.tab);
+						const tab = after('Cmd+Enter on Fern');
+						check('Own 188: Option+Enter on Fern, a link with an alias, opens Watering schedule in this tab, and Cmd+Enter in a new tab; Fern stays selected, no cell opens, and the text is as it was', fern === '1,0' && JSON.stringify(same.opened) === JSON.stringify([['note', 'Watering schedule', 'Links in cells.md', false]]) && JSON.stringify(tab.opened) === JSON.stringify([['note', 'Watering schedule', 'Links in cells.md', 'tab']]) && [same, tab].every((s) => !s.open && s.selected === '1,0' && s.text && !s.menus.length), { fern, same, tab });
+
+						// Step 5's other panes on Fern.
+						await key('Enter', follow.split);
+						const split = after('Cmd+Option+Enter');
+						await key('Enter', follow.window);
+						const win = after('Cmd+Option+Shift+Enter');
+						check('Own 189: Cmd+Option+Enter opens Fern\'s link to the right, and Cmd+Option+Shift+Enter in a new window', split.opened[0]?.[3] === 'split' && win.opened[0]?.[3] === 'window' && split.opened.length === 1 && win.opened.length === 1, { split, win });
+
+						// Step 3 and 7: several links show a menu right below the cell; Escape closes it; a pick opens.
+						const balcony = await selectPlant(3);
+						await key('Enter', follow.same);
+						const menu = menusShown()[0];
+						const cellRect = garden().drawnCell({ row: 3, column: 0 })?.getBoundingClientRect();
+						const menuRect = menu?.getBoundingClientRect();
+						const shown = { balcony, titles: titlesOf(menu), under: !!cellRect && !!menuRect && Math.abs(menuRect.top - cellRect.bottom) <= 4 && Math.abs(menuRect.left - cellRect.left) <= 4, opened: opened.splice(0) };
+						check('Own 190: two links show a menu right below the cell, listing Watering schedule and Cell moves, and open nothing yet', balcony === '3,0' && shown.titles.join() === 'Watering schedule,Cell moves' && shown.under && !shown.opened.length, { ...shown, cell: cellRect && [cellRect.left, cellRect.bottom], menu: menuRect && [menuRect.left, menuRect.top] });
+						await key('Escape');
+						const closed = { menus: menusShown().length, selected: selectedNow(view) };
+						await key('ArrowDown');
+						closed.down = selectedNow(view);
+						check('Own 191: Escape closes the menu, the cell stays selected, and ↓ then selects the cell below', closed.menus === 0 && closed.selected === '3,0' && closed.down === '4,0', closed);
+						await selectPlant(3);
+						await key('Enter', follow.same);
+						await key('ArrowDown');
+						await key('ArrowDown');
+						await key('Enter');
+						await sleep(200);
+						const picked = after('picked Cell moves');
+						check('Own 192: picking Cell moves from the menu with the arrows and Enter opens it, and nothing else: no cell opens, and Balcony\'s link cell stays selected', JSON.stringify(picked.opened) === JSON.stringify([['note', 'Cell moves', 'Links in cells.md', false]]) && !picked.menus.length && picked.text && !picked.open && picked.selected === '3,0', picked);
+
+						// Step 5: a web link, and a menu with a note and a web address.
+						await selectPlant(2);
+						await key('Enter', follow.same);
+						const mint = after('Mint');
+						await selectPlant(4);
+						await key('Enter', follow.same);
+						const porchTitles = titlesOf(menusShown()[0]);
+						await key('ArrowDown');
+						await key('ArrowDown');
+						await key('Enter');
+						await sleep(200);
+						const porch = after('Porch');
+						check('Own 193: Mint\'s web link opens in the browser, and Porch\'s menu lists Watering schedule and the web address, whose pick opens the browser', JSON.stringify(mint.opened) === JSON.stringify([['web', 'https://example.com']]) && porchTitles.join() === 'Watering schedule,https://example.com' && JSON.stringify(porch.opened) === JSON.stringify([['web', 'https://example.com']]), { mint, porchTitles, porch });
+
+						// Step 6: nothing on a cell with no link, a tag, a picture, a table selected whole or a range; a picture beside a
+						// link isn't counted.
+						const quiet = [];
+						for (const [row, label] of [[5, 'Basil'], [6, '#seed/late'], [7, 'Hall\'s picture']]) {
+							const at = await selectPlant(row);
+							await key('Enter', follow.same);
+							quiet.push({ ...after(label), at, want: `${row},0` });
+						}
+						await selectPlant(1);
+						await key('Escape');
+						const whole = selectedNow(view);
+						await key('Enter', follow.same);
+						quiet.push({ ...after('the table selected whole'), at: whole, want: null });
+						await selectPlant(1);
+						await key('ArrowDown', { shift: true });
+						const range = selectedNow(view);
+						await key('Enter', follow.same);
+						quiet.push({ ...after('a range of two cells'), at: range, want: '2,0 from 1,0' });
+						check('Own 194: Option+Enter does nothing, and shows no menu, on Basil, a tag, a picture, the table selected whole and a range of two cells, each still selected, with no cell open and the text as it was', quiet.every((q) => !q.opened.length && !q.menus.length && !q.open && q.text && q.at === q.want && q.selected === q.want), quiet);
+						await selectPlant(8);
+						await key('Enter', follow.same);
+						const yard = after('Yard');
+						check('Own 195: on Yard\'s cell, a picture and a link, Option+Enter opens Cell moves straight away: the picture isn\'t counted', JSON.stringify(yard.opened) === JSON.stringify([['note', 'Cell moves', 'Links in cells.md', false]]) && !yard.menus.length, yard);
+
+						// Step 4: in an open cell, the link at the caret.
+						await selectPlant(1);
+						await key('Enter');
+						await sleep(300);
+						const openFern = preview.openCell(view) ? `${preview.openCell(view).cell.row},${preview.openCell(view).cell.column}` : null;
+						await key('Enter', follow.same);
+						await sleep(200);
+						const inCell = { open: openFern, opened: opened.splice(0), text: view.state.doc.toString() === textBefore.links };
+						check('Own 196: in Fern\'s open cell, with the caret at its end, Option+Enter opens Watering schedule, as in Obsidian\'s own cell', openFern === '1,0' && JSON.stringify(inCell.opened) === JSON.stringify([['note', 'Watering schedule', 'Links in cells.md', false]]) && inCell.text, inCell);
+						await key('Escape');
+						await key('Escape');
+
+						// Step 7: under the pinned header of Beds, the menu sits where the cell is pinned.
+						const beds = () => tableAt(view, 'Beds');
+						const bedsLine = view.state.doc.lineAt(beds().from).number;
+						view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(bedsLine + 20).from, { y: 'start' }) });
+						await sleep(600);
+						await frames(4);
+						const pinnedHeader = beds().drawnCell({ row: 0, column: 0 });
+						const realHeader = beds().cellElement({ row: 0, column: 0 });
+						const pinRect = pinnedHeader?.getBoundingClientRect();
+						const pinned = !!pinnedHeader && !!realHeader && (pinnedHeader !== realHeader || Math.abs(pinRect.top - (view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientTop)) < 60);
+						if (pinnedHeader) await pointAt(middle(pinnedHeader, -6));
+						const headerSelected = selectedNow(view);
+						await key('Enter', follow.same);
+						const bedsMenu = menusShown()[0];
+						const bedsRect = bedsMenu?.getBoundingClientRect();
+						const pinRectNow = beds().drawnCell({ row: 0, column: 0 })?.getBoundingClientRect();
+						const pinnedMenu = { pinned, headerSelected, titles: titlesOf(bedsMenu), under: !!bedsRect && !!pinRectNow && Math.abs(bedsRect.top - pinRectNow.bottom) <= 4, opened: opened.splice(0) };
+						check('Own 197: on Beds\' pinned header cell, Option+Enter shows the menu right below the cell where it\'s pinned', pinned && headerSelected === '0,0' && pinnedMenu.titles.join() === 'Watering schedule,Cell moves' && pinnedMenu.under && !pinnedMenu.opened.length, { ...pinnedMenu, cell: pinRectNow && pinRectNow.bottom, menu: bedsRect && bedsRect.top });
+						await closeMenus();
+						await key('Escape');
+						await key('Escape');
+
+						// Step 7: deep in Frozen table 2000 by 12, a pinned cell's link, and the work it takes.
+						view = await open('Frozen table 2000 by 12');
+						await sleep(800);
+						const frozen = models(view)[0];
+						// Back at its start sideways: earlier checks may have slid it.
+						frozen.scrollSideways(-frozen.sideways().scroll);
+						frozen.showCell({ row: 1000, column: 0 });
+						await sleep(800);
+						await frames(4);
+						const pinnedRow1 = frozen.drawnCell({ row: 1, column: 1 });
+						// Past the cell's link, on its plain word, and inside the pane: the column runs wider than the pane.
+						if (pinnedRow1) {
+							const r = pinnedRow1.getBoundingClientRect();
+							const paneRight = view.scrollDOM.getBoundingClientRect().right - 20;
+							await pointAt({ x: Math.min(r.right - 6, paneRight, r.left + 260), y: r.top + r.height / 2 });
+						}
+						const deepSelected = selectedNow(view);
+						opened.length = 0;
+						const start = performance.now();
+						openedAt = null;
+						await key('Enter', follow.same);
+						const deep = { deepSelected, opened: opened.splice(0), ms: openedAt === null ? null : Math.round((openedAt - start) * 10) / 10, menus: menusShown().map(titlesOf) };
+						results.push({ name: 'Own 198 Option+Enter on Row 1\'s pinned link, deep in Frozen table 2000 by 12, from the key to the open (ms)', ok: true, detail: deep.ms });
+						check('Own 198: deep in Frozen table 2000 by 12, Option+Enter on Row 1\'s pinned cell in Column 1 opens Table 50 by 8, within 100 ms', deepSelected === '1,1' && JSON.stringify(deep.opened) === JSON.stringify([['note', 'Table 50 by 8', 'Frozen table 2000 by 12.md', false]]) && deep.ms !== null && deep.ms < 100, deep);
+						await closeMenus();
+						await key('Escape');
+						await key('Escape');
+
+						// Step 8: Obsidian's own table keeps Obsidian's commands: its open cell opens the link at the caret.
+						preview.use(false);
+						await sleep(500);
+						view = await open('Links in cells');
+						await sleep(500);
+						const widget = view.contentDOM.querySelector(':scope > .cm-table-widget');
+						// Fern's cell is wide: a press at its end, past the link, opens it with the caret there.
+						const fernTd = widget?.querySelector('table')?.rows[1]?.cells[0];
+						if (fernTd) await pointAt(middle(fernTd, -6));
+						await key('Home');
+						await key('ArrowRight');
+						await key('ArrowRight');
+						await key('ArrowRight');
+						const obsidianOpen = !!view.contentDOM.querySelector('.cm-table-widget.has-focus');
+						await key('Enter', follow.same);
+						await sleep(200);
+						const stock = { obsidianOpen, opened: opened.splice(0) };
+						check('Own 199: with its tables left to Obsidian, Option+Enter in Obsidian\'s open cell opens the link at the caret, as without the plugin', obsidianOpen && stock.opened[0]?.[1] === 'Watering schedule', stock);
+						await key('Escape');
+						await key('Escape');
+						preview.use(true);
+						await sleep(400);
+						view = await open('Links in cells');
+						check('Own 200: nothing crashed, the drawing matches the text, and Links in cells is as it was', crashed(view) === 0 && rowsRight(view).length === 0 && view.state.doc.toString() === textBefore.links, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
+					} finally {
+						app.workspace.openLinkText = realOpenLink;
+						window.open = realWindowOpen;
+						document.removeEventListener('open-link', hearEvent, true);
+						await closeMenus();
 						preview.setClickSelects(false);
 						preview.use(false);
 						await sleep(300);

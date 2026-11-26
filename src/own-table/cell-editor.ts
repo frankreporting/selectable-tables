@@ -121,7 +121,7 @@ function cellLanguage(): Language | null {
 		const mode = modes?.getMode?.({}, { name: 'hypermd', front_matter: false, table: false, fencedCodeBlockHighlighting: false, taskLists: false, headers: false, blockquotes: false, indentedCode: false, lists: false, hr: false, blockId: false });
 		language = mode && typeof mode.token === 'function' ? StreamLanguage.define(mode) : null;
 	} catch (error) {
-		console.error('Selectable Tables: no Markdown language for a cell', error);
+		console.error('Better Markdown Tables: no Markdown language for a cell', error);
 		language = null;
 	}
 	return language;
@@ -286,17 +286,15 @@ function makePlain(note: EditorView, owner: MarkdownView | null, holder: HTMLEle
 	};
 }
 
-/** Why cells open in the plain editor, once one was found: a missing piece, an error, or the preview's command. */
+/** Why cells open in the plain editor, once one was found: a missing piece, an error, or the check script. */
 let fallback: string | null = null;
 let forced = false;
 let told = false;
 
-/** For the preview's command and the check script: cells open in the plain editor, or borrowed again. */
+/** For the check script: cells open in the plain editor, or borrowed again. */
 export function forcePlain(on: boolean): void {
 	forced = on;
 }
-
-export const plainForced = () => forced;
 
 /** Why cells open in the plain editor now, or null when they open borrowed. */
 export function plainBecause(): string | null {
@@ -321,7 +319,7 @@ export function makeCellEditor(app: App, note: EditorView, owner: MarkdownView |
 			try {
 				return makeBorrowed(app, owner!, holder, text, hooks);
 			} catch (error) {
-				console.error('Selectable Tables: Obsidian\'s editor could not be borrowed for a cell', error);
+				console.error('Better Markdown Tables: Obsidian\'s editor could not be borrowed for a cell', error);
 				fallback = 'an error';
 				holder.empty();
 			}

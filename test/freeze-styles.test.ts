@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import { ANIMATION_REACH } from '../src/editor/freeze';
 import { MAX_FROZEN_COLUMNS } from '../src/editor/freeze-mark';
 
-const styles = readFileSync('styles.css', 'utf8');
+// The rules for frozen tables as Obsidian's own table pinned them, before the relaunch: the plugin's own table's come
+// after them, and have tests of their own.
+const styles = readFileSync('styles.css', 'utf8').split("/*\n * The plugin's own table, which every Live Preview note's tab gets.")[0]!;
 
 test('styles.css runs the rows\' animation as far past the pane as the script allows for', () => {
 	assert.ok(styles.includes(`view-timeline-inset: -${ANIMATION_REACH}px 0;`));

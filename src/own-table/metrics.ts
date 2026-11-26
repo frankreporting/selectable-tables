@@ -10,8 +10,8 @@ import type { Measure, Metrics } from './estimate';
 const metricsOf = new WeakMap<EditorView, { metrics: Metrics; look: number }>();
 /**
  * Counts changes of look. Metrics read before the latest are out of date in every editor, including editors whose
- * tables are Obsidian's at the time: with the preview switch off, nothing forgets an editor's metrics, so turning it
- * back on after a change of theme laid tables out with the theme before (STA-88's hand check).
+ * tables are Obsidian's at the time: an editor whose tables were Obsidian's, a note opened before the plugin's table
+ * took over say, would otherwise lay them out with the theme before (STA-88's hand check).
  */
 let look = 0;
 /** The last note's metrics, for a table laid out before its own editor has been measured. */
@@ -205,7 +205,7 @@ export function availableWidth(view: EditorView): number {
 	return view.contentDOM.clientWidth - px(content.paddingLeft) - px(content.paddingRight);
 }
 
-const context = activeDocument.createElement('canvas').getContext('2d');
+const context = createEl('canvas').getContext('2d');
 const widths = new Map<string, number>();
 
 /** Text widths from a canvas, kept by font and word: the same words come back in every row. */

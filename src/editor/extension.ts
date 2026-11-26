@@ -103,8 +103,8 @@ function selecting(table: Span, fromAbove: boolean, goal?: number): TransactionS
 }
 
 /**
- * What Backspace, Delete, Cut and Paste do to a selected cell or a range of cells of the plugin's own table, set by a
- * preview build (src/own-table/table-commands.ts), so a release carries none of it.
+ * What Backspace, Delete, Cut and Paste do to a selected cell or a range of cells of the plugin's own table, set by
+ * tables.ts (src/own-table/table-commands.ts).
  */
 export interface CellEdits {
 	/** Empties the selected cell or the range's cells, or deletes the range's rows or columns: Delete is `forward`. */
@@ -618,7 +618,7 @@ export function noteView(editor: Editor): EditorView | null {
 
 /**
  * The whole feature, for Plugin.registerEditorExtension. Obsidian adds it to cell editors too. On the plugin's own
- * table (a preview build's switch), its tables pin frozen rows and columns themselves (src/own-table/pins.ts), so
+ * table, its tables pin frozen rows and columns themselves (src/own-table/pins.ts), so
  * `frozen` is off.
  */
 export function selectableTables({ frozen = true }: { frozen?: boolean } = {}): Extension {

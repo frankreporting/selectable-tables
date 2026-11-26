@@ -1,5 +1,5 @@
 name: Bug report
-description: Something Selectable Tables does wrong
+description: Something Better Markdown Tables does wrong
 labels: ["bug"]
 body:
   - type: markdown
@@ -39,8 +39,8 @@ body:
     id: plugin-version
     attributes:
       label: Plugin version
-      description: Shown under Selectable Tables in Settings › Community plugins.
-      placeholder: 0.2.2
+      description: Shown under Better Markdown Tables in Settings › Community plugins.
+      placeholder: 0.2.3
     validations:
       required: true
   - type: input
@@ -48,7 +48,7 @@ body:
     attributes:
       label: Obsidian version
       description: Shown in Settings › General.
-      placeholder: 1.15.0
+      placeholder: 1.15.1
     validations:
       required: true
   - type: dropdown

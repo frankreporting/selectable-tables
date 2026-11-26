@@ -1,7 +1,7 @@
 import { type EditorState, Facet } from '@codemirror/state';
 import { BlockInfo, BlockType, EditorView } from '@codemirror/view';
 import type { Grid } from './decide';
-import { type Cell, looksLikeTable, Span } from './table-text';
+import type { Cell, Span } from './table-text';
 
 /** What the decisions need to know about how the note is drawn. */
 export interface Layout {
@@ -74,7 +74,7 @@ export interface OwnCell {
 /** The open cell of each note's editor, and of each cell's editor. */
 export const openCells = new WeakMap<EditorView, OwnCell>();
 
-/** The plugin's own tables, in an editor that draws them: a preview build's renderer gives these (src/own-table). */
+/** The plugin's own tables, in an editor that draws them: the plugin's renderer gives these (src/own-table). */
 export interface OwnTables {
 	/** The tables in this state, in order, each from its header's first character to its last row's last; null where Obsidian draws them. */
 	spans(state: EditorState): readonly Span[] | null;
@@ -131,23 +131,12 @@ export function partAt(line: BlockInfo, pos: number): BlockInfo {
 }
 
 /**
- * The layout of a live editor. Where the plugin draws its own tables, they come from its list of them. Elsewhere it's
- * read from CodeMirror's block layout at one spot per question: a table is a block widget over text that reads as a
- * Markdown table. The text check alone tells it from Obsidian's other block widgets, so nothing here depends on what
- * is drawn on screen at the moment.
+ * The layout of a live editor. Where the plugin draws its own tables, they come from its list of them. Elsewhere,
+ * where Obsidian draws its own (a canvas card, a hover preview, or a note before the plugin's table takes over), the
+ * keys see no tables, so they stand aside, as Obsidian has them without the plugin.
  */
 export function viewLayout(view: EditorView): Layout {
 	const isTextLine = (pos: number) => partAt(view.lineBlockAt(pos), pos).type === BlockType.Text;
 	const spans = ownSpans(view.state);
-	if (spans) return spansLayout(spans, { isTextLine });
-	return {
-		tableAt(pos) {
-			if (pos < 0 || pos > view.state.doc.length) return null;
-			const block = partAt(view.lineBlockAt(pos), pos);
-			if (block.type !== BlockType.WidgetRange || block.from === block.to) return null;
-			const span = { from: block.from, to: block.to };
-			return looksLikeTable(view.state.doc, span) ? span : null;
-		},
-		isTextLine,
-	};
+	return spans ? spansLayout(spans, { isTextLine }) : { tableAt: () => null, isTextLine };
 }

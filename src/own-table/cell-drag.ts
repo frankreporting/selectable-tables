@@ -43,7 +43,7 @@ export interface CellDragTable extends Span {
 let current: CellDrag | null = null;
 
 /**
- * The setting *Click to select a cell*, set by preview.ts from the plugin's data: a click on a cell selects it, and a
+ * The setting *Click to select a cell*, set by tables.ts from the plugin's data: a click on a cell selects it, and a
  * double-click opens it. Off, a click opens a cell, as in Obsidian.
  */
 let clickSelects = true;

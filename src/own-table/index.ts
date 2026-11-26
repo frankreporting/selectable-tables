@@ -27,8 +27,7 @@ import { forcePlain, missingPiece, plainBecause, resetFallback } from './cell-ed
 
 /**
  * The plugin's own table, for Live Preview notes: it draws each table Obsidian would draw, as one block, with only
- * the rows near the pane in the page. A preview, behind a switch (preview.ts): Obsidian's table controls aren't there
- * yet. The navigation layer (src/editor) runs on it, reading its tables through `ownTables` in layout.ts, and so do
+ * the rows near the pane in the page, set up by tables.ts. The navigation layer (src/editor) runs on it, reading its tables through `ownTables` in layout.ts, and so do
  * the freeze commands and the freeze items of the right-click menu.
  */
 

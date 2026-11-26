@@ -1,10 +1,10 @@
-// In-Obsidian checks for Selectable Tables. They test the Obsidian behaviors the plugin relies on, then
-// the plugin's keys on the test vault's notes, with simulated key presses, and with real ones through the
-// browser for the keys the check on key moves has to tell apart. Every check that shouldn't
-// edit a note compares its text before and after, and every note is put back as it was.
+// In-Obsidian checks for Better Markdown Tables. They test the plugin's own table on the test vault's notes, with
+// simulated key presses, and with real ones through the browser, against Obsidian's own table where Obsidian has the
+// same, and then what a user gets when the plugin's table can't be drawn. Every check that shouldn't edit a note
+// compares its text before and after, and every note is put back as it was.
 //
-// Run in the test vault only, with the plugin built and copied in (npm run test-vault). A preview build adds a
-// section for the plugin's own table, run with its switch on; the sections before it run with the switch off:
+// Run in the test vault only, with the plugin built and copied in (npm run test-vault), through
+// scripts/run-check.mjs, which sets the vault up first. By hand:
 //   obsidian vault="Selectable Tables Test" dev:cdp method=Emulation.setFocusEmulationEnabled params='{"enabled":true}'
 //   obsidian vault="Selectable Tables Test" eval code="eval(require('fs').readFileSync('<repo>/scripts/obsidian-check.js','utf8'))"
 // Results go to test-vault/check-results.json (git ignores it) and to the console.
@@ -200,19 +200,15 @@
 	const notesAtStart = new Map();
 	// Test plans are left out: Brian may be writing in one while a run goes.
 	for (const file of app.vault.getMarkdownFiles()) if (!/Test Plan$/.test(file.basename)) notesAtStart.set(file.path, await app.vault.read(file));
-	// A preview build's switch is off for the sections before the own table's, saved off too, since some sections
-	// turn the plugin off and on again. It's put back as it was at the end.
-	const atStart = app.plugins.plugins['selectable-tables'];
-	const previewWasOn = !!atStart?.preview?.isOn();
-	if (previewWasOn) {
-		atStart.preview.use(false);
-		await atStart.saveData({ ...(await atStart.loadData()), ownTables: false });
-		await sleep(400);
-	}
+	// Whether the plugin draws its tables as the run starts: some sections leave them to Obsidian to compare against, and
+	// the plugin's table is put back at the end.
+	const drewAtStart = !!app.plugins.plugins['selectable-tables']?.debug?.isOn();
 	try {
-		// Every section but the own table's, which comes last: window.__checkOwnOnly skips them.
+		// The sections from before the relaunch, which tested the plugin's keys and freezing on Obsidian's own table. Those
+		// stopped running at the relaunch, so these never run now: BMT-135 deletes them, keeping any check of an Obsidian
+		// behavior the plugin's table still relies on.
 		existing: {
-		if (window.__checkOwnOnly) break existing;
+		break existing;
 		// --- What the plugin relies on in Obsidian
 		let cm = await open('Two report tables');
 		let original = cm.state.doc.toString();
@@ -2619,7 +2615,8 @@
 		}
 		}
 
-		// --- Own table (preview builds only): the plugin draws Live Preview tables itself, behind its switch. Run
+		// --- Own table: the plugin draws Live Preview tables itself. Each check that compares against Obsidian's own table
+		// leaves the note's tables to Obsidian for a moment (`use(false)`, as when the plugin can't draw them). Run
 		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too;
 		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells (with
 		// window.__checkCornersOnly too, only its checks against Obsidian's frozen tables, Own 87 to Own 91), with
@@ -2632,9 +2629,11 @@
 		// window.__checkFormattingOnly instead, only the section on formatting its cells, with
 		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks, with
 		// window.__checkRangeMenusOnly instead, only the section on a range's right-click menu and the grips' clicks, and with
-		// window.__checkTypingOnly instead, only the section on typing over a selected cell.
-		// The note texts are put back as they were, and so is the switch.
-		const preview = app.plugins.plugins['selectable-tables']?.preview;
+		// window.__checkTypingOnly instead, only the section on typing over a selected cell. With window.__checkEarlierOnly
+		// instead of __checkCellsOnly, only the sections before the cells'. With
+		// window.__checkFallbackOnly instead, only the last section: Obsidian's own tables where the plugin's doesn't draw.
+		// The note texts are put back as they were, and so is the plugin's table.
+		const preview = app.plugins.plugins['selectable-tables']?.debug;
 		if (preview) {
 			// Every section but the clicks', which tests the setting Click to select a cell, runs with it off: they test a click
 			// opening a cell, as it did before the setting (STA-112). It's put back as it was at the end.
@@ -2699,6 +2698,9 @@
 			}
 			const notes = app.vault.getMarkdownFiles().map((file) => file.basename).filter((name) => !/Test Plan$/.test(name)).sort();
 			const small = notes.filter((name) => app.vault.getAbstractFileByPath(`${name}.md`).stat.size < 60000);
+			// Every section but the last, which window.__checkFallbackOnly runs alone.
+			ownSections: {
+			if (window.__checkFallbackOnly) break ownSections;
 			try {
 				// Every own-table section before the cells', which window.__checkCellsOnly skips.
 				earlier: {
@@ -3305,11 +3307,11 @@
 				await leaf.setViewState({ ...leaf.getViewState(), state: { ...leaf.getViewState().state, mode: 'source', source: false } });
 				await sleep(300);
 
-				// Switch off: Obsidian's tables come back, and the plugin's keys with them.
+				// Left to Obsidian, as when the plugin can't draw them: Obsidian's tables come back, with none of the plugin's keys.
 				preview.use(false);
 				await sleep(500);
 				view = await open('Two report tables');
-				check('Own 11: with the switch off, Obsidian draws the tables again and the plugin\'s keys are back', obsidianBoxes(view).length > 0 && ownBoxes(view).length === 0 && view.dom.classList.contains('selectable-tables'));
+				check('Own 11: with its tables left to Obsidian, Obsidian draws the tables again, with none of the plugin\'s keys', obsidianBoxes(view).length > 0 && ownBoxes(view).length === 0 && !view.dom.classList.contains('selectable-tables'));
 
 				// A theme changed with the switch off is taken up once it's turned on again: the plugin forgot its sizes
 				// only in notes it was drawing, so a table came back laid out with the theme before (STA-88's hand check).
@@ -3778,6 +3780,8 @@
 					await sleep(300);
 				}
 				}
+				// window.__checkEarlierOnly, with __checkOwnOnly, runs only the sections before the cells'.
+				if (window.__checkEarlierOnly) break ownSections;
 
 				if (!window.__checkFrozenCellsOnly && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly && !window.__checkClicksOnly && !window.__checkRangeMenusOnly && !window.__checkTypingOnly) {
 					// --- Editing a cell of the plugin's table (STA-81): a press or Enter opens it in Obsidian's own editor,
@@ -3980,7 +3984,8 @@
 					await key('PageDown');
 					await sleep(250);
 					const stockJump = { open: !!openCell(view), at: at(view) };
-					check('Own 53: with the switch off, Obsidian\'s own cell keeps its keys: → at the text\'s end goes to the next cell, and Page Down closes the cell and selects the column\'s bottom cell', stockOpened === '3,1' && stockNext === '3,2' && !stockJump.open && stockJump.at === '4,2', { stockOpened, stockNext, stockJump });
+					// Since the relaunch, Page Down there is Obsidian's alone, so only → is checked.
+					check('Own 53: with its tables left to Obsidian, Obsidian\'s own cell keeps its keys: → at the text\'s end goes to the next cell', stockOpened === '3,1' && stockNext === '3,2', { stockOpened, stockNext, stockJump });
 					await key('Escape');
 					await key('Escape');
 					preview.use(true);
@@ -4826,11 +4831,10 @@
 						await restore(view, frozenText);
 						return { texts, seen, opened, closed };
 					};
-					const off = await commandsRun(false);
+					// Obsidian's own table has no freeze commands since the relaunch, so the marks are checked against what they should be.
 					const on = await commandsRun(true);
 					// The mark on Plants' header line, two lines below its heading.
 					const marks = (texts) => texts.map((text) => (text.slice(text.indexOf('## Plants')).split('\n')[2].match(/%%freeze \d+ \d+%%/) ?? ['none'])[0]);
-					check('Own 69: freezing, Undo, Redo, Undo, Unfreeze from an open cell and Undo write the same text as with the switch off', on.texts.length === off.texts.length && on.texts.every((text, i) => text === off.texts[i]), { on: marks(on.texts), off: marks(off.texts) });
 					check('Own 69: Undo takes back the freeze alone, and Redo puts it back', marks(on.texts).join() === '%%freeze 4 2%%,%%freeze 2 1%%,%%freeze 4 2%%,%%freeze 2 1%%,none,%%freeze 2 1%%', marks(on.texts));
 					check('Own 69: after each, the cell stays selected and in view, clear of what\'s pinned', on.seen.every(([cell, at]) => cell === '3,1' && at === 'clear'), on.seen);
 					check('Own 69: Unfreeze from an open cell closes it, leaves it selected, and the keyboard in the note', on.opened && on.closed, on);
@@ -5283,15 +5287,13 @@
 							return seen;
 						});
 						// ↑ into the header takes the table back to its top, with the header where rows pin, a grip's height below the
-						// pane's top. With the switch off, Obsidian's table goes back to its top too, but draws the header lower, or out
-						// of view from further down.
-						const matchesOff = pastEnd.own.every((seen, i) => {
-							const off = pastEnd.off[i];
+						// pane's top. Obsidian's own frozen table, which this compared against before the relaunch, no longer pins, so
+						// the other keys are checked for bringing the cell into view, the note moving back up to it.
+						const shownBack = pastEnd.own.every((seen) => {
 							if (seen.k === 'ArrowUp') return seen.shows && Math.abs(seen.top - seen.band) <= 3 && seen.scrolled < -50000;
-							// Where the cell ends up: how far the note moves depends on where the scroll past the end landed.
-							return seen.shows && off?.shows && seen.text === off.text && Math.abs(seen.top - off.top) <= 3 && seen.scrolled < 0;
+							return seen.shows && seen.scrolled < 0;
 						});
-						check('Own 87: ←, →, Tab and ↑ to a pinned cell of the 2,000-row table, scrolled one and three screens past its end, bring it into view where the switch off does, and ↑ to the header at the table\'s top', matchesOff, pastEnd);
+						check('Own 87: ←, →, Tab and ↑ to a pinned cell of the 2,000-row table, scrolled one and three screens past its end, bring it into view, and ↑ to the header at the table\'s top', shownBack, pastEnd);
 
 						// 2. A press where pinned cells meet, under Baseline, whose header cells are rounded: in a corner's gap it opens
 						// the header cell sliding under it, as Obsidian's table does, and the note stays; a press on a frozen column's
@@ -5334,8 +5336,9 @@
 						});
 						await useTheme(themeBefore);
 						const same = (a, b) => !!a && !!b && a.row === b.row && a.column === b.column;
-						check('Own 88: under Baseline, a press in the gap at a pinned header cell\'s rounded corner opens the header cell under it, with the note still, as with the switch off', same(corners.own.corner?.cell, corners.off.corner?.cell) && corners.own.corner.cell.row === 0 && corners.own.corner.cell.column >= 2 && corners.own.corner.scrolled === 0 && corners.off.corner.scrolled === 0, corners);
-						check('Own 88: a press on a frozen column\'s cell below the pinned header still opens that cell', corners.own.column?.cell?.row >= 1 && corners.own.column?.cell?.column === 0 && corners.off.column?.cell?.row >= 1 && corners.off.column?.cell?.column === 0, corners);
+						// Obsidian's own table, which this compared against before the relaunch, no longer pins, so its result isn't a reference.
+						check('Own 88: under Baseline, a press in the gap at a pinned header cell\'s rounded corner opens the header cell under it, with the note still', !!corners.own.corner?.cell && corners.own.corner.cell.row === 0 && corners.own.corner.cell.column >= 2 && corners.own.corner.scrolled === 0, corners);
+						check('Own 88: a press on a frozen column\'s cell below the pinned header still opens that cell', corners.own.column?.cell?.row >= 1 && corners.own.column?.cell?.column === 0, corners);
 
 						// 3. A right-click on a link in a cell: one menu, its items and their order as with the switch off. Obsidian
 						// draws its own menus for the check.
@@ -5536,7 +5539,6 @@
 							const s = syncs[tag];
 							return !!s && s.open && s.row === 'Row 1' && (s.focus || !keys) && s.cell?.row === row && s.rowOfOpen === row && s.pins?.row === row && s.carried === 'Row 1' && s.hidden === 'Row 1' && s.shows && s.ink > 0 && steadyOk(s.steady);
 						};
-						check('Own 90: with the switch off, a row put in above an open cell of Row 1, as Sync writes it, closes the cell', syncs.off?.open === false, syncs.off);
 						check('Own 90: with the switch on, the cell stays open in Row 1 with the keyboard, typing goes into Row 1, and what pins follows it, deep down, as Sync puts a row in and takes it out and a second pane puts it in', syncs.start && followed('deep, open', 1) && followed('row put in, as Sync', 2) && syncs.typed && followed('scrolled a screen and back', 2) && followed('row taken out, as Sync', 1) && followed('row put in, from a second pane', 2, false), syncs);
 
 						// 5. 20 switches between light and dark, and a theme and back, with a frozen column's cell open and the table
@@ -5772,7 +5774,7 @@
 						const offMenus = await menusFor(false);
 						const onMenus = await menusFor(true);
 						const tableTop = ['Row', 'Column', 'Sort by column (A to Z)', 'Sort by column (Z to A)', 'Freeze rows up to here', 'Freeze columns up to here', 'Freeze rows and columns up to here'];
-						check('Own 74: a right-click on a cell that isn\'t open shows Row, Column, the two sorts, then the freeze items, as Obsidian\'s own table does', onMenus.closed.top.join() === tableTop.join() && offMenus.closed.top.join() === tableTop.join(), { on: onMenus.closed.top, off: offMenus.closed.top });
+						check('Own 74: a right-click on a cell that isn\'t open shows Row, Column, the two sorts, as Obsidian\'s own table does, then the freeze items', onMenus.closed.top.join() === tableTop.join() && offMenus.closed.top.join() === tableTop.slice(0, 4).join(), { on: onMenus.closed.top, off: offMenus.closed.top });
 						check('Own 74: the right-clicked cell is selected as its menu shows', onMenus.selected?.row === 2 && onMenus.selected?.column === 0, onMenus.selected);
 						check('Own 74: its Row and Column submenus hold Obsidian\'s items, worded and ordered as in Obsidian\'s', JSON.stringify([onMenus.closed.Row, onMenus.closed.Column]) === JSON.stringify([offMenus.closed.Row, offMenus.closed.Column]) && onMenus.closed.Row?.length === 6 && onMenus.closed.Column?.length === 8, { on: [onMenus.closed.Row, onMenus.closed.Column], off: [offMenus.closed.Row, offMenus.closed.Column] });
 						// Obsidian's open cell puts the freeze items, from editor-menu, before its own table items; the plugin's cell puts
@@ -6721,8 +6723,8 @@
 						const plants = (text) => text?.slice(text.indexOf('## Plants'), text.indexOf('## Plants') + 900);
 						check('Own 99: in Plants with its header pinned, a body row dragged up one row moves there, as with the switch off', frozenOn.pinned && frozenOn.row === frozenOff.row && frozenOn.afterRow === frozenOff.afterRow && frozenOn.afterRow !== frozenOn.text, { on: { pinned: frozenOn.pinned, row: frozenOn.row, text: plants(frozenOn.afterRow) }, off: { pinned: frozenOff.pinned, row: frozenOff.row, text: plants(frozenOff.afterRow) } });
 						results.push({ name: 'Own 99 pinned header\'s column grip reachable (switch on, off)', ok: true, detail: [frozenOn.columnReachable, frozenOff.columnReachable] });
-						check('Own 99: with the switch on, Plants\' rows pin a grip\'s height below the pane\'s top, and with the switch off at its top', frozenOn.pinned && frozenOn.band > 0 && frozenOff.pinned, { on: { pinned: frozenOn.pinned, band: frozenOn.band }, off: { pinned: frozenOff.pinned } });
-						check('Own 99: with the switch on, the pinned header\'s grip for Bed is in the pane, and dragged onto Sown it writes what the same drag writes with the header at its place; with the switch off it\'s above the pane, as before', frozenOn.columnReachable && frozenOn.afterColumn === frozenOn.afterPlaceColumn && !frozenOff.columnReachable, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn)?.slice(0, 300), place: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.columnReachable } });
+						check('Own 99: Plants\' rows pin a grip\'s height below the pane\'s top', frozenOn.pinned && frozenOn.band > 0, { on: { pinned: frozenOn.pinned, band: frozenOn.band }, off: { pinned: frozenOff.pinned } });
+						check('Own 99: the pinned header\'s grip for Bed is in the pane, and dragged onto Sown it writes what the same drag writes with the header at its place', frozenOn.columnReachable && frozenOn.afterColumn === frozenOn.afterPlaceColumn, { on: { reachable: frozenOn.columnReachable, text: plants(frozenOn.afterColumn)?.slice(0, 300), place: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.columnReachable } });
 						check('Own 99: a right-click on the pinned header\'s grip shows the same menu as at the header\'s place', frozenOn.pinnedAtClick && !!frozenOn.pinnedMenu?.length && frozenOn.pinnedMenu.join() === frozenOn.placeMenu?.join(), { pinnedAtClick: frozenOn.pinnedAtClick, pinned: frozenOn.pinnedMenu, place: frozenOn.placeMenu });
 						check('Own 99: with the header at its place, Bed\'s grip dragged onto Sown puts Bed after Sown, as with the switch off', frozenOn.placeReachable && frozenOn.afterPlaceColumn === frozenOff.afterPlaceColumn && /\| Sown +\| Bed/.test(plants(frozenOn.afterPlaceColumn) ?? ''), { on: { reachable: frozenOn.placeReachable, text: plants(frozenOn.afterPlaceColumn)?.slice(0, 300) }, off: { reachable: frozenOff.placeReachable, text: plants(frozenOff.afterPlaceColumn)?.slice(0, 300) } });
 						const deep = await deepGrip();
@@ -7509,21 +7511,7 @@
 						}
 						check('Own 118: 60 seeded random steps on Plants and Frozen table 2000 by 12: each range drawn on exactly its cells, pinned copies included, the cell moved to last in view, and the text unchanged', fuzz.length === 0, fuzz);
 
-						// With the switch off, Shift with an arrow on Obsidian's selected cell does nothing, as before.
-						preview.use(false);
-						await sleep(400);
-						view = await open('Cell moves');
-						await scrollTo(view, 'Seed trays');
-						const stockCell = obsidianCell(view, 'Seed trays', 1, 0);
-						await pointAt(middle(stockCell, 6));
-						await key('Escape');
-						const marks = () => Array.from(view.contentDOM.querySelectorAll('.selectable-tables-cell, td.is-selected, th.is-selected')).map((el) => `${el.parentElement.rowIndex},${el.cellIndex}${el.classList.contains('is-selected') ? ' range' : ''}`).join(' ');
-						const stockBefore = marks();
-						await key('ArrowRight', shift);
-						check('Own 119: with the switch off, Shift with an arrow on Obsidian\'s selected cell does nothing', stockBefore === '1,0' && marks() === '1,0' && view.state.doc.toString() === text, { before: stockBefore, after: marks() });
-						await leave(view);
-						preview.use(true);
-						await sleep(400);
+						// Own 119 checked Shift with an arrow on Obsidian's selected cell, which has no selected cell since the relaunch.
 						view = await open('Frozen tables');
 						await sleep(300);
 						check('Own 120: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
@@ -9151,24 +9139,10 @@
 						results.push({ name: 'Own 155 the random steps taken, by kind', ok: true, detail: kinds });
 						check('Own 155: 40 seeded random steps: after each, nothing crashed, the drawing matches the text, the table keeps its shape and freeze, the range or cell stays, and one Undo takes back one command', fuzz.length === 0, fuzz.slice(0, 4));
 
-						// Own 156: with the switch off, Bold on a selected cell of Obsidian's table still does nothing, as before.
-						preview.use(false);
-						await sleep(400);
-						view = await open('Table controls');
-						await sleep(300);
-						await scrollTo(view, 'Seeds');
-						const stockCell = obsidianCell(view, 'Seeds', 1, 0);
-						if (stockCell) await click(inCell(stockCell));
-						await key('Escape');
-						const stockSelected = where(view);
-						await key('b', meta);
-						const stockQuiet = view.state.doc.toString() === text;
-						await leave(view);
-						preview.use(true);
-						await sleep(400);
+						// Own 156: Obsidian's table has no selected cell since the relaunch, so only the plugin's is checked here.
 						view = await open('Frozen tables');
 						await sleep(300);
-						check('Own 156: with the switch off, Cmd+B on a selected cell of Obsidian\'s table leaves its text alone, and nothing crashed with it on', stockSelected === '1,0' && stockQuiet && crashed(view) === 0 && rowsRight(view).length === 0, { stockSelected, stockQuiet, crashed: crashed(view) });
+						check('Own 156: nothing crashed, and the drawing matches the text', crashed(view) === 0 && rowsRight(view).length === 0, { crashed: crashed(view), rows: rowsRight(view).slice(0, 5) });
 					} finally {
 						delete view?.update;
 						view = await open('Watering schedule');
@@ -10510,6 +10484,145 @@
 				preview.use(false);
 				await sleep(300);
 			}
+			}
+
+			// --- Obsidian's own tables, where the plugin's doesn't draw: a canvas card and a hover preview, in editing, and
+			// every note once the copy of Obsidian's language can't be made, as after an Obsidian update. They draw as
+			// Obsidian draws them without the plugin: its widget, with none of the plugin's keys or freezing. Last, since
+			// it turns the plugin off and on, and the plugin's table has to come back after. Alone with
+			// window.__checkOwnOnly, __checkCellsOnly and __checkFallbackOnly all true.
+			if (!window.__checkCellsOnly || window.__checkFallbackOnly) {
+				const CANT_DRAW = "Better Markdown Tables can't draw tables in this version of Obsidian. Tables are Obsidian's own until the plugin is updated.";
+				const ownIn = (root) => root.querySelectorAll('.selectable-tables-own').length;
+				const obsidianIn = (root) => root.querySelectorAll('.cm-table-widget:not(.selectable-tables-own)').length;
+				const viewOf = (root) => {
+					const el = root.querySelector('.cm-editor');
+					return el ? EditorView.findFromDOM(el) : null;
+				};
+				const EditorView = (await open('Watering schedule')).constructor;
+				// Any step that brings a minimized window forward is named, and the window minimized again at once.
+				const ownWindow = window.electron.remote.getCurrentWindow();
+				const minimizedAtStart = ownWindow.isMinimized();
+				const guard = (step) => {
+					if (!minimizedAtStart || ownWindow.isMinimized()) return;
+					ownWindow.minimize();
+					// A hover preview switched to editing always does it, so there it's only noted.
+					results.push({ name: `Fallback: the window came forward at ${step}, and was minimized again`, ok: step === 'the hover preview' });
+				};
+				preview.use(true);
+				await sleep(400);
+				const canvasPath = 'Fallback check.canvas';
+				try {
+					// A canvas card and a hover preview, in editing: only with window.__checkOutsideNotes, since a hover preview
+					// switched to editing brings a minimized window back in front (11/25). Run it in a window that may come forward.
+					if (window.__checkOutsideNotes) {
+					// A canvas card holding a table, opened for editing.
+					const table = '| Plant | Room |\n| ----- | ---- |\n| Fern | Kitchen |\n| Basil | Balcony |';
+					const canvasFile = await app.vault.create(canvasPath, JSON.stringify({ nodes: [{ id: 'card', type: 'text', text: `Above\n\n${table}\n\nBelow`, x: 0, y: 0, width: 500, height: 400 }], edges: [] }));
+					const canvasLeaf = app.workspace.getLeaf(false);
+					await canvasLeaf.openFile(canvasFile);
+					await sleep(800);
+					const canvas = canvasLeaf.view.canvas;
+					const node = canvas?.nodes?.get('card');
+					node?.startEditing();
+					await sleep(800);
+					// The card's editor sits outside the card's own element, so it's read from the card.
+					const cardView = node?.child?.editMode?.editor?.cm ?? null;
+					const card = { editor: !!cardView?.dom.isConnected, obsidian: cardView ? obsidianIn(cardView.contentDOM) : 0, own: cardView ? ownIn(cardView.contentDOM) : 0 };
+					if (cardView) {
+						const start = cardView.state.doc.toString().indexOf('| Plant');
+						cardView.dispatch({ selection: { anchor: start, head: start + table.length } });
+						await sleep(300);
+						card.selectedClass = cardView.dom.classList.contains('selectable-tables-selected');
+						card.crashed = crashed(cardView);
+					}
+					guard('the canvas card');
+					check('Fallback 1: a canvas card in editing draws its table as Obsidian\'s own, with none of the plugin\'s, and a table selected there gets none of the plugin\'s marks', card.editor && card.obsidian === 1 && card.own === 0 && card.selectedClass === false && card.crashed === 0, card);
+					canvas?.deselectAll?.();
+					await sleep(300);
+
+					// A hover preview of a note with tables, switched to editing.
+					const view = await open('About this vault');
+					const leaf = app.workspace.getLeaf(false);
+					const link = view.contentDOM.querySelector('.cm-hmd-internal-link, .cm-underline') ?? view.contentDOM;
+					const r = link.getBoundingClientRect();
+					app.workspace.trigger('hover-link', { event: new MouseEvent('mouseover', { clientX: r.left + 5, clientY: r.top + 5, metaKey: true, ctrlKey: true }), source: 'preview', hoverParent: leaf.view, targetEl: link, linktext: 'Cell moves', sourcePath: 'About this vault.md' });
+					let popover = null;
+					for (let i = 0; i < 30 && !popover?.hoverEl?.isConnected; i++) {
+						await sleep(100);
+						popover = leaf.view.hoverPopover;
+					}
+					const embed = (popover?._children ?? []).find((child) => typeof child.toggleMode === 'function');
+					if (embed?.getMode?.() === 'preview') embed.toggleMode();
+					await sleep(800);
+					const hover = { shown: !!popover?.hoverEl?.isConnected, editing: embed?.getMode?.(), obsidian: popover?.hoverEl ? obsidianIn(popover.hoverEl) : 0, own: popover?.hoverEl ? ownIn(popover.hoverEl) : 0 };
+					const hoverView = popover?.hoverEl && viewOf(popover.hoverEl);
+					hover.crashed = hoverView ? crashed(hoverView) : null;
+					guard('the hover preview');
+					check('Fallback 2: a hover preview in editing draws its tables as Obsidian\'s own, with none of the plugin\'s', hover.shown && hover.editing === 'source' && hover.obsidian > 0 && hover.own === 0 && hover.crashed === 0, hover);
+					popover?.hide?.();
+					await sleep(300);
+					}
+
+					// The copy made to fail, as after an Obsidian update: the note opened next learns it can't be made.
+					let view;
+					const noticesBefore = Array.from(document.querySelectorAll('.notice')).filter((el) => el.textContent.includes("can't draw tables")).length;
+					preview.breakCopy(true);
+					view = await open('Watering schedule');
+					view = await open('Cell moves');
+					await sleep(1200);
+					const shown = () => Array.from(document.querySelectorAll('.notice')).filter((el) => el.textContent.includes("can't draw tables"));
+					const notices = shown();
+					const fell = { drawing: preview.isOn(), notices: notices.length - noticesBefore, text: notices[notices.length - 1]?.textContent ?? null, obsidian: obsidianIn(view.contentDOM), own: ownIn(view.contentDOM), crashed: crashed(view) };
+					guard('the copy made to fail');
+					check('Fallback 3: when the copy can\'t be made, the plugin stops drawing tables, says so once in its words, and the note\'s tables are Obsidian\'s own', !fell.drawing && fell.notices === 1 && fell.text === CANT_DRAW && fell.obsidian > 0 && fell.own === 0 && fell.crashed === 0, fell);
+					// Another note: no second notice.
+					view = await open('Two report tables');
+					await sleep(800);
+					check('Fallback 4: another note opened after it shows Obsidian\'s own tables, and no second notice', obsidianIn(view.contentDOM) > 0 && ownIn(view.contentDOM) === 0 && shown().length - noticesBefore === 1, { obsidian: obsidianIn(view.contentDOM), notices: shown().length - noticesBefore });
+					// A cell of Obsidian's table opens on a press and takes typing, as without the plugin.
+					const textBefore = view.state.doc.toString();
+					const widget = view.contentDOM.querySelector('.cm-table-widget');
+					const cell = widget?.querySelectorAll('td')[0];
+					if (cell) await realClick(cell);
+					await sleep(400);
+					const cellEl = view.contentDOM.querySelector('.cm-table-widget .table-cell-wrapper .cm-editor');
+					const typed = { opened: !!cellEl };
+					if (cellEl) {
+						await cdp.sendCommand('Input.insertText', { text: 'Q' });
+						await sleep(400);
+						const after = view.state.doc.toString();
+						// Obsidian's table keeps its column's padding as you type, so the text can stay as long.
+						typed.inTable = after.includes('Q') && !textBefore.includes('Q');
+						await press(EditorView.findFromDOM(cellEl).contentDOM, 'Escape');
+						await sleep(300);
+					}
+					typed.crashed = crashed(view);
+					guard('typing in Obsidian\'s cell');
+					check('Fallback 5: a press opens a cell of Obsidian\'s table there, and typing goes into it', typed.opened && typed.inTable && typed.crashed === 0, typed);
+					if (view.state.doc.toString() !== textBefore) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: textBefore } });
+					await sleep(300);
+					// The freeze commands and the table commands have no cell to act on, so the palette doesn't offer them.
+					const active = app.workspace.activeEditor;
+					const offered = app.commands.listCommands().filter((command) => command.id.startsWith('selectable-tables:') && (command.editorCheckCallback ? command.editorCheckCallback(true, active?.editor, active) : command.checkCallback ? command.checkCallback(true) : true)).map((command) => command.id);
+					guard('the commands');
+					check('Fallback 6: with Obsidian\'s tables, none of the plugin\'s commands is offered', offered.length === 0, offered);
+				} finally {
+					preview.breakCopy(false);
+					const file = app.vault.getAbstractFileByPath(canvasPath);
+					if (file) await app.vault.delete(file);
+					// The plugin turned off and on draws its tables again.
+					await app.plugins.disablePlugin('selectable-tables');
+					await sleep(500);
+					await app.plugins.enablePlugin('selectable-tables');
+					await sleep(1500);
+					guard('the plugin turned off and on');
+				}
+				const back = app.plugins.plugins['selectable-tables']?.debug;
+				const view = await open('Two report tables');
+				await sleep(800);
+				check('Fallback 7: turned off and on, the plugin draws its tables again', !!back?.isOn() && ownIn(view.contentDOM) > 0 && obsidianIn(view.contentDOM) === 0, { drawing: back?.isOn(), own: ownIn(view.contentDOM), obsidian: obsidianIn(view.contentDOM) });
+			}
 		}
 	} catch (error) {
 		results.push({ name: 'the check script itself', ok: false, detail: String(error && error.stack || error) });
@@ -10529,11 +10642,7 @@
 	} catch (error) {
 		results.push({ name: 'putting the notes back', ok: false, detail: String(error) });
 	}
-	if (previewWasOn) {
-		const plugin = app.plugins.plugins['selectable-tables'];
-		await plugin.saveData({ ...(await plugin.loadData()), ownTables: true });
-		plugin.preview.use(true);
-	}
+	if (drewAtStart) app.plugins.plugins['selectable-tables']?.debug?.use(true);
 	if (attachedHere) cdp.detach();
 
 	const failed = results.filter((r) => !r.ok);
@@ -10543,6 +10652,6 @@
 	const path = window.require('path').join(app.vault.adapter.basePath, '..', 'check-results.json');
 	window.require('fs').writeFileSync(path, JSON.stringify(summary, null, '\t'));
 	window.__checkProgress = { running: false, count: results.length, last: 'done', at: Date.now() };
-	console.log(`Selectable Tables check: ${summary.passed} passed, ${summary.failed} failed. Results in ${path}`);
+	console.log(`Better Markdown Tables check: ${summary.passed} passed, ${summary.failed} failed. Results in ${path}`);
 	return `${summary.passed} passed, ${summary.failed} failed`;
 })();

@@ -21,7 +21,7 @@ import { timed } from './profile';
 /** Where the caret goes in a cell that opens: its text's start or end, all of it, a click, or the end of it emptied for typing over. */
 export type At = 'start' | 'end' | 'all' | 'replace' | Click | { note: { anchor: number; head: number } };
 
-/** On an open cell's drawn text, hidden by the preview's styles.css while its editor shows. */
+/** On an open cell's drawn text, hidden by styles.css while its editor shows. */
 const HIDDEN_CLASS = 'selectable-tables-open-text';
 
 /** On a change the cell takes from the note, which isn't written back. */
@@ -107,7 +107,7 @@ export class OpenCell implements OwnCell {
 			onUpdate: (update) => this.onCellUpdate(update),
 		};
 		this.editor = makeCellEditor(setup.app, note, owner instanceof MarkdownView ? owner : null, this.holder, text, hooks, () => {
-			new Notice('Selectable Tables: cells open in a simpler editor for now, after an Obsidian update. Markdown shows as text until you leave the cell.');
+			new Notice('Better Markdown Tables: cells open in a simpler editor for now, after an Obsidian update. Markdown shows as text until you leave the cell.');
 		});
 		element.closest('.cm-table-widget')?.addClass('has-focus');
 		const content = this.editor.view.contentDOM;

@@ -3,7 +3,13 @@
 	display: none;
 }
 
-.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-content {
+/*
+ * The browser's own caret too, on the content and on each line, where it's drawn. A theme or a snippet that sets the
+ * caret's color on the content, even with !important, can't bring it back: a line's own color wins over the one it
+ * inherits from the content.
+ */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-content,
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-content > .cm-line {
 	caret-color: transparent;
 }
 

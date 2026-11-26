@@ -171,7 +171,10 @@ const SETUP = `(async () => {
 		out.fixed.push('set aside custom hotkeys, unsaved: ' + custom.join(', '));
 	}
 	const leaves = [];
-	app.workspace.iterateRootLeaves((leaf) => leaves.push(leaf));
+	// A block body: iterateRootLeaves stops at the first leaf whose callback returns something truthy, as push's count is.
+	app.workspace.iterateRootLeaves((leaf) => {
+		leaves.push(leaf);
+	});
 	if (leaves.length > 1) {
 		saved.layout = app.workspace.getLayout();
 		const keep = leaves.find((leaf) => leaf.view.getViewType() === 'markdown') ?? leaves[0];

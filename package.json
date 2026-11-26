@@ -1,6 +1,6 @@
 {
 	"name": "selectable-tables",
-	"version": "0.2.3",
+	"version": "0.3.0",
 	"description": "Faster performance for large tables, frozen rows and columns, spreadsheet-style navigation, and more. Formerly Selectable Tables.",
 	"main": "main.js",
 	"type": "module",

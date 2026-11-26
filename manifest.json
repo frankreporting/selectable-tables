@@ -1,8 +1,8 @@
 {
 	"id": "selectable-tables",
 	"name": "Better Markdown Tables",
-	"version": "0.2.3",
-	"minAppVersion": "1.14.4",
+	"version": "0.3.0",
+	"minAppVersion": "1.15.1",
 	"description": "Faster performance for large tables, frozen rows and columns, spreadsheet-style navigation, and more. Formerly Selectable Tables.",
 	"author": "Brian Frank",
 	"isDesktopOnly": false

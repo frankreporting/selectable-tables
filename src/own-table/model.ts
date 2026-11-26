@@ -509,6 +509,16 @@ export class Model implements Span, DrawnTable, DragTable {
 		return this.dir === 'rtl';
 	}
 
+	/** A cell's element where it's drawn on top, if its row is drawn: a pinned copy where it pins, else its own. */
+	drawnCell(cell: Cell): HTMLTableCellElement | null {
+		const scroller = this.view?.scrollDOM;
+		if (!scroller) return null;
+		const pinned = this.pins.pinnedCell(cell, scroller.getBoundingClientRect().top + scroller.clientTop)?.el;
+		if (pinned?.isConnected) return pinned;
+		const real = this.cellElement(cell);
+		return real?.isConnected ? real : null;
+	}
+
 	/** A cell's element, if its row is drawn: row 0 is the header. */
 	cellElement({ row, column }: Cell): HTMLTableCellElement | null {
 		const tr = row === 0 ? this.blocks[0]?.thead?.firstElementChild : this.rendered.get(row - 1);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hasMark, markedCells, markText, MAX_FROZEN_COLUMNS, readFreeze, withFreeze, withoutMark } from '../src/editor/freeze-mark';
+import { defaultFreeze, freezeOf, hasMark, markedCells, markText, MAX_FROZEN_COLUMNS, readFreeze, setDefaultFreeze, withFreeze, withoutMark } from '../src/editor/freeze-mark';
 
 const nothing = { rows: 0, columns: 0 };
 
@@ -143,4 +143,37 @@ test('cells are counted as Obsidian counts them: an escaped pipe is text, and a 
 	assert.deepEqual(markedCells('Name %%freeze 2 1%% | Age'), [0]);
 	assert.deepEqual(markedCells('Name | Age %%freeze 2 1%%'), [1]);
 	assert.deepEqual(markedCells('|| %%freeze 1 1%% |'), [1]);
+});
+
+test('a table with no mark freezes the default while one is set, and nothing once it is cleared', () => {
+	try {
+		setDefaultFreeze({ rows: 1, columns: 2 });
+		assert.deepEqual(freezeOf('| Name | Bed |'), { rows: 1, columns: 2 });
+		assert.deepEqual(defaultFreeze(), { rows: 1, columns: 2 });
+		setDefaultFreeze(null);
+		assert.deepEqual(freezeOf('| Name | Bed |'), { rows: 0, columns: 0 });
+	} finally {
+		setDefaultFreeze(null);
+	}
+});
+
+test('a table\'s own mark wins over the default, and a mark of zeros keeps it unfrozen', () => {
+	try {
+		setDefaultFreeze({ rows: 1, columns: 1 });
+		assert.deepEqual(freezeOf('| %%freeze 2 3%% Name | Bed |'), { rows: 2, columns: 3 });
+		assert.deepEqual(freezeOf('| %%freeze 0 0%% Name | Bed |'), { rows: 0, columns: 0 });
+	} finally {
+		setDefaultFreeze(null);
+	}
+});
+
+test('a default of nothing is no default', () => {
+	setDefaultFreeze({ rows: 0, columns: 0 });
+	assert.equal(defaultFreeze(), null);
+});
+
+test('freezing nothing with keep writes a mark of zeros, over a mark or where a new one goes', () => {
+	assert.equal(withFreeze('| %%freeze 2 1%% Name | Bed |', { rows: 0, columns: 0 }, true), '| %%freeze 0 0%% Name | Bed |');
+	assert.equal(withFreeze('| Name | Bed |', { rows: 0, columns: 0 }, true), '| %%freeze 0 0%% Name | Bed |');
+	assert.equal(withFreeze('| %%freeze 2 1%% Name | Bed |', { rows: 0, columns: 0 }), '| Name | Bed |');
 });

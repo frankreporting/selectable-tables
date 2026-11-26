@@ -50,6 +50,30 @@ export function hasMark(header: string): boolean {
 }
 
 /**
+ * What a table with no mark of its own freezes: the setting *Freeze tables*, or nothing while it's off (BMT-140). Nothing
+ * is written into the note for it; the plugin draws such a table as if it had this mark.
+ */
+let tableDefault: Freeze | null = null;
+
+/** Sets what a table with no mark of its own freezes, or null for nothing. */
+export function setDefaultFreeze(freeze: Freeze | null): void {
+	tableDefault = freeze && (freeze.rows || freeze.columns) ? { rows: freeze.rows, columns: Math.min(freeze.columns, MAX_FROZEN_COLUMNS) } : null;
+}
+
+/** What a table with no mark of its own freezes now, or null for nothing. */
+export function defaultFreeze(): Freeze | null {
+	return tableDefault;
+}
+
+/**
+ * What a table freezes, from its header row: its own mark, which always wins, `%%freeze 0 0%%` included, which keeps it
+ * unfrozen; else the default, while the setting is on.
+ */
+export function freezeOf(header: string): Freeze {
+	return hasMark(header) ? readFreeze(header) : (tableDefault ?? NOTHING_FROZEN);
+}
+
+/**
  * The header cells holding a mark, by column. A mark draws nothing, but the space typed beside it stays in
  * its cell, and Obsidian's cells keep every space, so styles.css has these cells drop it.
  */
@@ -109,11 +133,12 @@ function pipeAfter(text: string, from: number): number {
  * A table's header row with a new freeze. The first mark is written over, just its own text, and any other
  * goes, so the one written is the one that counts. With no mark, one goes at the start of the first cell's
  * text, with a space on each side: commands write it there because the first column is the least likely to be
- * deleted, which would end the freeze. Freezing nothing takes every mark out.
+ * deleted, which would end the freeze. Freezing nothing takes every mark out, unless `keep` says to write
+ * `%%freeze 0 0%%`, which keeps the table unfrozen while a default freezes tables with no mark.
  */
-export function withFreeze(header: string, freeze: Freeze): string {
+export function withFreeze(header: string, freeze: Freeze, keep = false): string {
 	const [first, ...others] = marksIn(header);
-	if (!freeze.rows && !freeze.columns) return withoutMarks(header);
+	if (!freeze.rows && !freeze.columns && !keep) return withoutMarks(header);
 	if (first) {
 		const text = withoutMarks(header, others);
 		return text.slice(0, first.from) + markText(freeze) + text.slice(first.to);

@@ -3,6 +3,7 @@ import { addIcon, type App, Notice, type Plugin, PluginSettingTab, removeIcon, t
 import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
 import { breakCopy } from './own-table/language';
+import { setDefaultFreeze } from './editor/freeze-mark';
 import { cellFormatter, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
 import { addAtEnd, addRowFrom, clearCells, gripItems, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
@@ -41,19 +42,36 @@ function whenStyled(plugin: Plugin, ready: () => void): void {
 }
 
 /**
- * What the plugin saves: whether Tab and Enter add a row at a table's end. Preview builds also saved a click setting and
- * their switch, as `clickSelects` and `ownTables`, which are kept as they were and no longer read.
+ * What the plugin saves: whether Tab and Enter add a row at a table's end, and whether, and how far, every table with no
+ * freeze of its own freezes. Preview builds also saved a click setting and their switch, as `clickSelects` and
+ * `ownTables`, which are kept as they were and no longer read.
  */
 interface Saved {
 	addsRows?: boolean;
+	freezeTables?: boolean;
+	freezeRows?: number;
+	freezeColumns?: number;
 }
 
-/** The one setting: whether Tab in a table's last cell and Enter on its last row add a row, as in Obsidian. */
+/** Whether Tab in a table's last cell and Enter on its last row add a row, as in Obsidian. */
 const ADDS_ROWS = 'addsRows';
+/** Whether every table with no freeze of its own freezes, and its rows and columns, each 0 to 9 (BMT-140). */
+const FREEZE_TABLES = 'freezeTables';
+const FREEZE_ROWS = 'freezeRows';
+const FREEZE_COLUMNS = 'freezeColumns';
+/** The rows and columns *Freeze tables* starts from as it's turned on. */
+const FIRST_FREEZE = 1;
+const COUNTS: Record<string, string> = Object.fromEntries(Array.from({ length: 10 }, (_, count) => [String(count), String(count)]));
+
+/** What every table with no freeze of its own freezes, from the settings, or null while *Freeze tables* is off. */
+function defaultOf(saved: Saved): { rows: number; columns: number } | null {
+	return saved.freezeTables ? { rows: saved.freezeRows ?? FIRST_FREEZE, columns: saved.freezeColumns ?? FIRST_FREEZE } : null;
+}
 
 /**
- * The plugin's settings tab: whether Tab and Enter add a row at a table's end (BMT-138). Obsidian draws it from its
- * declarative settings (1.13 on), which settings search finds.
+ * The plugin's settings tab: whether Tab and Enter add a row at a table's end (BMT-138), and *Freeze tables*, taken from
+ * Plainday's, with its rows and columns showing under it while it's on (BMT-140). Obsidian draws it from its declarative
+ * settings (1.13 on), which settings search finds.
  */
 class Settings extends PluginSettingTab {
 	constructor(
@@ -61,6 +79,7 @@ class Settings extends PluginSettingTab {
 		plugin: Plugin,
 		private readonly saved: Saved,
 		private readonly save: () => Promise<void>,
+		private readonly freezeChanged: () => void,
 	) {
 		super(app, plugin);
 	}
@@ -72,16 +91,53 @@ class Settings extends PluginSettingTab {
 				desc: "In a table's open cell, Tab in the last cell and Enter on the last row add a row, as in Obsidian. Turn it off to keep them from adding rows.",
 				control: { type: 'toggle', key: ADDS_ROWS, defaultValue: true },
 			},
+			{
+				name: 'Freeze tables',
+				desc: 'Keeps the first rows and columns of every table in view as you scroll, unless the table has a freeze of its own.',
+				control: { type: 'toggle', key: FREEZE_TABLES, defaultValue: false },
+			},
+			{
+				name: 'Freeze rows',
+				control: { type: 'dropdown', key: FREEZE_ROWS, options: COUNTS, defaultValue: String(FIRST_FREEZE) },
+				visible: () => this.saved.freezeTables === true,
+			},
+			{
+				name: 'Freeze columns',
+				control: { type: 'dropdown', key: FREEZE_COLUMNS, options: COUNTS, defaultValue: String(FIRST_FREEZE) },
+				visible: () => this.saved.freezeTables === true,
+			},
 		];
 	}
 
 	getControlValue(key: string): unknown {
-		return key === ADDS_ROWS ? this.saved.addsRows ?? true : undefined;
+		if (key === ADDS_ROWS) return this.saved.addsRows ?? true;
+		if (key === FREEZE_TABLES) return this.saved.freezeTables ?? false;
+		if (key === FREEZE_ROWS) return String(this.saved.freezeRows ?? FIRST_FREEZE);
+		if (key === FREEZE_COLUMNS) return String(this.saved.freezeColumns ?? FIRST_FREEZE);
+		return undefined;
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
-		if (key !== ADDS_ROWS) return;
-		this.saved.addsRows = value === true;
+		if (key === ADDS_ROWS) this.saved.addsRows = value === true;
+		else if (key === FREEZE_TABLES) {
+			const on = value === true;
+			this.saved.freezeTables = on;
+			// Turned on, it starts from 1 and 1, as Plainday's did.
+			if (on) {
+				this.saved.freezeRows = FIRST_FREEZE;
+				this.saved.freezeColumns = FIRST_FREEZE;
+			}
+		} else if (key === FREEZE_ROWS || key === FREEZE_COLUMNS) {
+			const count = Math.max(0, Math.min(9, Number(value) || 0));
+			if (key === FREEZE_ROWS) this.saved.freezeRows = count;
+			else this.saved.freezeColumns = count;
+		} else return;
+		if (key !== ADDS_ROWS) {
+			setDefaultFreeze(defaultOf(this.saved));
+			this.freezeChanged();
+			// The rows and columns show only while the switch is on.
+			if (key === FREEZE_TABLES) this.update();
+		}
 		await this.save();
 	}
 }
@@ -158,7 +214,10 @@ export async function drawTables(plugin: Plugin, extensions: Extension[]): Promi
 	// check a click opening a cell.
 	setClickSelects(true);
 	plugin.register(() => setClickSelects(true));
-	plugin.addSettingTab(new Settings(app, plugin, saved, () => plugin.saveData(saved)));
+	// Every table with no freeze of its own freezes as the settings say, while *Freeze tables* is on (BMT-140).
+	setDefaultFreeze(defaultOf(saved));
+	plugin.register(() => setDefaultFreeze(null));
+	plugin.addSettingTab(new Settings(app, plugin, saved, () => plugin.saveData(saved), () => own.freezeChanged()));
 	plugin.register(() => setTableControls(null));
 	for (const command of tableCommands()) plugin.addCommand(command);
 	// The note's editors answer for an open cell while it's open; their own answers come back as the plugin unloads.

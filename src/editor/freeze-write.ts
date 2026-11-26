@@ -34,14 +34,14 @@ export interface LineChange {
  * taken out after a backslash would escape the pipe after it, and one written inside what reads as code
  * wouldn't count. Nor can the row be left with only dashes, which Obsidian doesn't read as a row.
  */
-function headerWith(header: string, freeze: Freeze): string | null {
+function headerWith(header: string, freeze: Freeze, keep: boolean): string | null {
 	const cells = rowCells(header).map(withoutMark);
-	let written = withFreeze(header, freeze);
+	let written = withFreeze(header, freeze, keep);
 	if (rowCells(written).length < cells.length) written = `${written.trimEnd()} |`;
 	const kept = rowCells(written).map(withoutMark);
 	if (kept.length !== cells.length || kept.some((text, column) => text !== cells[column]) || onlyDashes(written)) return null;
 	const { rows, columns } = readFreeze(written);
-	const reads = freeze.rows || freeze.columns ? rows === freeze.rows && columns === freeze.columns : !hasMark(written);
+	const reads = freeze.rows || freeze.columns || keep ? rows === freeze.rows && columns === freeze.columns && hasMark(written) : !hasMark(written);
 	return reads ? written : null;
 }
 
@@ -50,10 +50,11 @@ function headerWith(header: string, freeze: Freeze): string | null {
  * them, or null when its header row can't take the mark. The mark widens its column, and Enter opens a cell
  * only in a table padded as Obsidian pads it, so a table Obsidian wrote is padded again that way. Any other
  * table keeps its own spacing, and only its header row changes. No changes when the header already says this.
+ * `keep` writes a freeze of nothing as `%%freeze 0 0%%` rather than taking the mark out (`withFreeze`).
  */
-export function freezeChanges(doc: Text, table: Span, freeze: Freeze): { changes: LineChange[]; to: number } | null {
+export function freezeChanges(doc: Text, table: Span, freeze: Freeze, keep = false): { changes: LineChange[]; to: number } | null {
 	const first = doc.lineAt(table.from);
-	const header = headerWith(first.text, freeze);
+	const header = headerWith(first.text, freeze, keep);
 	if (header === null) return null;
 	if (header === first.text) return { changes: [], to: table.to };
 	const rewritten = rewrittenWith(doc, table, header);

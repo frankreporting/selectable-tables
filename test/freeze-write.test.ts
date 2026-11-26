@@ -152,3 +152,20 @@ test('a header the mark can\'t go in safely is left alone', () => {
 	const code = noteWith('Bob`s | Ann`s', '--- | ---', 'a | b');
 	assert.equal(freezeChanges(code.doc, code.table, freeze(2, 1)), null, 'the mark would land in what reads as code');
 });
+
+test('unfreezing with keep writes a mark of zeros, which reads back as nothing frozen', () => {
+	const { doc, table } = noteWith('| %%freeze 2 1%% Name | Bed  |', '| ------------------- | ---- |', '| Shed 1              | Moss |');
+	const written = freezeChanges(doc, table, nothing, true);
+	assert.ok(written);
+	const header = apply(doc, written.changes).lineAt(table.from).text;
+	assert.ok(header.includes('%%freeze 0 0%%'), header);
+	assert.deepEqual(readFreeze(header), nothing);
+});
+
+test('keep on a table with no mark writes a mark of zeros, and without keep there is nothing to write', () => {
+	const { doc, table } = noteWith(...SHEDS);
+	const kept = freezeChanges(doc, table, nothing, true);
+	assert.ok(kept && kept.changes.length > 0);
+	assert.ok(apply(doc, kept.changes).lineAt(table.from).text.includes('%%freeze 0 0%%'));
+	assert.deepEqual(freezeChanges(doc, table, nothing)?.changes, []);
+});

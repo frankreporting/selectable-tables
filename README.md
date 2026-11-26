@@ -108,6 +108,7 @@ A freeze is saved as a comment in the table's header row, such as `%%freeze 2 1%
 The comment doesn't show, and it stays with the table's text, so it copies, syncs and moves with the table. Copying the cell that holds it leaves it out. You can also type it yourself, in any cell of the header row.
 
 - `%%freeze 0 0%%`, or no comment, freezes nothing. Deleting the column that holds the comment ends the freeze.
+- **To freeze every table,** turn on **Freeze tables** in the plugin's settings, and choose how many rows and columns, 1 and 1 to start. It applies to every table without a comment of its own, and writes nothing into your notes. A table's own comment always wins, so `%%freeze 0 0%%` keeps a table unfrozen. On a table the setting freezes, **Unfreeze table** writes `%%freeze 0 0%%`, and the freeze commands write a comment of the table's own.
 - A table can freeze up to 9 columns.
 - Rows taller than half the pane, or columns as wide as the table, stop pinning until there's room, so there's always somewhere to scroll.
 - Frozen rows pin a little below the top of the pane, so the header's drag handles stay in reach.

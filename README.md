@@ -183,3 +183,7 @@ Open the folder as a vault in Obsidian (**Open another vault → Open folder as 
 ## License
 
 [MIT](LICENSE)
+
+## Credits
+
+Built with [Claude Code](https://claude.com/claude-code), Anthropic's AI coding agent, which wrote much of the code with me.

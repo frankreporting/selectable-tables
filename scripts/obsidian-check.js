@@ -4683,6 +4683,23 @@
 					await leave();
 					for (let i = 0; i < 24 && view.state.doc.toString() !== frozenText; i++) await key('z', { meta: true });
 					check('Own 67: Cmd+Z takes the typing back', view.state.doc.toString() === frozenText);
+					// A theme's rule that tells a note's table from other tables by the box holding it lands on the copies as on the
+					// real table (BMT-136): Baseline's Row lines draw a line under each cell of a table outside a `.table-wrapper`,
+					// which doubled the copies' lines and moved every row below a short one a pixel down. A stand-in for that rule,
+					// drawn thick, must leave each of the strip's rows on its real row.
+					{
+						const lines = document.createElement('style');
+						lines.textContent = 'div:not(.el-table):not(.table-wrapper) > table > tbody > tr > td { border-bottom: 4px solid rgb(255, 0, 0); }';
+						document.head.append(lines);
+						await frames(3);
+						const reals = Array.from(firstBox(plants).querySelectorAll(':scope > .table-wrapper > table > tbody > tr')).filter((tr) => !tr.hasClass('selectable-tables-spacer'));
+						const copies = Array.from(strip()?.querySelectorAll('tbody > tr') ?? []).filter((tr) => !tr.hasClass('selectable-tables-spacer'));
+						const off = reals.map((tr, i) => [i, Math.round(tr.getBoundingClientRect().bottom - (copies[i]?.getBoundingClientRect().bottom ?? NaN))]).filter(([, d]) => !(Math.abs(d) <= 1));
+						const wrapped = Array.from(firstBox(plants).querySelectorAll('.selectable-tables-strip table')).every((table) => table.parentElement.hasClass('table-wrapper'));
+						lines.remove();
+						await frames(2);
+						check('Own 201: under a theme rule for tables outside a table wrapper, the frozen column\'s rows stay on their real rows', !!strip() && reals.length > 0 && copies.length === reals.length && off.length === 0 && wrapped, { rows: reals.length, copies: copies.length, off: off.slice(0, 5), wrapped });
+					}
 
 					// A cell in a frozen row and a frozen column, opened with the rows pinned and the table moved sideways, opens where it
 					// is and the table stays: the strip goes under the pinned rows, so rows passing under them don't cover it, and a

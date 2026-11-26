@@ -3908,7 +3908,11 @@
 					await restore(view, mdText);
 
 					// The keys in an open cell (STA-9): the arrows and the jump keys stay in its text, and stop at its ends; Enter, Tab
-					// and Shift+Tab move between cells, each with its text selected, and do nothing at the table's ends.
+					// and Shift+Tab move between cells, each with its text selected, and with the setting Tab and Enter add a row off, do
+					// nothing at the table's ends. Own 55 checks the setting on (BMT-138).
+					const movesTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+					const movesWere = movesTab?.getControlValue?.('addsRows');
+					await movesTab?.setControlValue('addsRows', false);
 					view = await open('Cell moves');
 					const cellsText = view.state.doc.toString();
 					const seed = models(view)[0];
@@ -3926,7 +3930,7 @@
 					}
 					const stepsWant = '3,1 6 | 3,1 6 | 3,1 6 | 3,1 0 | 3,1 0 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 6-0 | 3,1 6 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | 4,1 0-10 | 4,2 0-11 | 4,2 0-11 | selected 4,2';
 					const unchanged = view.state.doc.toString() === cellsText;
-					check('Own 53: in an open cell ← → ↑ ↓, Cmd+← → ↑ ↓, Page Up and Down, Cmd+Home and End and Ctrl+↑ ↓ stay in its text and stop at its ends, with Shift selecting, the note still; Tab, Shift+Tab and Enter move with the text selected, and do nothing at the table\'s end', steps.join(' | ') === stepsWant && scrollMoved <= 1 && unchanged, { got: steps.join(' | '), scrollMoved, unchanged });
+					check('Own 53: in an open cell ← → ↑ ↓, Cmd+← → ↑ ↓, Page Up and Down, Cmd+Home and End and Ctrl+↑ ↓ stay in its text and stop at its ends, with Shift selecting, the note still; Tab, Shift+Tab and Enter move with the text selected, and with Tab and Enter add a row off, do nothing at the table\'s end', steps.join(' | ') === stepsWant && scrollMoved <= 1 && unchanged, { got: steps.join(' | '), scrollMoved, unchanged });
 					await key('Escape');
 					await restore(view, cellsText);
 					await frames(3);
@@ -3968,6 +3972,7 @@
 					await key('Escape');
 					check('Own 53: after Shift+Enter, ↑ and ↓ move between the open cell\'s two lines, then to its start and end', linesOk, { twoLines, lines });
 					await restore(view, cellsText);
+					await movesTab?.setControlValue('addsRows', movesWere ?? true);
 					// With the switch off, Obsidian's own cell keeps its keys: → at the text's end goes to the next cell, and Page Down
 					// closes the cell and selects the column's bottom cell. Only the plugin's cell keeps them in its text.
 					preview.use(false);

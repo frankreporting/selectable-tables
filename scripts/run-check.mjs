@@ -4,7 +4,7 @@
 //
 //   node scripts/run-check.mjs [--only <section>] [--install] [--minimize] [--minutes 90] [--stall 10]
 //
-//   --only <section>  own, cells, or a cells section by its flag's name: Formatting runs window.__checkFormattingOnly
+//   --only <section>  own, earlier (the own table's sections before the cells'), cells, or a cells section by its flag's name: Formatting runs window.__checkFormattingOnly
 //                     with __checkOwnOnly and __checkCellsOnly, and Fallback the last section, Obsidian's own tables
 //                     where the plugin's doesn't draw. Without it, the full run.
 //   --install         builds the plugin and copies it into the vault's plugin folder first.
@@ -48,6 +48,7 @@ function flagsFor(section) {
 	if (!section) return [];
 	if (section === 'own') return ['__checkOwnOnly'];
 	if (section === 'cells') return ['__checkOwnOnly', '__checkCellsOnly'];
+	if (section === 'earlier') return ['__checkOwnOnly', '__checkEarlierOnly'];
 	const name = `__check${section[0].toUpperCase()}${section.slice(1)}Only`;
 	return ['__checkOwnOnly', '__checkCellsOnly', ...(section === 'corners' ? ['__checkFrozenCellsOnly'] : []), name];
 }

@@ -2,7 +2,7 @@
 
 *Formerly Selectable Tables.*
 
-An Obsidian plugin that makes Markdown tables in Live Preview fast and easy to work with, like a spreadsheet. It draws each table itself, so a table of thousands of rows scrolls and takes typing as smoothly as a short one. Select a cell and move with the arrow keys without opening anything, type to replace a cell, select a range of cells, freeze the first rows and columns, and move, add, sort and format rows, columns and cells. You hit `Enter` to drop into a cell for editing.
+An Obsidian plugin that makes Markdown tables in Live Preview faster and easier to navigate. The plugin takes over rendering of each table from Obsidian, so a table of thousands of rows scrolls and takes typing much more smoothly. Select a cell and move with the arrow keys without opening anything, type to replace a cell, select a range of cells, freeze the first rows and columns, and move, add, sort and format rows, columns and cells. `Enter` drops into a cell for editing.
 
 ![Demo with the keys shown on screen: holding ↓ passes the tables, → selects one, the arrows and jump keys move between cells without opening them, and Enter opens a cell](docs/demo.gif)
 
@@ -17,16 +17,6 @@ One of the original objectives was to make scrolling notes with large tables a l
 3. Select **Install**, then **Enable**.
 
 Requires Obsidian 1.15.1 or later. On an older Obsidian, the plugin stays on version 0.2.3, as Selectable Tables.
-
-## Where it works
-
-Every table in a note's Live Preview, on a computer, a phone or a tablet. Everywhere else, Obsidian draws its tables as it does without the plugin, and none of what follows applies there:
-
-- Source mode and Reading view.
-- Canvas cards, hover previews, and other editors outside a note's tab.
-- Tables inside callouts or list items, which Obsidian doesn't draw as tables in the editor.
-
-Other plugins that work with the tables Obsidian draws in Live Preview won't find them in a note, since the plugin draws its own there.
 
 ## Large tables
 
@@ -44,7 +34,7 @@ Only the rows near the screen are drawn, and the rest stand in at their size, so
 | Any other key move that would land in the table, such as Option with an arrow | Selects the whole table. No cell opens. Page Up and Page Down pass it. |
 | Shift with an arrow | The selection takes the whole table at once. |
 
-**With the mouse:** a click on a cell selects it, and a double-click opens it, with the caret where you clicked. A click on the cell already selected opens it too. A click beside the cells selects the whole table. Drag across cells to select a range, and four quick clicks select every cell.
+**With the mouse:** a click on a cell selects it, and a double-click opens it, with the caret where you clicked. A click on the cell already selected opens it too. A click beside the cells selects the whole table.
 
 **With a table selected:**
 
@@ -75,15 +65,13 @@ Only the rows near the screen are drawn, and the rest stand in at their size, so
 | Option+Enter | Opens the cell's link. Cmd+Enter opens it in a new tab, Cmd+Option+Enter to the right, and Cmd+Option+Shift+Enter in a new window, or whatever keys you've set for those commands. With several links in the cell, a menu below it lists them. A picture doesn't count as a link. |
 | Escape | Back to the selected table. |
 
-**In an open cell,** you edit with Obsidian's own editor, links, suggestions and all. The arrow keys stay in the cell's text: ← and → stop at its ends, and ↑ and ↓ go to its start or end from its first or last line. Tab and Shift+Tab go to the next and previous cell, and Enter to the cell below, each with its text selected. In the last cell, Tab adds a row, and so does Enter on the last row, as in Obsidian: turn off **Tab and Enter add a row** in the plugin's settings to stop that. Shift+Enter is a line break. Option+Enter and the other link keys open the link at the caret. Escape closes the cell and selects it.
+**In an open cell,** the arrow keys stay in the cell's text: ← and → stop at its ends, and ↑ and ↓ go to its start or end from its first or last line. Escape closes the cell and selects it. Everything else works as in Obsidian's own cell. To stop Tab and Enter adding a row at the table's end, turn off **Tab and Enter add a row** in the plugin's settings.
 
 With Vim mode on, Vim's own keys come first in normal mode.
 
 ## Rows, columns and cells
 
-Right-click a cell for Obsidian's **Row**, **Column** and **Sort** items, which add, move, duplicate and delete rows and columns, align columns and sort the table, then the freeze items below. Right-click inside a range of cells for **Cut**, **Copy**, **Paste**, **Format**, **Align**, **Clear cells** and **Delete cells**. The command palette has the same edits as Obsidian's table commands.
-
-Hover over a table for Obsidian's drag handles: drag one to move its row or column, or click it to select the row or column. The **+** buttons below and beside the table add a row or a column.
+Obsidian's own table controls work as before: the right-click menus for a cell and a range of cells, the drag handles, the **+** buttons and the table commands.
 
 ## Freeze rows and columns
 
@@ -96,7 +84,7 @@ To freeze, right-click a cell and choose one of these, or select or open a cell 
 - **Freeze rows and columns up to here:** both at once. On a table's first cell, that freezes the header row and the first column.
 - **Unfreeze table.**
 
-Afterwards that cell is selected and in view, and Undo takes the change back. To give a command its own keys, look it up in **Settings → Hotkeys**.
+Afterwards that cell stays selected and in view.
 
 A freeze is saved as a comment in the table's header row, such as `%%freeze 2 1%%` for 2 rows and 1 column. The commands put it in the first cell, unless the row already has one:
 
@@ -134,8 +122,10 @@ Obsidian gives plugins no way to draw tables in its place, so the plugin changes
 
 ## Known issues
 
+- The plugin draws tables only in a note's Live Preview. Everywhere else, Obsidian draws its own, without the plugin's keys or freezing: Source mode, Reading view, canvas cards, hover previews, and other editors outside a note's tab.
+- Tables inside callouts or list items aren't drawn as tables in the editor, as without the plugin.
+- Other plugins that work with the tables Obsidian draws in Live Preview won't find them in a note, since the plugin draws its own there.
 - On phones and tablets, frozen rows and columns don't pin yet.
-- Canvas cards and hover previews show Obsidian's own tables, without the plugin's keys or freezing.
 - A very fast flick through a long table can show blank strips for a moment, before its rows are drawn.
 - Typing an accent or an input method's first key on a selected cell only opens it.
 

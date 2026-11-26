@@ -3908,7 +3908,11 @@
 					await restore(view, mdText);
 
 					// The keys in an open cell (STA-9): the arrows and the jump keys stay in its text, and stop at its ends; Enter, Tab
-					// and Shift+Tab move between cells, each with its text selected, and do nothing at the table's ends.
+					// and Shift+Tab move between cells, each with its text selected, and with the setting Tab and Enter add a row off, do
+					// nothing at the table's ends. Own 55 checks the setting on (BMT-138).
+					const movesTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+					const movesWere = movesTab?.getControlValue?.('addsRows');
+					await movesTab?.setControlValue('addsRows', false);
 					view = await open('Cell moves');
 					const cellsText = view.state.doc.toString();
 					const seed = models(view)[0];
@@ -3926,7 +3930,7 @@
 					}
 					const stepsWant = '3,1 6 | 3,1 6 | 3,1 6 | 3,1 0 | 3,1 0 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 0 | 3,1 6 | 3,1 6-0 | 3,1 6 | 3,2 0-5 | 3,1 0-6 | 4,1 0-10 | 4,1 0-10 | 4,2 0-11 | 4,2 0-11 | selected 4,2';
 					const unchanged = view.state.doc.toString() === cellsText;
-					check('Own 53: in an open cell ← → ↑ ↓, Cmd+← → ↑ ↓, Page Up and Down, Cmd+Home and End and Ctrl+↑ ↓ stay in its text and stop at its ends, with Shift selecting, the note still; Tab, Shift+Tab and Enter move with the text selected, and do nothing at the table\'s end', steps.join(' | ') === stepsWant && scrollMoved <= 1 && unchanged, { got: steps.join(' | '), scrollMoved, unchanged });
+					check('Own 53: in an open cell ← → ↑ ↓, Cmd+← → ↑ ↓, Page Up and Down, Cmd+Home and End and Ctrl+↑ ↓ stay in its text and stop at its ends, with Shift selecting, the note still; Tab, Shift+Tab and Enter move with the text selected, and with Tab and Enter add a row off, do nothing at the table\'s end', steps.join(' | ') === stepsWant && scrollMoved <= 1 && unchanged, { got: steps.join(' | '), scrollMoved, unchanged });
 					await key('Escape');
 					await restore(view, cellsText);
 					await frames(3);
@@ -3968,6 +3972,7 @@
 					await key('Escape');
 					check('Own 53: after Shift+Enter, ↑ and ↓ move between the open cell\'s two lines, then to its start and end', linesOk, { twoLines, lines });
 					await restore(view, cellsText);
+					await movesTab?.setControlValue('addsRows', movesWere ?? true);
 					// With the switch off, Obsidian's own cell keeps its keys: → at the text's end goes to the next cell, and Page Down
 					// closes the cell and selects the column's bottom cell. Only the plugin's cell keeps them in its text.
 					preview.use(false);
@@ -4022,23 +4027,42 @@
 					await key('Escape');
 					await restore(view, cellsText);
 
-					// Tab held runs along the rows and stops at the table's last cell; a fresh Tab or Enter there does nothing.
+					// Tab held runs along the rows and stops at the table's last cell, adding no row. With the setting Tab and Enter add a
+					// row on, its default (BMT-138), a fresh Tab there adds a row and opens its first cell, and a fresh Enter on that row
+					// adds another and opens the cell below. With it off, they do nothing, and the cell stays open.
+					const rowsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+					const addsRowsWere = rowsTab?.getControlValue?.('addsRows');
+					if (rowsTab && addsRowsWere !== true) await rowsTab.setControlValue('addsRows', true);
 					await tableUnder(view, 'Tall table');
 					const tall = models(view).find((model) => view.state.doc.sliceString(model.from, model.from + 7) === '| Row |');
 					const tallLines = view.state.doc.lines;
-					await openText(view, '1');
-					for (let i = 0; i < tall.count * 3 + 6; i++) await key('Tab', { repeat: i > 0 });
-					const lastCell = `${tall.count},2`;
+					const lastRow = tall.count;
+					const toLastCell = async () => {
+						await openText(view, '1');
+						for (let i = 0; i < lastRow * 3 + 6; i++) await key('Tab', { repeat: i > 0 });
+					};
+					const atEnd = async (name) => {
+						await key(name);
+						await sleep(300);
+						await frames(3);
+						return { at: where(view), lines: view.state.doc.lines };
+					};
+					await toLastCell();
+					const lastCell = `${lastRow},2`;
 					const heldStops = where(view)?.startsWith(lastCell) && view.state.doc.lines === tallLines;
-					await key('Tab');
-					await sleep(300);
-					await frames(3);
-					const tabbed = { at: where(view), lines: view.state.doc.lines };
-					await key('Enter');
-					await sleep(300);
-					await frames(3);
-					const entered = { at: where(view), lines: view.state.doc.lines };
-					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, and a fresh Tab or Enter there does nothing: no row is added, and the cell stays open', heldStops && tabbed.lines === tallLines && !!tabbed.at?.startsWith(lastCell) && entered.lines === tallLines && !!entered.at?.startsWith(lastCell), { heldStops, lastCell, tabbed, entered, tallLines });
+					const tabbed = await atEnd('Tab');
+					const entered = await atEnd('Enter');
+					check('Own 55: a held Tab runs along the rows and stops at the table\'s last cell, adding no row', heldStops, { at: where(view), lastCell, heldStops });
+					check('Own 55: with Tab and Enter add a row on, a fresh Tab there adds a row and opens its first cell, and Enter on it adds another and opens the cell below', tabbed.lines === tallLines + 1 && !!tabbed.at?.startsWith(`${lastRow + 1},0`) && entered.lines === tallLines + 2 && !!entered.at?.startsWith(`${lastRow + 2},0`), { tabbed, entered, tallLines, lastRow });
+					await key('Escape');
+					await key('Escape');
+					await restore(view, cellsText);
+					if (rowsTab) await rowsTab.setControlValue('addsRows', false);
+					await toLastCell();
+					const tabbedOff = await atEnd('Tab');
+					const enteredOff = await atEnd('Enter');
+					check('Own 55: with it off, a fresh Tab or Enter there does nothing: no row is added, and the cell stays open', !!rowsTab && tabbedOff.lines === tallLines && !!tabbedOff.at?.startsWith(lastCell) && enteredOff.lines === tallLines && !!enteredOff.at?.startsWith(lastCell), { tab: !!rowsTab, tabbedOff, enteredOff, tallLines });
+					if (rowsTab) await rowsTab.setControlValue('addsRows', addsRowsWere ?? true);
 					await key('Escape');
 					await key('Escape');
 					await restore(view, cellsText);
@@ -4256,7 +4280,11 @@
 					preview.forcePlain(false);
 					check('Own 62: forced, cells open in the plain editor, its Markdown shown as text, written to the note, drawn once it closes, with Toggle checkbox leaving the row alone and Undo working', plain && !plain.editor.borrowed && plainShown === 'Tomato **b**' && plainAnswer && plainQuiet && drawnBold && plainUndo, { borrowed: plain?.editor.borrowed, plainShown, plainAnswer, plainQuiet, drawnBold, plainUndo });
 					await restore(view, cellsText);
-					// The plain editor has the same keys: they stay in its text, and Enter and Tab stop at the table's end (STA-9).
+					// The plain editor has the same keys: they stay in its text, and with Tab and Enter add a row off, Enter and Tab stop
+					// at the table's end (STA-9). The setting's on side is the same code, which Own 55 checks.
+					const plainRowsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+					const plainRowsWere = plainRowsTab?.getControlValue?.('addsRows');
+					await plainRowsTab?.setControlValue('addsRows', false);
 					preview.forcePlain(true);
 					await openText(view, 'Tomato');
 					const plainKeys = [where(view)];
@@ -4268,7 +4296,8 @@
 					await key('Escape');
 					await key('Escape');
 					preview.forcePlain(false);
-					check('Own 62: in the plain editor too, the arrows and Page Up and Down stay in the cell\'s text, and Enter and Tab stop at the table\'s end', plainStays, plainKeys.join(' | '));
+					await plainRowsTab?.setControlValue('addsRows', plainRowsWere ?? true);
+					check('Own 62: in the plain editor too, the arrows and Page Up and Down stay in the cell\'s text, and with Tab and Enter add a row off, Enter and Tab stop at the table\'s end', plainStays, plainKeys.join(' | '));
 					await restore(view, cellsText);
 					// Each private piece the borrowed editor needs, taken away in turn, is named.
 					const ownerNow = app.workspace.activeLeaf.view;
@@ -5947,35 +5976,51 @@
 						await leaveAll(view);
 						await restore(view, reportText);
 
-						// Tab and Enter at the table's end do nothing, tapped or held: no key adds a row (Brian, 11/24).
-						const rowsNow = () => view.state.doc.toString().split('\n').filter((line) => line.startsWith('|')).length;
-						const linesBefore = rowsNow();
-						await scrollTo(view, null);
-						await openCellAt(view, true, null, 0, 0);
-						for (let i = 0; i < 11; i++) await key('Tab');
-						const tapAtEnd = { open: openAtNow(view), rows: rowsNow() - linesBefore };
-						await key('Tab');
-						await sleep(300);
-						await frames(3);
-						const tapped = { open: openAtNow(view), rows: rowsNow() - linesBefore, hasFocus: oc(view)?.view.hasFocus };
+						// Tab and Enter at the table's end, tapped or held. With the setting Tab and Enter add a row off, they do nothing
+						// (Brian, 11/24); on, its default, a fresh press adds a row and a held key's repeats add none (BMT-138).
+						const endsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+						const endsWere = endsTab?.getControlValue?.('addsRows');
+						const ends = async () => {
+							const rowsNow = () => view.state.doc.toString().split('\n').filter((line) => line.startsWith('|')).length;
+							const linesBefore = rowsNow();
+							await scrollTo(view, null);
+							await openCellAt(view, true, null, 0, 0);
+							for (let i = 0; i < 11; i++) await key('Tab');
+							const tapAtEnd = { open: openAtNow(view), rows: rowsNow() - linesBefore };
+							await key('Tab');
+							await sleep(300);
+							await frames(3);
+							const tapped = { open: openAtNow(view), rows: rowsNow() - linesBefore, hasFocus: oc(view)?.view.hasFocus };
+							await leaveAll(view);
+							await restore(view, reportText);
+							await scrollTo(view, null);
+							await openCellAt(view, true, null, 0, 0);
+							await key('Tab');
+							for (let i = 0; i < 20; i++) await key('Tab', { repeat: true });
+							const held = { open: openAtNow(view), rows: rowsNow() - linesBefore };
+							await leaveAll(view);
+							await openCellAt(view, true, null, 3, 1);
+							await key('Enter');
+							await sleep(300);
+							await frames(3);
+							const entered = { open: openAtNow(view), rows: rowsNow() - linesBefore, hasFocus: oc(view)?.view.hasFocus };
+							for (let i = 0; i < 5; i++) await key('Enter', { repeat: true });
+							const enterHeld = { open: openAtNow(view), rows: rowsNow() - linesBefore };
+							return { tapAtEnd, tapped, held, entered, enterHeld };
+						};
+						await endsTab?.setControlValue('addsRows', false);
+						let { tapAtEnd, tapped, held, entered, enterHeld } = await ends();
+						check('Own 79: with Tab and Enter add a row off, tapping Tab through the cells stops at the last, and one more tap does nothing: no row, the cell still open with the keyboard', tapAtEnd.open === '3,2' && tapAtEnd.rows === 0 && tapped.open === '3,2' && tapped.rows === 0 && tapped.hasFocus, { tapAtEnd, tapped });
+						check('Own 79: with it off, holding Tab stops at the last cell and adds nothing', held.open === '3,2' && held.rows === 0, held);
+						check('Own 79: with it off, Enter on the last row does nothing, tapped or held: no row, the cell still open', entered.open === '3,1' && entered.rows === 0 && entered.hasFocus && enterHeld.open === '3,1' && enterHeld.rows === 0, { entered, enterHeld });
 						await leaveAll(view);
 						await restore(view, reportText);
-						await scrollTo(view, null);
-						await openCellAt(view, true, null, 0, 0);
-						await key('Tab');
-						for (let i = 0; i < 20; i++) await key('Tab', { repeat: true });
-						const held = { open: openAtNow(view), rows: rowsNow() - linesBefore };
-						await leaveAll(view);
-						await openCellAt(view, true, null, 3, 1);
-						await key('Enter');
-						await sleep(300);
-						await frames(3);
-						const entered = { open: openAtNow(view), rows: rowsNow() - linesBefore, hasFocus: oc(view)?.view.hasFocus };
-						for (let i = 0; i < 5; i++) await key('Enter', { repeat: true });
-						const enterHeld = { open: openAtNow(view), rows: rowsNow() - linesBefore };
-						check('Own 79: tapping Tab through the cells stops at the last, and one more tap does nothing: no row, the cell still open with the keyboard', tapAtEnd.open === '3,2' && tapAtEnd.rows === 0 && tapped.open === '3,2' && tapped.rows === 0 && tapped.hasFocus, { tapAtEnd, tapped });
-						check('Own 79: holding Tab stops at the last cell and adds nothing', held.open === '3,2' && held.rows === 0, held);
-						check('Own 79: Enter on the last row does nothing, tapped or held: no row, the cell still open', entered.open === '3,1' && entered.rows === 0 && entered.hasFocus && enterHeld.open === '3,1' && enterHeld.rows === 0, { entered, enterHeld });
+						await endsTab?.setControlValue('addsRows', true);
+						({ tapAtEnd, tapped, held, entered, enterHeld } = await ends());
+						check('Own 79: with it on, one more tap of Tab at the last cell adds a row and opens its first cell, with the keyboard', !!endsTab && tapAtEnd.open === '3,2' && tapAtEnd.rows === 0 && tapped.open === '4,0' && tapped.rows === 1 && tapped.hasFocus, { tapAtEnd, tapped });
+						check('Own 79: with it on, holding Tab stops at the last cell and adds nothing', held.open === '3,2' && held.rows === 0, held);
+						check('Own 79: with it on, Enter on the last row adds a row and opens the cell below, and holding it adds no more', entered.open === '4,1' && entered.rows === 1 && entered.hasFocus && enterHeld.open === '4,1' && enterHeld.rows === 1, { entered, enterHeld });
+						await endsTab?.setControlValue('addsRows', endsWere ?? true);
 						await leaveAll(view);
 						await restore(view, reportText);
 
@@ -9461,7 +9506,9 @@
 						check('Own 162: a double-click on it opens it where it\'s pinned, with the note where it was', !!headerAt && pinned.opened?.open === `0,${pinned.cell?.column}` && pinned.opened.there && Math.abs(pinned.opened.moved) < 2, pinned);
 						check('Own 162: in Plants slid sideways, a double-click on Plant 4 in the frozen Name column opens it where it shows', strip.cell?.row === 4 && strip.cell.column === 0 && strip.open === '4,0' && strip.there, strip);
 
-						// Own 163: the plugin has no settings tab, and a click selects a cell, always (BMT-137, Brian 11/26). The check
+						// Own 163: a click selects a cell, always, with no setting for it (BMT-137, Brian 11/26): the settings tab holds one
+						// switch, Tab and Enter add a row, on by default (BMT-138). Obsidian 1.15 opens Settings in a popout window, which
+						// would show on the screen, so the tab's own definitions are read instead. The check
 						// script still has a click open a cell, through the plugin's own switch, for every section but this one: then a
 						// click on Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before.
 						const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
@@ -9469,7 +9516,8 @@
 						await sleep(300);
 						model = tableAt(view, null);
 						await leaveAll(view);
-						const setting = { tab: !!tab, selects: preview.clickSelects(), cursor: getComputedStyle(model.cellElement({ row: 1, column: 0 })).cursor };
+						const definitions = tab?.getSettingDefinitions?.() ?? [];
+						const setting = { names: definitions.map((each) => each.name), type: definitions[0]?.control?.type, on: tab?.getControlValue?.('addsRows'), selects: preview.clickSelects(), cursor: getComputedStyle(model.cellElement({ row: 1, column: 0 })).cursor };
 						preview.setClickSelects(false);
 						app.workspace.updateOptions();
 						await sleep(200);
@@ -9490,7 +9538,7 @@
 						await leaveAll(view);
 						preview.setClickSelects(true);
 						app.workspace.updateOptions();
-						check('Own 163: the plugin has no settings tab, and a click selects a cell, with the arrow pointer', !setting.tab && setting.selects && setting.cursor === 'default', setting);
+						check('Own 163: the settings tab holds one switch, Tab and Enter add a row, a toggle, on; none for clicks, and a click selects a cell, with the arrow pointer', setting.names.join() === 'Tab and Enter add a row' && setting.type === 'toggle' && setting.on === true && setting.selects && setting.cursor === 'default', setting);
 						check('Own 163: with it off, a click on Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before', off.click === '1,0' && off.drag.at === '1,1 from 1,0' && !off.drag.open && off.drag.ranged === 2, off);
 						check('Own 163: with it off, the pointer over a cell is Obsidian\'s text cursor again', off.pointer === 'text', off.pointer);
 

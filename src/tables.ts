@@ -98,13 +98,11 @@ class Settings extends PluginSettingTab {
 			},
 			{
 				name: 'Freeze rows',
-				desc: 'How many of each table\'s first rows stay in view, its header included.',
 				control: { type: 'dropdown', key: FREEZE_ROWS, options: COUNTS, defaultValue: String(FIRST_FREEZE) },
 				visible: () => this.saved.freezeTables === true,
 			},
 			{
 				name: 'Freeze columns',
-				desc: 'How many of each table\'s first columns stay in view.',
 				control: { type: 'dropdown', key: FREEZE_COLUMNS, options: COUNTS, defaultValue: String(FIRST_FREEZE) },
 				visible: () => this.saved.freezeTables === true,
 			},

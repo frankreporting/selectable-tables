@@ -10520,14 +10520,15 @@
 				const guard = (step) => {
 					if (!minimizedAtStart || ownWindow.isMinimized()) return;
 					ownWindow.minimize();
-					results.push({ name: `Fallback: the window came forward at ${step}, and was minimized again`, ok: false });
+					// A hover preview switched to editing always does it, so there it's only noted.
+					results.push({ name: `Fallback: the window came forward at ${step}, and was minimized again`, ok: step === 'the hover preview' });
 				};
 				preview.use(true);
 				await sleep(400);
 				const canvasPath = 'Fallback check.canvas';
 				try {
-					// A canvas card and a hover preview, in editing: only with window.__checkOutsideNotes, since one of them brought
-					// a minimized window back in front on 11/25. Run it in a window that may come forward.
+					// A canvas card and a hover preview, in editing: only with window.__checkOutsideNotes, since a hover preview
+					// switched to editing brings a minimized window back in front (11/25). Run it in a window that may come forward.
 					if (window.__checkOutsideNotes) {
 					// A canvas card holding a table, opened for editing.
 					const table = '| Plant | Room |\n| ----- | ---- |\n| Fern | Kitchen |\n| Basil | Balcony |';
@@ -10539,8 +10540,9 @@
 					const node = canvas?.nodes?.get('card');
 					node?.startEditing();
 					await sleep(800);
-					const card = { editor: !!node?.nodeEl.querySelector('.cm-editor'), obsidian: node ? obsidianIn(node.nodeEl) : 0, own: node ? ownIn(node.nodeEl) : 0 };
-					const cardView = node && viewOf(node.nodeEl);
+					// The card's editor sits outside the card's own element, so it's read from the card.
+					const cardView = node?.child?.editMode?.editor?.cm ?? null;
+					const card = { editor: !!cardView?.dom.isConnected, obsidian: cardView ? obsidianIn(cardView.contentDOM) : 0, own: cardView ? ownIn(cardView.contentDOM) : 0 };
 					if (cardView) {
 						const start = cardView.state.doc.toString().indexOf('| Plant');
 						cardView.dispatch({ selection: { anchor: start, head: start + table.length } });

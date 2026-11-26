@@ -379,7 +379,7 @@ export class Model implements Span, DrawnTable, DragTable {
 		/** Selects the table whole. */
 		private readonly select: (model: Model) => void,
 		/** Opens a cell for editing, at a click in it, at its text's end, or emptied for typing over; says whether it opened now. */
-		private readonly open: (model: Model, cell: Cell, at: Click | 'replace' | null) => boolean,
+		private readonly open: (model: Model, cell: Cell, at: Click | 'replace' | null, focus?: boolean) => boolean,
 	) {
 		this.component.load();
 	}
@@ -490,8 +490,8 @@ export class Model implements Span, DrawnTable, DragTable {
 		this.open(this, cell, null);
 	}
 
-	typeOver(cell: Cell): boolean {
-		return this.open(this, cell, 'replace');
+	typeOver(cell: Cell, focus = true): boolean {
+		return this.open(this, cell, 'replace', focus);
 	}
 
 	/**

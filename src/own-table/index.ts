@@ -179,7 +179,7 @@ function retire(models: Iterable<Model>): void {
 /** The tables field, the editor plugin and the rest, for one copy of the plugin. */
 export function ownTables(app: App, failed: () => void, cells: Omit<CellSetup, 'app'>) {
 	const setup: CellSetup = { app, ...cells };
-	const open = (model: Model, cell: Cell, at: Click | 'replace' | null) => OpenCell.open(setup, model, cell, at ?? 'end') !== null;
+	const open = (model: Model, cell: Cell, at: Click | 'replace' | null, focus = true) => OpenCell.open(setup, model, cell, at ?? 'end', focus) !== null;
 	const select = (model: Model) => {
 		const view = model.view;
 		if (!view) return;

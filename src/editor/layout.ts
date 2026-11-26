@@ -41,10 +41,10 @@ export interface DrawnTable {
 	openCell(cell: Cell): void;
 	/**
 	 * Opens a cell emptied for typing over, a header cell keeping its freeze mark, with the caret at the end: typing on the
-	 * selected cell. Says whether it opened now, inside the key's event; a cell whose row isn't in the page opens once it's
-	 * drawn.
+	 * selected cell. Its editor takes the keyboard unless `focus` is false. Says whether it opened now, inside the key's
+	 * event; a cell whose row isn't in the page opens once it's drawn.
 	 */
-	typeOver(cell: Cell): boolean;
+	typeOver(cell: Cell, focus?: boolean): boolean;
 	/** Runs `run` once a cell's row is drawn again, after an edit that changed the table's rows, without scrolling first. */
 	afterDraw(cell: Cell, run: () => void): void;
 	/** Whether the table reads right to left, from its first header cell, as Obsidian's does. */

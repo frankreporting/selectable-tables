@@ -439,6 +439,17 @@ export function typeOn(context: TableContext): Action | null {
 	return typeBelow(context);
 }
 
+/**
+ * Whether a key starts an accent or an input method's composition rather than typing a character itself: a dead key, such
+ * as Option+E, or an input method's first key, whose key code is 229 everywhere and whose `key` is its real letter on a
+ * Mac, `Process` on Windows and Linux, and `Unidentified` on Android. On a Mac the text box has to hold the keyboard before
+ * such a key: moved during it, macOS drops the accent half made, and the cell's editor goes on composing for good (Brian's
+ * hand check, 11/25).
+ */
+export function composes({ key, keyCode }: { key: string; keyCode: number }): boolean {
+	return keyCode === 229 || key === 'Dead' || key === 'Process' || key === 'Unidentified';
+}
+
 /** The parts of a key event that say whether it types. */
 export interface Key {
 	key: string;

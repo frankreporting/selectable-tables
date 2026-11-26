@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
-import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, showsCellAfter, stay, stopsEdit, tab, typeBelow, typeOn, typesText, writesTable } from '../src/editor/decide';
+import { Action, arrow, Cells, copied, deleteForward, Direction, enter, escape, Grid, landing, noCells, noteEnd, opensCell, option, page, rowEnd, selectedTable, shifted, shiftedRowEnd, showsCellAfter, stay, stopsEdit, tab, typeBelow, typeOn, typesText, writesTable, composes } from '../src/editor/decide';
 import { Drawing, layoutOf, note } from './notes';
 import type { Cell } from '../src/editor/table-text';
 
@@ -531,6 +531,19 @@ describe('typing on a selected table or cell', () => {
 				assert.ok(!stopsEdit(done.tr, table, false), JSON.stringify(after));
 			}
 		}
+	});
+});
+
+describe('keys that start an accent or an input method', () => {
+	test('a dead key, and an input method\'s first key on each system, compose', () => {
+		assert.ok(composes({ key: 'Dead', keyCode: 229 }), 'Option+E on a Mac');
+		assert.ok(composes({ key: 'n', keyCode: 229 }), 'an input method on a Mac: its real letter, key code 229');
+		assert.ok(composes({ key: 'Process', keyCode: 229 }), 'Windows and Linux');
+		assert.ok(composes({ key: 'Unidentified', keyCode: 0 }), 'Android');
+	});
+
+	test('a key that types its own character doesn\'t', () => {
+		for (const [key, keyCode] of [['n', 78], ['M', 77], [' ', 32], ['é', 0], ['[', 219]] as const) assert.ok(!composes({ key, keyCode }), key);
 	});
 });
 

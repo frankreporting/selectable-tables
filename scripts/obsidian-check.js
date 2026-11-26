@@ -10227,24 +10227,35 @@
 						check('Own 175: Escape selects Mint, not open, and one Cmd+Z puts Basil back, selected', mint.escaped.at === '2,0' && !mint.escaped.open && mint.undone.same && mint.undone.at === '2,0' && !mint.undone.open, mint);
 						await putBack(view, text);
 
-						// Own 176 (step 2): Option+E then E on Cactus gives é; Japanese input on Fern composes 日本 in the cell, and the
-						// next key types after it.
+						// Own 176 (step 2): an accent key's or an input method's first key on a selected cell opens it emptied and is lost:
+						// moved during that key, macOS drops the accent half made, and the cell's editor goes on composing, so Escape stops
+						// working (Brian's hand check, 11/25). The cell takes the keyboard once the key is up, and an accent or a
+						// composition in it then works, and so does Escape.
 						await click(await cellMiddle(model, 3, 0));
 						await realCompose({ key: 'Dead', code: 'KeyE', altKey: true }, ['´'], 'é');
-						await sleep(200);
+						await sleep(300);
 						const accent = state(view);
+						await realCompose({ key: 'Dead', code: 'KeyE', altKey: true }, ['´'], 'é');
+						await sleep(200);
+						accent.then = state(view);
+						await key('Escape');
+						accent.escaped = { at: where(view), open: opened(view), note: lineOf(view, '| é ') !== null };
 						await putBack(view, text);
 						model = tableAt(view, null);
 						await click(await cellMiddle(model, 1, 0));
 						await realCompose({ key: 'n', code: 'KeyN' }, ['n', 'に', 'にh', 'にほ', 'にほn', 'にほん', '日本'], '日本');
-						await sleep(200);
+						await sleep(300);
 						const japanese = state(view);
+						await realCompose({ key: 'n', code: 'KeyN' }, ['n', 'に', 'にh', 'にほ', 'にほn', 'にほん', '日本'], '日本');
 						await realType('x');
-						japanese.then = preview.openCell(view)?.view.state.doc.toString() ?? null;
+						japanese.then = state(view);
+						await key('Escape');
+						japanese.escaped = { at: where(view), open: opened(view) };
 						japanese.table = view.state.doc.toString().slice(model.from, model.to).split('\n').length;
 						await putBack(view, text);
-						check('Own 176: Option+E then E on Cactus: the cell opens reading é, the composition ended', accent.open === '3,0' && accent.cell === 'é' && accent.note === 'é' && !accent.composing && accent.focused, accent);
-						check('Own 176: Japanese input on Fern composes 日本 in the cell, ends, and the next key types after it; the table keeps its rows', japanese.open === '1,0' && japanese.cell === '日本' && japanese.note === '日本' && !japanese.composing && japanese.then === '日本x' && japanese.table === 5, japanese);
+						check('Own 176: Option+E on Cactus opens it emptied, the accent lost, with the keyboard and no composition left', accent.open === '3,0' && accent.cell === '' && accent.focused && !accent.composing, accent);
+						check('Own 176: Option+E then E in the open cell gives é, and Escape closes it, selected', accent.then.cell === 'é' && accent.then.note === 'é' && !accent.then.composing && accent.escaped.at === '3,0' && !accent.escaped.open && accent.escaped.note, accent);
+						check('Own 176: Japanese input\'s first key on Fern opens it emptied, with the keyboard and no composition left; composing 日本 in it then works, the next key types after it, and Escape closes it', japanese.open === '1,0' && japanese.cell === '' && japanese.focused && !japanese.composing && japanese.then.cell === '日本x' && !japanese.then.composing && japanese.escaped.at === '1,0' && !japanese.escaped.open && japanese.table === 5, japanese);
 
 						// Own 177 (step 3): [[Wat typed on Office starts a link, with its suggestions; Enter puts the link alone in the cell.
 						model = tableAt(view, null);

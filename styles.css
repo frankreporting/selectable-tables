@@ -446,11 +446,9 @@ body {
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe .table-wrapper:is(.selectable-tables-squeezed, .selectable-tables-spread) > table {
-	/* stylelint-disable declaration-no-important */
-	width: auto !important;
-	min-width: 0 !important;
-	max-width: none !important;
-	/* stylelint-enable declaration-no-important */
+	width: auto;
+	min-width: 0;
+	max-width: none;
 }
 
 /*
@@ -469,15 +467,35 @@ body {
 }
 
 /*
- * The blocks inside don't scroll, are as wide as their table, and drop the box's sizes. Obsidian, and themes after
- * it, set a table box's side margins with !important, so the margins here need it too.
+ * The blocks inside don't scroll, are as wide as their table, and drop the box's sizes. Obsidian sets a table box's side
+ * margins with !important, as a reach of `--size-4-4` into the note's margins, so a block sets that size to nothing for
+ * itself and passes the box's own on to what it holds, and takes the drag handles' size, which Obsidian sets from the
+ * same size, from the box. Minimal sets them with !important from a size of its own, which
+ * the blocks set to nothing too (Brian, 11/25). Any other theme that sets them with !important has to leave the
+ * plugin's blocks out.
  */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks {
+	--selectable-tables-size-4-4: var(--size-4-4);
+	--selectable-tables-drag-size: var(--table-drag-handle-size);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own > * {
+	--size-4-4: var(--selectable-tables-size-4-4);
+}
+
 .markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own {
+	--size-4-4: 0px;
+
+	/* Obsidian sets the drag handles' size from that size too, on the block itself: it keeps the box's. */
+	--table-drag-handle-size: var(--selectable-tables-drag-size);
+
+	/* Minimal sets the margins with !important from this, for its line width: the same way round it. */
+	--container-table-margin: 0;
+
 	display: flow-root;
 	overflow: visible;
 	contain: none;
-	/* stylelint-disable-next-line declaration-no-important */
-	margin: 0 !important;
+	margin: 0;
 	padding-inline: 0;
 
 	/* As wide as the table, and no wider than the box for a table a theme makes 100% wide, as Border does. */
@@ -497,16 +515,15 @@ body {
 
 /*
  * A theme's border on the table itself, as Blue Topaz and Obsidian Nord draw, belongs at the table's ends, not at
- * every seam between its blocks. Nord sets it with !important, so these need it too.
+ * every seam between its blocks. A theme that sets it with !important, as Nord does, has to leave the plugin's blocks
+ * out.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-first) table {
-	/* stylelint-disable-next-line declaration-no-important */
-	border-top-width: 0 !important;
+	border-top-width: 0;
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) table {
-	/* stylelint-disable-next-line declaration-no-important */
-	border-bottom-width: 0 !important;
+	border-bottom-width: 0;
 }
 
 /*
@@ -1055,8 +1072,7 @@ body {
  * do, but it shrinks the box the header's tint is laid in (below), which then stops short of the header's edge.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows table > thead.selectable-tables-pinned-row {
-	/* stylelint-disable-next-line declaration-no-important */
-	border-width: 0 !important;
+	border-width: 0;
 }
 
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows thead.selectable-tables-pinned-row::before,

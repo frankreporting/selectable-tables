@@ -1,6 +1,7 @@
 import type { Text as Doc } from '@codemirror/state';
 import type { Span } from '../editor/table-text';
 import { linesOf } from './shape';
+import { domOf } from './dom';
 
 /** Obsidian's Find marks its match with this class, and the Search pane its result with `is-flashing`. */
 export const FIND_CLASS = 'obsidian-search-match-highlight';
@@ -95,8 +96,7 @@ function wrap(box: Element, from: number, to: number, classes: string[]): void {
 		if (end <= start) continue;
 		const middle = start > 0 ? node.splitText(start) : node;
 		if (end - start < middle.data.length) middle.splitText(end - start);
-		const span = middle.ownerDocument.createElement('span');
-		span.className = classes.join(' ');
+		const span = domOf(middle).createSpan({ cls: classes });
 		middle.replaceWith(span);
 		span.append(middle);
 	}

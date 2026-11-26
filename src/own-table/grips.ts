@@ -76,7 +76,7 @@ export function addButtons(wrapper: HTMLElement, add: (what: 'row' | 'column') =
 }
 
 /**
- * What a press on a handle, a + button or a cell does, set by preview.ts: drag.ts, cell-drag.ts and table-commands.ts
+ * What a press on a handle, a + button or a cell does, set by tables.ts: drag.ts, cell-drag.ts and table-commands.ts
  * reach the note's editor commands, which the table's drawing has no need of.
  */
 export interface TableControls {

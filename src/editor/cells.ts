@@ -1,7 +1,7 @@
 import type { EditorState } from '@codemirror/state';
 import { EditorView, PluginValue, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { Cells, Grid, sameCell, selectedTable } from './decide';
-import { type DrawnTable, ownTables, viewLayout } from './layout';
+import { type DrawnTable, ownSpans, ownTables, viewLayout } from './layout';
 import type { Cell, Span } from './table-text';
 import { holdWidth } from './width-copy';
 
@@ -254,7 +254,8 @@ class CellSelection implements PluginValue, Cells {
 	private readonly onFocus = (event: FocusEvent) => {
 		const target = event.target as HTMLElement;
 		if (target === this.view.contentDOM) return;
-		holdWidth(target);
+		// Not in Obsidian's own table, in a canvas card say, which keeps Obsidian's look as without the plugin.
+		if (ownSpans(this.view.state)) holdWidth(target);
 		this.onLeave(event);
 		const cell = frozenCell(target);
 		if (cell) showAfterScroll(this.view, cell);

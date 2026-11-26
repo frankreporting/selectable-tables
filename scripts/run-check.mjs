@@ -5,8 +5,9 @@
 //   node scripts/run-check.mjs [--only <section>] [--install] [--minimize] [--minutes 90] [--stall 10]
 //
 //   --only <section>  own, cells, or a cells section by its flag's name: Formatting runs window.__checkFormattingOnly
-//                     with __checkOwnOnly and __checkCellsOnly. Without it, the full run.
-//   --install         builds a preview and copies it into the vault's plugin folder first.
+//                     with __checkOwnOnly and __checkCellsOnly, and Fallback the last section, Obsidian's own tables
+//                     where the plugin's doesn't draw. Without it, the full run.
+//   --install         builds the plugin and copies it into the vault's plugin folder first.
 //   --minimize        minimizes the window if it's in front. That changes the screen, so only with Brian's OK.
 //   --minutes <n>     the whole run's deadline (default 90).
 //   --stall <n>       stops when the run reports nothing new for this long (default 10): it reports each result and
@@ -19,7 +20,7 @@
 // isn't minimized, and warns about a theme, snippets, changed sample notes, or a click setting running other than
 // it's saved, which it leaves alone. It takes the timing lock (/tmp/obsidian-timing.lock) for the run, waiting within
 // the deadline while another chat holds it. Afterwards it puts the hotkeys, the panes, the throttling, the debugger,
-// the plugin's click setting and its switch for drawing tables back, and releases the lock, whatever happened. Exit codes: 0 all passed, 1 some failed, 2 no results (stalled, deadline, or the window stopped
+// the plugin's click setting and whether it draws tables back, and releases the lock, whatever happened. Exit codes: 0 all passed, 1 some failed, 2 no results (stalled, deadline, or the window stopped
 // answering), 3 the setup stopped it.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -131,8 +132,9 @@ const SETUP = `(async () => {
 	if (!out.minimized && !${args.includes('--minimize')}) return JSON.stringify({ ...out, stop: 'the window is in front: minimizing it changes the screen, so it needs an OK first (then run with --minimize)' });
 	const saved = (window.__runCheckSaved = { keys: null, layout: null, attached: false, settings: null });
 	const plugin = app.plugins.plugins['selectable-tables'];
-	if (plugin?.preview) {
-		saved.settings = { clickSelects: plugin.preview.clickSelects(), drawing: plugin.preview.isOn() };
+	const hook = plugin?.debug ?? plugin?.preview;
+	if (hook) {
+		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn() };
 		if (((await plugin.loadData())?.clickSelects ?? true) !== saved.settings.clickSelects) out.warnings.push('Click to select a cell is ' + (saved.settings.clickSelects ? 'on' : 'off') + ' but saved the other way');
 	}
 	win.webContents.setBackgroundThrottling(false);
@@ -189,17 +191,18 @@ const RESTORE = `(async () => {
 		done.push('panes');
 	}
 	// The plugin's settings, as they were: the click setting through its tab, as its toggle sets it, so the plugin's own
-	// copy, the saved file and the flag all agree (a check that changed it left the plugin's copy off, 11/25); and the
-	// switch that has the plugin draw tables, which the checks turn off as they end.
+	// copy, the saved file and the flag all agree (a check that changed it left the plugin's copy off, 11/25); and whether
+	// the plugin draws tables, which the checks leave to Obsidian as they end.
 	const plugin = app.plugins.plugins['selectable-tables'];
-	if (saved?.settings && plugin?.preview) {
+	const hook = plugin?.debug ?? plugin?.preview;
+	if (saved?.settings && hook) {
 		const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
 		const want = saved.settings.clickSelects;
-		const differed = plugin.preview.clickSelects() !== want || ((await plugin.loadData())?.clickSelects ?? true) !== want;
+		const differed = hook.clickSelects() !== want || ((await plugin.loadData())?.clickSelects ?? true) !== want;
 		if (tab?.setControlValue) await tab.setControlValue('clickSelects', want);
 		if (differed) done.push('the click setting');
-		if (plugin.preview.isOn() !== saved.settings.drawing) {
-			plugin.preview.use(saved.settings.drawing);
+		if (hook.isOn() !== saved.settings.drawing) {
+			hook.use(saved.settings.drawing);
 			done.push('the plugin drawing tables');
 		}
 	}
@@ -234,8 +237,8 @@ function summary(file) {
 
 async function main() {
 	if (args.includes('--install')) {
-		say('building a preview');
-		const build = spawnSync('npm', ['run', 'build:preview'], { cwd: repo, encoding: 'utf8' });
+		say('building the plugin');
+		const build = spawnSync('npm', ['run', 'build'], { cwd: repo, encoding: 'utf8' });
 		if (build.status !== 0) {
 			console.log(build.stdout, build.stderr);
 			return 3;
@@ -267,8 +270,8 @@ async function main() {
 		for (const line of changedNotes(setup.basePath)) say(`warning: a sample note differs from git: ${line}`);
 		const plugins = path.join(setup.basePath, '.obsidian', 'plugins', 'selectable-tables');
 		if (args.includes('--install')) {
-			spawnSync('node', ['scripts/install-test-vault.mjs', '--preview', '--to', plugins], { cwd: repo, encoding: 'utf8' });
-			say('copied the preview into the vault');
+			spawnSync('node', ['scripts/install-test-vault.mjs', '--to', plugins], { cwd: repo, encoding: 'utf8' });
+			say('copied the build into the vault');
 		} else if (existsSync(path.join(repo, 'main.js')) && readFileSync(path.join(repo, 'main.js'), 'utf8') !== readFileSync(path.join(plugins, 'main.js'), 'utf8')) {
 			say('warning: the vault holds another build than this repo\'s main.js (--install copies this one in)');
 		}

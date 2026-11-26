@@ -13,7 +13,7 @@ import { cellPlace, difference, paddingFor, writeCell } from './cell-write';
 import { ADDS, editCells, type Edited, editTable, type LineChange, lineChanges, readTableData, shownText, type TableEdit } from './table-edits';
 
 /**
- * Obsidian's table controls on the plugin's own table, in a preview build: the Row, Column and Sort items of its
+ * Obsidian's table controls on the plugin's own table: the Row, Column and Sort items of its
  * right-click menu, its 15 table commands, the row Tab and Enter add at a table's end, and Backspace, Delete, Cut and
  * Paste on a selected cell or a range of cells, as Obsidian has them (read from 1.15.1's `onContextMenu`, `makeRowMenu`,
  * `makeColMenu`, `makeSortMenu`, its `editor:table-*` commands, `deleteSelection` and `pasteSelection`). Each edit

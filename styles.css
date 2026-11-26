@@ -112,8 +112,8 @@
 /*
  * Frozen rows and columns. Collapsed borders belong to the table and stay behind when cells move, so when a
  * theme collapses them, freeze.ts marks the table and its cells draw their own, with Obsidian's variables, to
- * look the same. A theme with separate borders already has its cells draw them, and they're left alone. In
- * preview builds the plugin's own table takes the same class, since collapsed borders repaint the whole table
+ * look the same. A theme with separate borders already has its cells draw them, and they're left alone. On
+ * the plugin's own table, the same class goes on its box, since collapsed borders repaint the whole table
  * for every row it adds.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own-borders table {
@@ -372,4 +372,818 @@
 	background-color: var(--selectable-tables-page, var(--background-primary));
 	background-image: var(--selectable-tables-behind, none);
 	pointer-events: none;
+}
+
+/*
+ * The plugin's own table, which every Live Preview note's tab gets. The table's box carries Obsidian's classes for its
+ * own table, so Obsidian's look and a theme's land on it. The rules above are older: they style the plugin's selected
+ * table and cell, and frozen rows and columns as they were pinned in Obsidian's own table before the relaunch, which
+ * BMT-135 takes out where the plugin's table doesn't use them.
+ */
+
+/*
+ * Says this stylesheet is in the page. Obsidian adds a plugin's styles only after its start-up, and the plugin draws no
+ * table before then (tables.ts): its hidden parts, unhidden, take room beside the note.
+ */
+body {
+	--selectable-tables-styled: 1;
+}
+
+/* Columns keep the widths the plugin works out from the text, so they hold as rows come and go. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own table {
+	table-layout: fixed;
+}
+
+/* An open cell's drawn text, while its editor shows in its place. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own td > .table-cell-wrapper.selectable-tables-open-text,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own th > .table-cell-wrapper.selectable-tables-open-text {
+	display: none;
+}
+
+/* Rows that stand in for the rows not drawn take only their height: no padding, border, color or shadow of a theme's. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-own tr.selectable-tables-spacer > td {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	min-width: 0;
+	box-shadow: none;
+}
+
+/* A row that only keeps the drawn rows odd or even, for themes that stripe rows: hidden, it still counts for them. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-own tr.selectable-tables-parity {
+	display: none;
+}
+
+/*
+ * The hidden table the plugin reads a theme's fonts and sizes from, in a stand-in for the note's content, so it sits
+ * where a table does and takes the width a table's box has there.
+ */
+.markdown-source-view.mod-cm6 .cm-content.selectable-tables-probe-content.selectable-tables-probe-content {
+	position: absolute;
+	top: 0;
+	left: 0;
+	min-height: 0;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+/*
+ * A copy of a cell holding a picture or a player, alone in the probe: squeezed for its narrowest, spread for its
+ * widest. Its table takes only the room its cell asks for, whatever width a theme gives tables (Baseline's 100%).
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe .table-wrapper.selectable-tables-squeezed {
+	width: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe .table-wrapper.selectable-tables-spread {
+	width: 100000px;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-probe .table-wrapper:is(.selectable-tables-squeezed, .selectable-tables-spread) > table {
+	/* stylelint-disable declaration-no-important */
+	width: auto !important;
+	min-width: 0 !important;
+	max-width: none !important;
+	/* stylelint-enable declaration-no-important */
+}
+
+/*
+ * A table of more than 100 rows is drawn as one block per 100 rows, in a box CodeMirror puts around them. The box is
+ * the table's box: it carries Obsidian's classes for a table's box, so Obsidian's and a theme's sizes for that box
+ * land on it once, as on Obsidian's one widget: its reach into the margins, its padding beside the table, a theme's
+ * width. It scrolls the blocks sideways together. Only its padding above and below goes, which CodeMirror can't see
+ * in a box around blocks: the first block keeps the padding above, and the last the padding below. It stacks its
+ * blocks whatever a theme does with a table's box: one that centers tables makes the box a flex row.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks.selectable-tables-blocks {
+	display: flow-root;
+	overflow-x: auto;
+	overflow-y: hidden;
+	padding-block: 0;
+}
+
+/*
+ * The blocks inside don't scroll, are as wide as their table, and drop the box's sizes. Obsidian, and themes after
+ * it, set a table box's side margins with !important, so the margins here need it too.
+ */
+.markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own {
+	display: flow-root;
+	overflow: visible;
+	contain: none;
+	/* stylelint-disable-next-line declaration-no-important */
+	margin: 0 !important;
+	padding-inline: 0;
+
+	/* As wide as the table, and no wider than the box for a table a theme makes 100% wide, as Border does. */
+	width: fit-content;
+	max-width: none;
+	min-width: 100%;
+	box-sizing: border-box;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-first) {
+	padding-top: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) {
+	padding-bottom: 0;
+}
+
+/*
+ * A theme's border on the table itself, as Blue Topaz and Obsidian Nord draw, belongs at the table's ends, not at
+ * every seam between its blocks. Nord sets it with !important, so these need it too.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-first) table {
+	/* stylelint-disable-next-line declaration-no-important */
+	border-top-width: 0 !important;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) table {
+	/* stylelint-disable-next-line declaration-no-important */
+	border-bottom-width: 0 !important;
+}
+
+/*
+ * A table selected whole: Obsidian's tint, and the frame styles.css draws, run on across the seams between blocks,
+ * where each block's would reach past its table and lie over the next block's.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.is-selected:not(.selectable-tables-first) table::after {
+	top: 0;
+	border-top-width: 0;
+	border-start-start-radius: 0;
+	border-start-end-radius: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.is-selected:not(.selectable-tables-last) table::after {
+	bottom: 0;
+	border-bottom-width: 0;
+	border-end-start-radius: 0;
+	border-end-end-radius: 0;
+}
+
+/*
+ * On a computer, a wide table moves sideways by a transform that follows a scrollbar of the plugin's own (bar.ts),
+ * and its box clips it instead of scrolling it: a box that scrolls sideways stops rows sticking to the note. Phones
+ * and tablets keep the box, scrolled by a finger.
+ */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-bars .cm-table-widget.selectable-tables-own,
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-bars .cm-table-widget.selectable-tables-blocks.selectable-tables-blocks {
+	overflow: clip;
+}
+
+/*
+ * Each block's table follows the scroll of its table's bar, a timeline the note's scroller names for every block
+ * in it, so the blocks move as one, on the compositor, where the swipe runs.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-slides > .table-wrapper {
+	will-change: transform;
+	animation: selectable-tables-slide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+@keyframes selectable-tables-slide {
+	from {
+		transform: none;
+	}
+
+	to {
+		transform: translateX(var(--selectable-tables-slide));
+	}
+}
+
+/*
+ * The bar, in the note's scroller: under the table's last row, and carried up to the pane's bottom while the table
+ * crosses it, by an animation on the note's own scroll, so it never trails a scroll. Its look is the system's, or
+ * Obsidian's where Obsidian styles scrollbars. It draws above a first block that carries an open frozen row (pins.ts,
+ * `carry`), which draws above the later blocks.
+ */
+.markdown-source-view.mod-cm6 .cm-scroller > .selectable-tables-bar {
+	position: absolute;
+	z-index: 4;
+	overflow-x: auto;
+	overflow-y: hidden;
+	will-change: transform;
+	animation: selectable-tables-bar linear both;
+	animation-timeline: scroll(nearest block);
+	animation-range: var(--selectable-tables-bar-from) var(--selectable-tables-bar-to);
+}
+
+.markdown-source-view.mod-cm6 .cm-scroller > .selectable-tables-bar > div {
+	height: 1px;
+}
+
+@keyframes selectable-tables-bar {
+	from {
+		transform: translateY(var(--selectable-tables-bar-rise));
+	}
+
+	to {
+		transform: none;
+	}
+}
+
+/*
+ * Find's match where a cell's Markdown changes the matched words as drawn: the whole cell shows it, in the color
+ * Obsidian draws round a match in the text. Where the cell draws them as typed, the words carry Obsidian's own class.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own :is(th, td).selectable-tables-match-cell {
+	box-shadow: inset 0 0 0 3px var(--text-accent);
+}
+
+/*
+ * Frozen rows and columns, on a computer (pins.ts). No box scrolls the table sideways, so rows stick to the note with
+ * plain sticky: a table of one block's real frozen rows, and in a table of more blocks a copy of them in each block,
+ * on a rail the block clips, so at a seam one block's copy hands over to the next one's. The frozen columns are a strip
+ * beside the table that doesn't take its sideways move, with a corner over the copy where frozen rows and columns
+ * meet. Nothing shows until the theme's colors are read.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own:not(.selectable-tables-pins) > :is(.selectable-tables-strip, .selectable-tables-rail),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own:not(.selectable-tables-pins) > .table-wrapper > .selectable-tables-strip {
+	display: none;
+}
+
+.markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows:not(.selectable-tables-carries) {
+	overflow-x: visible;
+	overflow-y: clip;
+}
+
+/*
+ * An open cell of the frozen rows in a table of more blocks (pins.ts, `carry`): its real row, in the first block, is
+ * carried down with the note by an animation on the note's own scroll, which runs where the scroll does, so it lies
+ * where the blocks' copies pin, and its copies hide. It rests in its place before the scroll offset where it reaches
+ * its pin, and leaves with the table's end after the other. The first block draws above the later ones while it
+ * carries the row, and doesn't clip it; its rail clips the copy at the block's end instead.
+ */
+.markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-carries {
+	position: relative;
+	z-index: 3;
+	overflow: visible;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-carries > .selectable-tables-rail {
+	overflow-x: visible;
+	overflow-y: clip;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins tr.selectable-tables-carried {
+	position: relative;
+	z-index: 3;
+	will-change: transform;
+	animation: selectable-tables-carry linear both;
+	animation-timeline: scroll(nearest block);
+	animation-range: var(--selectable-tables-carry-from) var(--selectable-tables-carry-to);
+}
+
+@keyframes selectable-tables-carry {
+	from {
+		transform: none;
+	}
+
+	to {
+		transform: translateY(var(--selectable-tables-carry-travel));
+	}
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins thead.selectable-tables-pinned-row {
+	position: sticky;
+	z-index: 3;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins tr.selectable-tables-pinned-row {
+	position: sticky;
+	z-index: 2;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .table-wrapper > .selectable-tables-strip {
+	position: absolute;
+	z-index: 1;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-rail {
+	position: absolute;
+	inset-inline: 0;
+	z-index: 2;
+	pointer-events: none;
+}
+
+/*
+ * The copy sticks inside its block, which clips it. Chromium paints only what of the copy was inside the clip when it
+ * last painted, and doesn't paint again as the copy sticks, which happens where the scroll runs: across a seam, the
+ * part of the next block's copy that slid into view showed its cells with no text, for a pinned rows' height of
+ * scrolling. A transform animation has Chromium paint everything under it, so the copy carries one that never moves
+ * anything, on the note's scroll, which runs where the scroll does.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-rail > .selectable-tables-copy {
+	position: sticky;
+	top: var(--selectable-tables-own-pin, 0);
+	height: 0;
+	animation: selectable-tables-still linear both;
+	animation-timeline: scroll();
+}
+
+@keyframes selectable-tables-still {
+	from {
+		transform: translateX(0);
+	}
+
+	to {
+		transform: translateX(0);
+	}
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > :is(.selectable-tables-copy-slides, .selectable-tables-corner) {
+	position: absolute;
+	top: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > .selectable-tables-corner {
+	z-index: 1;
+}
+
+/* The copy of the frozen rows moves sideways with the table; the strip and the corner stay. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-slides .selectable-tables-copy-slides {
+	will-change: transform;
+	animation: selectable-tables-slide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+.markdown-source-view.mod-cm6.mod-cm6 .cm-table-widget.selectable-tables-own :is(.selectable-tables-strip, .selectable-tables-copy) table {
+	margin: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own :is(.selectable-tables-strip, .selectable-tables-copy) td.selectable-tables-filler {
+	display: none;
+}
+
+/* What pins is solid, painted with what shows behind each cell unfrozen, odd and even, as theme-paint.ts reads it. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins {
+	--selectable-tables-strip-offset: calc(-1 * var(--table-drag-handle-size));
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins:dir(rtl) {
+	--selectable-tables-strip-offset: var(--table-drag-handle-size);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) thead > tr,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins thead.selectable-tables-pinned-row > tr,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins thead > tr:is(.selectable-tables-lifted-row, .selectable-tables-carried) {
+	--selectable-tables-odd-cell: var(--selectable-tables-head-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-head-even-cell);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tbody > tr:nth-child(odd),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tbody > tr:is(.selectable-tables-pinned-row, .selectable-tables-lifted-row, .selectable-tables-carried):nth-child(odd) {
+	--selectable-tables-odd-cell: var(--selectable-tables-odd-row-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-odd-row-even-cell);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tbody > tr:nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tbody > tr:is(.selectable-tables-pinned-row, .selectable-tables-lifted-row, .selectable-tables-carried):nth-child(even) {
+	--selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
+	--selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer) > :is(th, td),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr, tr.selectable-tables-carried) > :is(th, td),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tr.selectable-tables-lifted-row > .selectable-tables-lifted {
+	background-color: var(--selectable-tables-page, var(--background-primary));
+	background-image: var(--selectable-tables-odd-cell, none);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer) > :is(th, td):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr, tr.selectable-tables-carried) > :is(th, td):nth-child(even),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tr.selectable-tables-lifted-row > .selectable-tables-lifted:nth-child(even) {
+	background-image: var(--selectable-tables-even-cell, none);
+}
+
+/*
+ * Beside the strip, over the table's box padding, from just above the table to just below it: the table moved sideways
+ * passes there, its cells, and the selected table's frame, which would run on past the strip's corner. The strip's
+ * first column covers the rows; this covers the frame's edges above and below them.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins > .selectable-tables-strip::before,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins > .table-wrapper > .selectable-tables-strip::before {
+	content: "";
+	position: absolute;
+	top: -4px;
+	bottom: -4px;
+	inset-inline-end: 100%;
+	width: var(--table-drag-handle-size);
+	background-color: var(--selectable-tables-page, var(--background-primary));
+}
+
+/* The strip's first column covers the table's padding beside it, where cells passing sideways would show. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-corner) tr:not(.selectable-tables-spacer) > :is(th, td):first-child,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins tr.selectable-tables-lifted-row > .selectable-tables-lifted:first-child {
+	box-shadow: var(--selectable-tables-strip, calc(-1 * var(--table-drag-handle-size)) 0 0 var(--background-primary));
+}
+
+/*
+ * Where a theme rounds its cells, what's pinned lays what shows at a cell's corners at rest under its cells, as
+ * theme-paint.ts reads it, so cells passing under don't show there.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr:not(.selectable-tables-spacer),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(tr.selectable-tables-pinned-row, thead.selectable-tables-pinned-row > tr, tr.selectable-tables-carried) {
+	box-shadow: var(--selectable-tables-corners, inset 0 0 0 100vmax var(--background-primary));
+}
+
+/*
+ * A table selected whole: the tint lies over what pins too, each piece's own. The frame is the table's: the strip and
+ * the corner draw its edge at the table's start, the strip its ends too, and the copy none.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins.is-selected table::after {
+	z-index: 4;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) table.selectable-tables-holds-cell::after {
+	display: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.selectable-tables-pins.is-selected .selectable-tables-strip table::after {
+	inset-inline-end: 0;
+	border-inline-end-width: 0;
+	border-start-end-radius: 0;
+	border-end-end-radius: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.selectable-tables-pins.is-selected .selectable-tables-copy-slides table::after {
+	inset: 0;
+	border-width: 0;
+	border-radius: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.selectable-tables-pins.is-selected .selectable-tables-corner table::after {
+	top: 0;
+	bottom: 0;
+	inset-inline-end: 0;
+	border-block-width: 0;
+	border-inline-end-width: 0;
+	border-radius: 0;
+}
+
+/*
+ * An open cell in a frozen column, while the table moves sideways: its row's frozen cells take the opposite move, on
+ * the same timeline, so they stay where the strip is, above the cells passing under them, and the row's copy in the
+ * strip hides. The editor stays in the real cell, which the keys, the note's selection and the history all follow.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides tr.selectable-tables-lifted-row > .selectable-tables-lifted {
+	position: relative;
+	z-index: 1;
+	will-change: transform;
+	animation: selectable-tables-unslide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+@keyframes selectable-tables-unslide {
+	from {
+		transform: none;
+	}
+
+	to {
+		transform: translateX(calc(-1 * var(--selectable-tables-slide)));
+	}
+}
+
+/*
+ * An open cell in a frozen row and a frozen column (pins.ts, `holdsCorner`): the first block's strip goes inside the
+ * table's wrapper, under the pinned rows, as Obsidian's own table layers them, and takes the opposite of the table's
+ * sideways move, as the pinned rows' frozen cells do. So the real cells show where the strip is, the open one among
+ * them, the rows passing under the pinned rows pass under them in the strip too, and the table still moves sideways.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .table-wrapper.selectable-tables-holds-strip {
+	position: relative;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-slides > .table-wrapper > .selectable-tables-strip {
+	will-change: transform;
+	animation: selectable-tables-unslide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+/*
+ * A copy over a cell that's open: the open row's in the strip, and, for an open cell in a frozen row of a table of more
+ * blocks, the first block's copy of the frozen rows, which lies over its real rows, while those pin themselves. Only
+ * the copies' cells take presses, so one where a copy's row is hidden reaches the open cell under it.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-strip,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .table-wrapper > .selectable-tables-strip {
+	pointer-events: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > :is(.selectable-tables-strip, .selectable-tables-rail) :is(th, td),
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .table-wrapper > .selectable-tables-strip :is(th, td) {
+	pointer-events: auto;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-hidden-copy {
+	visibility: hidden;
+}
+
+/*
+ * As in a frozen table of Obsidian's (styles.css), the selected cell's frame sits inside its cell where anything pins: a
+ * frame past the cell would peek out beside what's pinned over it, as the real cell's does a pixel above the strip.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(th, td).selectable-tables-cell::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(th, td).is-selected::after {
+	inset: 0;
+}
+
+/* A range of cells is drawn with Obsidian's classes for its own range; the cell moved to last is shown with a selected cell's margins. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own :is(th, td).is-selected {
+	scroll-margin: var(--size-4-4);
+}
+
+/* A row's solid fill is a shadow, which Chromium paints even on a hidden row: it goes too, or it covers the open cell. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr.selectable-tables-hidden-copy.selectable-tables-hidden-copy,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins :is(.selectable-tables-strip, .selectable-tables-copy) tr.selectable-tables-hidden-copy.selectable-tables-hidden-copy > :is(th, td) {
+	background: none;
+	box-shadow: none;
+}
+
+/*
+ * A soft shadow under the pinned rows and beside the frozen columns while cells pass under them, with a line at its
+ * inner edge, over the pinned cells' last pixel: where a theme draws its line there it lies on that line, and where a
+ * theme draws it on the cells passing under, as Baseline does, it brings that line back (STA-41). Each fades by an
+ * opacity animation on a timeline the scroll drives, so it keeps up with any flick and nothing runs on the page.
+ *
+ * The rows' fades by a view timeline of each block's own table: in over the first 16 px after the table's top passes
+ * where rows pin, on the first block, and out over the 16 px before the rows leave with the table's end, on the last.
+ * It rides each block's rail under its copy of the rows (pins.ts), so across a seam it hands over as they do, and a
+ * table of one block has a rail for it alone, above its real pinned rows. It moves sideways with the table, inside a
+ * box that stays put and clips it at the table's start while frozen columns pin: the box's padding beside them is
+ * outside the table.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pin-rows {
+	/* As deep as pins.ts's SHADE_DEPTH, which starts the rails that much higher. */
+	--selectable-tables-shade-depth: 8px;
+
+	timeline-scope: --selectable-tables-rows;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pin-rows > .table-wrapper > table {
+	view-timeline: --selectable-tables-rows block;
+
+	/* Rows pin a band below the pane's top (pins.ts), so the timeline's top edge is there too. */
+	view-timeline-inset: var(--selectable-tables-band, 0px) 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own > .selectable-tables-rail.selectable-tables-shade-rail {
+	z-index: 3;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-copy > .selectable-tables-shade-clip {
+	position: absolute;
+	inset-inline-end: 0;
+	z-index: 2;
+	top: calc(var(--selectable-tables-pinned, 0px) - var(--table-border-width, 1px));
+	height: calc(var(--selectable-tables-shade-depth, 8px) + var(--table-border-width, 1px));
+	overflow: clip;
+	pointer-events: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade-clip > .selectable-tables-shade {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-slides .selectable-tables-shade-clip > .selectable-tables-shade {
+	will-change: transform;
+	animation: selectable-tables-slide linear both;
+	animation-timeline: var(--selectable-tables-x);
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade > .selectable-tables-shade-fade {
+	position: absolute;
+	inset: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade-fade.selectable-tables-fades-in {
+	animation: selectable-tables-shade-in linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing 0 exit-crossing 16px;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade-fade::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-top: var(--table-border-width, 1px) solid var(--table-border-color);
+	background-image: linear-gradient(var(--background-modifier-box-shadow), transparent);
+	background-clip: padding-box;
+	background-origin: padding-box;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own .selectable-tables-shade-fade.selectable-tables-fades-out::after {
+	animation: selectable-tables-shade-out linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing calc(100% - var(--selectable-tables-pinned, 0px) - 16px) exit-crossing calc(100% - var(--selectable-tables-pinned, 0px));
+}
+
+@keyframes selectable-tables-shade-in {
+	from {
+		opacity: 0;
+	}
+
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes selectable-tables-shade-out {
+	from {
+		opacity: 1;
+	}
+
+	to {
+		opacity: 0;
+	}
+}
+
+/*
+ * The columns' shadow, beside the strip, fades in over the first 24 px the table moves sideways, on its scrollbar's
+ * timeline, and stays until the table is back at its start. In a table of more blocks the copy of the pinned rows
+ * lies over the strip beside them, so the corner over that copy has one too.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides > .selectable-tables-strip::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides > .table-wrapper > .selectable-tables-strip::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides .selectable-tables-copy > .selectable-tables-corner::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	inset-inline-start: calc(100% - var(--table-border-width, 1px));
+	width: calc(var(--selectable-tables-shade-depth, 8px) + var(--table-border-width, 1px));
+	border-inline-start: var(--table-border-width, 1px) solid var(--table-border-color);
+	background-image: linear-gradient(to right, var(--background-modifier-box-shadow), transparent);
+	background-clip: padding-box;
+	background-origin: padding-box;
+	pointer-events: none;
+	animation: selectable-tables-shade-in linear both;
+	animation-timeline: var(--selectable-tables-x);
+	animation-range: 0 24px;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides:dir(rtl) > .selectable-tables-strip::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides:dir(rtl) > .table-wrapper > .selectable-tables-strip::after,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-slides:dir(rtl) .selectable-tables-copy > .selectable-tables-corner::after {
+	background-image: linear-gradient(to left, var(--background-modifier-box-shadow), transparent);
+}
+
+/*
+ * The band above the pinned rows (STA-116). Rows pin a grip's height below the pane's top (pins.ts), so the pinned
+ * header's column grips, which sit just above it, stay in the pane. What pins draws the band, under the grips: the
+ * real header in a table of one block, and the strip's, and in a table of more blocks the boxes holding each block's
+ * copy of the rows and its corner, at the top of their table, which a theme can border above the header. So it moves
+ * sideways with what draws it. It's painted with what shows behind the table, so nothing passing under shows there.
+ * A press on it selects the table, as one beside the cells does.
+ *
+ * On the first block it grows from the table's top as the table's top passes where rows pin, on the timeline the
+ * shadow under the rows follows, so it covers just the rows passing up there: at rest it would lie over the table's
+ * top padding and hide the selected table's frame. A later block's lies above the block, which clips it, until the
+ * block's top passes where rows pin. A transform, where the scroll runs: the same with opacity drew a faint line
+ * where two blocks met inside the band.
+ *
+ * A theme's border on the header, as some set, draws nothing where cells draw their own borders, as a pinned table's
+ * do, but it shrinks the box the header's tint is laid in (below), which then stops short of the header's edge.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows table > thead.selectable-tables-pinned-row {
+	/* stylelint-disable-next-line declaration-no-important */
+	border-width: 0 !important;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows thead.selectable-tables-pinned-row::before,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows .selectable-tables-copy > :is(.selectable-tables-copy-slides, .selectable-tables-corner)::before {
+	content: "";
+	position: absolute;
+	bottom: 100%;
+	inset-inline: calc(-1 * var(--table-drag-handle-size));
+	height: var(--selectable-tables-band, 0px);
+	background-color: var(--selectable-tables-page, var(--background-primary));
+	background-image: var(--selectable-tables-behind, none);
+	pointer-events: auto;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-first.selectable-tables-pins.selectable-tables-pin-rows thead.selectable-tables-pinned-row::before,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-first.selectable-tables-pins.selectable-tables-pin-rows .selectable-tables-copy > :is(.selectable-tables-copy-slides, .selectable-tables-corner)::before {
+	transform-origin: bottom;
+	animation: selectable-tables-band linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing 0 exit-crossing var(--selectable-tables-band, 0px);
+}
+
+@keyframes selectable-tables-band {
+	from {
+		transform: scaleY(0);
+	}
+
+	to {
+		transform: none;
+	}
+}
+
+/*
+ * A table selected whole: its tint and frame lie over everything in the table. Once rows pin, the band has to stay
+ * plain, so a real pinned header goes above them with it and takes the tint as a piece of its own, the strip's with
+ * the frame's edge at the table's start, which the strip draws; and the rails go above them too, the shadow's and
+ * those of a table of more blocks, whose copies have their own tint. At rest they stay under the tint, so its frame
+ * draws whole round the header. Each switches on the timeline the band follows: main-thread animations, while the
+ * table is selected.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected table:not(.selectable-tables-holds-cell) > thead.selectable-tables-pinned-row,
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected > .selectable-tables-rail {
+	animation: selectable-tables-raise linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing 0 exit-crossing 1px;
+}
+
+/*
+ * A later block's copy starts showing as the block's top comes within the rows' height of where they pin, before the
+ * block's own table passes it, so its rail is lifted at once: at rest the block clips the copy anyway.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected:not(.selectable-tables-first) > .selectable-tables-rail {
+	z-index: 5;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected table:not(.selectable-tables-holds-cell) > thead.selectable-tables-pinned-row::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background-color: var(--table-selection);
+	pointer-events: none;
+	animation: selectable-tables-own-tint linear both;
+	animation-timeline: --selectable-tables-rows;
+	animation-range: exit-crossing 0 exit-crossing 1px;
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-selected .cm-table-widget.selectable-tables-own.selectable-tables-pins.selectable-tables-pin-rows.is-selected .selectable-tables-strip table:not(.selectable-tables-holds-cell) > thead.selectable-tables-pinned-row::after {
+	inset-inline-start: calc(-1 * var(--table-selection-border-width));
+	border-inline-start: var(--table-selection-border-width) solid var(--table-selection-border-color);
+}
+
+@keyframes selectable-tables-raise {
+	to {
+		z-index: 5;
+	}
+}
+
+@keyframes selectable-tables-own-tint {
+	from {
+		visibility: hidden;
+	}
+
+	to {
+		visibility: visible;
+	}
+}
+
+/*
+ * Obsidian's drag handles and + buttons (grips.ts). While a handle is dragged, the one that moves is a copy that
+ * follows the pointer (drag.ts): every other handle hides, the one pressed too, which Obsidian keeps showing while
+ * it's held, and the copy looks as Obsidian's held handle does.
+ */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.is-dragging :is(.table-row-drag-handle, .table-col-drag-handle):not(.selectable-tables-dragged) {
+	display: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.is-dragging .selectable-tables-dragged {
+	z-index: 3;
+	display: flex;
+	opacity: 1;
+}
+
+@media (hover: hover) {
+	.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own.is-dragging .selectable-tables-dragged {
+		cursor: grabbing;
+		background-color: var(--table-drag-handle-background-active);
+		color: var(--table-drag-handle-color-active);
+		box-shadow: 0 0 0 var(--table-selection-border-width) var(--table-selection-border-color);
+	}
+}
+
+/* A table of more than 100 rows has its + below on its last block only: the one at its side runs every block. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) .table-row-btn {
+	display: none;
+}
+
+/* The + at the side runs on across the seams between blocks, with no border of its own there. */
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-first) .table-col-btn {
+	border-top: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own:not(.selectable-tables-last) .table-col-btn {
+	border-bottom: none;
+}
+
+/*
+ * With Click to select a cell on, a click on a cell only selects it, so the pointer is an arrow over the cells, where
+ * Obsidian shows a text cursor, and a text cursor in the open cell's editor. Links, handles and buttons keep their own.
+ */
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-click-selects .cm-table-widget.selectable-tables-own :is(td, th) {
+	cursor: var(--cursor);
+}
+
+.markdown-source-view.mod-cm6 .cm-editor.selectable-tables-click-selects .cm-table-widget.selectable-tables-own :is(td, th) .cm-editor {
+	cursor: text;
 }

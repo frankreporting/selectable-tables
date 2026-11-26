@@ -143,7 +143,7 @@ export function selectAt(view: EditorView, place: Place): boolean {
 }
 
 /**
- * Items a preview build puts before the freeze items, on the plugin's own table: Obsidian's Row, Column and Sort, which
+ * Items tables.ts puts before the freeze items, on the plugin's own table: Obsidian's Row, Column and Sort, which
  * its own table menu has over its own table (src/own-table/table-commands.ts). A drag handle's menu is its row's or
  * its column's, and a right-click inside a range of cells gets the range's menu (src/own-table/range-menu.ts), with no
  * freeze items, as Obsidian's range has none.

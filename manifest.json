@@ -1,9 +1,9 @@
 {
 	"id": "selectable-tables",
-	"name": "Selectable Tables",
+	"name": "Better Markdown Tables",
 	"version": "0.2.3",
 	"minAppVersion": "1.14.4",
-	"description": "Make Live Preview tables selectable as whole blocks, like images. Arrow keys to bypass or select, enter to edit.",
+	"description": "Faster performance for large tables, frozen rows and columns, spreadsheet-style navigation, and more. Formerly Selectable Tables.",
 	"author": "Brian Frank",
 	"isDesktopOnly": false
 }

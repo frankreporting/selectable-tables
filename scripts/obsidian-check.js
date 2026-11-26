@@ -1,10 +1,10 @@
-// In-Obsidian checks for Selectable Tables. They test the Obsidian behaviors the plugin relies on, then
-// the plugin's keys on the test vault's notes, with simulated key presses, and with real ones through the
-// browser for the keys the check on key moves has to tell apart. Every check that shouldn't
-// edit a note compares its text before and after, and every note is put back as it was.
+// In-Obsidian checks for Better Markdown Tables. They test the plugin's own table on the test vault's notes, with
+// simulated key presses, and with real ones through the browser, against Obsidian's own table where Obsidian has the
+// same, and then what a user gets when the plugin's table can't be drawn. Every check that shouldn't edit a note
+// compares its text before and after, and every note is put back as it was.
 //
-// Run in the test vault only, with the plugin built and copied in (npm run test-vault). A preview build adds a
-// section for the plugin's own table, run with its switch on; the sections before it run with the switch off:
+// Run in the test vault only, with the plugin built and copied in (npm run test-vault), through
+// scripts/run-check.mjs, which sets the vault up first. By hand:
 //   obsidian vault="Selectable Tables Test" dev:cdp method=Emulation.setFocusEmulationEnabled params='{"enabled":true}'
 //   obsidian vault="Selectable Tables Test" eval code="eval(require('fs').readFileSync('<repo>/scripts/obsidian-check.js','utf8'))"
 // Results go to test-vault/check-results.json (git ignores it) and to the console.
@@ -200,19 +200,15 @@
 	const notesAtStart = new Map();
 	// Test plans are left out: Brian may be writing in one while a run goes.
 	for (const file of app.vault.getMarkdownFiles()) if (!/Test Plan$/.test(file.basename)) notesAtStart.set(file.path, await app.vault.read(file));
-	// A preview build's switch is off for the sections before the own table's, saved off too, since some sections
-	// turn the plugin off and on again. It's put back as it was at the end.
-	const atStart = app.plugins.plugins['selectable-tables'];
-	const previewWasOn = !!atStart?.preview?.isOn();
-	if (previewWasOn) {
-		atStart.preview.use(false);
-		await atStart.saveData({ ...(await atStart.loadData()), ownTables: false });
-		await sleep(400);
-	}
+	// Whether the plugin draws its tables as the run starts: some sections leave them to Obsidian to compare against, and
+	// the plugin's table is put back at the end.
+	const drewAtStart = !!app.plugins.plugins['selectable-tables']?.debug?.isOn();
 	try {
-		// Every section but the own table's, which comes last: window.__checkOwnOnly skips them.
+		// The sections from before the relaunch, which tested the plugin's keys and freezing on Obsidian's own table. Those
+		// stopped running at the relaunch, so these never run now: BMT-135 deletes them, keeping any check of an Obsidian
+		// behavior the plugin's table still relies on.
 		existing: {
-		if (window.__checkOwnOnly) break existing;
+		break existing;
 		// --- What the plugin relies on in Obsidian
 		let cm = await open('Two report tables');
 		let original = cm.state.doc.toString();
@@ -2619,7 +2615,8 @@
 		}
 		}
 
-		// --- Own table (preview builds only): the plugin draws Live Preview tables itself, behind its switch. Run
+		// --- Own table: the plugin draws Live Preview tables itself. Each check that compares against Obsidian's own table
+		// leaves the note's tables to Obsidian for a moment (`use(false)`, as when the plugin can't draw them). Run
 		// alone with window.__checkOwnOnly = true, and its cells' section alone with window.__checkCellsOnly = true too;
 		// with window.__checkFrozenCellsOnly as well, only the section on its frozen tables' cells (with
 		// window.__checkCornersOnly too, only its checks against Obsidian's frozen tables, Own 87 to Own 91), with
@@ -2632,9 +2629,10 @@
 		// window.__checkFormattingOnly instead, only the section on formatting its cells, with
 		// window.__checkClicksOnly instead, only the section on clicks, which selects a cell, and double-clicks, with
 		// window.__checkRangeMenusOnly instead, only the section on a range's right-click menu and the grips' clicks, and with
-		// window.__checkTypingOnly instead, only the section on typing over a selected cell.
-		// The note texts are put back as they were, and so is the switch.
-		const preview = app.plugins.plugins['selectable-tables']?.preview;
+		// window.__checkTypingOnly instead, only the section on typing over a selected cell. With
+		// window.__checkFallbackOnly instead, only the last section: Obsidian's own tables where the plugin's doesn't draw.
+		// The note texts are put back as they were, and so is the plugin's table.
+		const preview = app.plugins.plugins['selectable-tables']?.debug;
 		if (preview) {
 			// Every section but the clicks', which tests the setting Click to select a cell, runs with it off: they test a click
 			// opening a cell, as it did before the setting (STA-112). It's put back as it was at the end.
@@ -2699,6 +2697,9 @@
 			}
 			const notes = app.vault.getMarkdownFiles().map((file) => file.basename).filter((name) => !/Test Plan$/.test(name)).sort();
 			const small = notes.filter((name) => app.vault.getAbstractFileByPath(`${name}.md`).stat.size < 60000);
+			// Every section but the last, which window.__checkFallbackOnly runs alone.
+			ownSections: {
+			if (window.__checkFallbackOnly) break ownSections;
 			try {
 				// Every own-table section before the cells', which window.__checkCellsOnly skips.
 				earlier: {
@@ -10510,6 +10511,125 @@
 				preview.use(false);
 				await sleep(300);
 			}
+			}
+
+			// --- Obsidian's own tables, where the plugin's doesn't draw: a canvas card and a hover preview, in editing, and
+			// every note once the copy of Obsidian's language can't be made, as after an Obsidian update. They draw as
+			// Obsidian draws them without the plugin: its widget, with none of the plugin's keys or freezing. Last, since
+			// it turns the plugin off and on, and the plugin's table has to come back after. Alone with
+			// window.__checkOwnOnly, __checkCellsOnly and __checkFallbackOnly all true.
+			if (!window.__checkCellsOnly || window.__checkFallbackOnly) {
+				const CANT_DRAW = "Better Markdown Tables can't draw tables in this version of Obsidian. Tables are Obsidian's own until the plugin is updated.";
+				const ownIn = (root) => root.querySelectorAll('.selectable-tables-own').length;
+				const obsidianIn = (root) => root.querySelectorAll('.cm-table-widget:not(.selectable-tables-own)').length;
+				const viewOf = (root) => {
+					const el = root.querySelector('.cm-editor');
+					return el ? EditorView.findFromDOM(el) : null;
+				};
+				const EditorView = (await open('Watering schedule')).constructor;
+				preview.use(true);
+				await sleep(400);
+				const canvasPath = 'Fallback check.canvas';
+				try {
+					// A canvas card holding a table, opened for editing.
+					const table = '| Plant | Room |\n| ----- | ---- |\n| Fern | Kitchen |\n| Basil | Balcony |';
+					const canvasFile = await app.vault.create(canvasPath, JSON.stringify({ nodes: [{ id: 'card', type: 'text', text: `Above\n\n${table}\n\nBelow`, x: 0, y: 0, width: 500, height: 400 }], edges: [] }));
+					const canvasLeaf = app.workspace.getLeaf(false);
+					await canvasLeaf.openFile(canvasFile);
+					await sleep(800);
+					const canvas = canvasLeaf.view.canvas;
+					const node = canvas?.nodes?.get('card');
+					node?.startEditing();
+					await sleep(800);
+					const card = { editor: !!node?.nodeEl.querySelector('.cm-editor'), obsidian: node ? obsidianIn(node.nodeEl) : 0, own: node ? ownIn(node.nodeEl) : 0 };
+					const cardView = node && viewOf(node.nodeEl);
+					if (cardView) {
+						const start = cardView.state.doc.toString().indexOf('| Plant');
+						cardView.dispatch({ selection: { anchor: start, head: start + table.length } });
+						await sleep(300);
+						card.selectedClass = cardView.dom.classList.contains('selectable-tables-selected');
+						card.crashed = crashed(cardView);
+					}
+					check('Fallback 1: a canvas card in editing draws its table as Obsidian\'s own, with none of the plugin\'s, and a table selected there gets none of the plugin\'s marks', card.editor && card.obsidian === 1 && card.own === 0 && card.selectedClass === false && card.crashed === 0, card);
+					canvas?.deselectAll?.();
+					await sleep(300);
+
+					// A hover preview of a note with tables, switched to editing.
+					let view = await open('About this vault');
+					const leaf = app.workspace.getLeaf(false);
+					const link = view.contentDOM.querySelector('.cm-hmd-internal-link, .cm-underline') ?? view.contentDOM;
+					const r = link.getBoundingClientRect();
+					app.workspace.trigger('hover-link', { event: new MouseEvent('mouseover', { clientX: r.left + 5, clientY: r.top + 5, metaKey: true, ctrlKey: true }), source: 'preview', hoverParent: leaf.view, targetEl: link, linktext: 'Cell moves', sourcePath: 'About this vault.md' });
+					let popover = null;
+					for (let i = 0; i < 30 && !popover?.hoverEl?.isConnected; i++) {
+						await sleep(100);
+						popover = leaf.view.hoverPopover;
+					}
+					const embed = (popover?._children ?? []).find((child) => typeof child.toggleMode === 'function');
+					if (embed?.getMode?.() === 'preview') embed.toggleMode();
+					await sleep(800);
+					const hover = { shown: !!popover?.hoverEl?.isConnected, editing: embed?.getMode?.(), obsidian: popover?.hoverEl ? obsidianIn(popover.hoverEl) : 0, own: popover?.hoverEl ? ownIn(popover.hoverEl) : 0 };
+					const hoverView = popover?.hoverEl && viewOf(popover.hoverEl);
+					hover.crashed = hoverView ? crashed(hoverView) : null;
+					check('Fallback 2: a hover preview in editing draws its tables as Obsidian\'s own, with none of the plugin\'s', hover.shown && hover.editing === 'source' && hover.obsidian > 0 && hover.own === 0 && hover.crashed === 0, hover);
+					popover?.hide?.();
+					await sleep(300);
+
+					// The copy made to fail, as after an Obsidian update: the note opened next learns it can't be made.
+					const noticesBefore = Array.from(document.querySelectorAll('.notice')).filter((el) => el.textContent.includes("can't draw tables")).length;
+					preview.breakCopy(true);
+					view = await open('Watering schedule');
+					view = await open('Cell moves');
+					await sleep(1200);
+					const shown = () => Array.from(document.querySelectorAll('.notice')).filter((el) => el.textContent.includes("can't draw tables"));
+					const notices = shown();
+					const fell = { drawing: preview.isOn(), notices: notices.length - noticesBefore, text: notices[notices.length - 1]?.textContent ?? null, obsidian: obsidianIn(view.contentDOM), own: ownIn(view.contentDOM), crashed: crashed(view) };
+					check('Fallback 3: when the copy can\'t be made, the plugin stops drawing tables, says so once in its words, and the note\'s tables are Obsidian\'s own', !fell.drawing && fell.notices === 1 && fell.text === CANT_DRAW && fell.obsidian > 0 && fell.own === 0 && fell.crashed === 0, fell);
+					// Another note: no second notice.
+					view = await open('Two report tables');
+					await sleep(800);
+					check('Fallback 4: another note opened after it shows Obsidian\'s own tables, and no second notice', obsidianIn(view.contentDOM) > 0 && ownIn(view.contentDOM) === 0 && shown().length - noticesBefore === 1, { obsidian: obsidianIn(view.contentDOM), notices: shown().length - noticesBefore });
+					// A cell of Obsidian's table opens on a press and takes typing, as without the plugin.
+					const textBefore = view.state.doc.toString();
+					const widget = view.contentDOM.querySelector('.cm-table-widget');
+					const cell = widget?.querySelectorAll('td')[0];
+					if (cell) await realClick(cell);
+					await sleep(400);
+					const cellEl = view.contentDOM.querySelector('.cm-table-widget .table-cell-wrapper .cm-editor');
+					const typed = { opened: !!cellEl };
+					if (cellEl) {
+						await cdp.sendCommand('Input.insertText', { text: 'Q' });
+						await sleep(400);
+						const after = view.state.doc.toString();
+						typed.changedBy = after.length - textBefore.length;
+						typed.inTable = after.includes('Q') && !textBefore.includes('Q');
+						await press(EditorView.findFromDOM(cellEl).contentDOM, 'Escape');
+						await sleep(300);
+						app.commands.executeCommandById('editor:undo');
+						await sleep(400);
+					}
+					typed.back = view.state.doc.toString() === textBefore;
+					typed.crashed = crashed(view);
+					check('Fallback 5: a press opens a cell of Obsidian\'s table there, typing goes into it, and Undo takes it back', typed.opened && typed.changedBy === 1 && typed.inTable && typed.crashed === 0, typed);
+					// The freeze commands and the table commands have no cell to act on, so the palette doesn't offer them.
+					const active = app.workspace.activeEditor;
+					const offered = app.commands.listCommands().filter((command) => command.id.startsWith('selectable-tables:') && (command.editorCheckCallback ? command.editorCheckCallback(true, active?.editor, active) : command.checkCallback ? command.checkCallback(true) : true)).map((command) => command.id);
+					check('Fallback 6: with Obsidian\'s tables, none of the plugin\'s commands is offered', offered.length === 0, offered);
+				} finally {
+					preview.breakCopy(false);
+					const file = app.vault.getAbstractFileByPath(canvasPath);
+					if (file) await app.vault.delete(file);
+					// The plugin turned off and on draws its tables again.
+					await app.plugins.disablePlugin('selectable-tables');
+					await sleep(500);
+					await app.plugins.enablePlugin('selectable-tables');
+					await sleep(1500);
+				}
+				const back = app.plugins.plugins['selectable-tables']?.debug;
+				const view = await open('Two report tables');
+				await sleep(800);
+				check('Fallback 7: turned off and on, the plugin draws its tables again', !!back?.isOn() && ownIn(view.contentDOM) > 0 && obsidianIn(view.contentDOM) === 0, { drawing: back?.isOn(), own: ownIn(view.contentDOM), obsidian: obsidianIn(view.contentDOM) });
+			}
 		}
 	} catch (error) {
 		results.push({ name: 'the check script itself', ok: false, detail: String(error && error.stack || error) });
@@ -10529,11 +10649,7 @@
 	} catch (error) {
 		results.push({ name: 'putting the notes back', ok: false, detail: String(error) });
 	}
-	if (previewWasOn) {
-		const plugin = app.plugins.plugins['selectable-tables'];
-		await plugin.saveData({ ...(await plugin.loadData()), ownTables: true });
-		plugin.preview.use(true);
-	}
+	if (drewAtStart) app.plugins.plugins['selectable-tables']?.debug?.use(true);
 	if (attachedHere) cdp.detach();
 
 	const failed = results.filter((r) => !r.ok);
@@ -10543,6 +10659,6 @@
 	const path = window.require('path').join(app.vault.adapter.basePath, '..', 'check-results.json');
 	window.require('fs').writeFileSync(path, JSON.stringify(summary, null, '\t'));
 	window.__checkProgress = { running: false, count: results.length, last: 'done', at: Date.now() };
-	console.log(`Selectable Tables check: ${summary.passed} passed, ${summary.failed} failed. Results in ${path}`);
+	console.log(`Better Markdown Tables check: ${summary.passed} passed, ${summary.failed} failed. Results in ${path}`);
 	return `${summary.passed} passed, ${summary.failed} failed`;
 })();

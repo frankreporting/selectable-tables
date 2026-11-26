@@ -15,7 +15,7 @@ import { linesOf, selectedCells, submenuOf, writeLines } from './table-commands'
 import { lineClassProp } from './tree-rows';
 
 /**
- * Obsidian's formatting on the plugin's table, in a preview build: Bold, Italic, Strikethrough, Highlight, Code, Math,
+ * Obsidian's formatting on the plugin's table: Bold, Italic, Strikethrough, Highlight, Code, Math,
  * Comment and Clear formatting act on a selected cell's text, or on every cell of a range, as on Obsidian's own range
  * of cells, and in an open cell they take formatting off as well as add it.
  *
@@ -60,10 +60,10 @@ function methodOf(object: object, name: Formatting): Method | null {
 /** Says once that formatting can't reach selected cells in this Obsidian. */
 let told = false;
 function cantFormat(why: unknown): void {
-	if (why) console.error('Selectable Tables: formatting on selected cells failed', why);
+	if (why) console.error('Better Markdown Tables: formatting on selected cells failed', why);
 	if (told) return;
 	told = true;
-	new Notice("Selectable Tables can't format selected cells in this version of Obsidian.");
+	new Notice("Better Markdown Tables can't format selected cells in this version of Obsidian.");
 }
 
 /**
@@ -123,7 +123,7 @@ function formatCells(view: EditorView, editor: object, name: Formatting, args: r
 	if (texts === 'same') return true;
 	if (texts === 'unread') {
 		// A cell's text ran on into another's: nothing is written rather than a cell put in the wrong place.
-		console.warn('Selectable Tables: formatting changed the cells in a way that could not be read back');
+		console.warn('Better Markdown Tables: formatting changed the cells in a way that could not be read back');
 		return true;
 	}
 	if (!texts) {
@@ -324,12 +324,12 @@ export function firstCellFormats(view: EditorView): Formats {
 		const state = parsed(stand.doc, language);
 		return state ? formatsAt(state, stand.ranges[0]!, tokenClassProp) : NO_FORMATS;
 	} catch (error) {
-		console.error('Selectable Tables: reading a cell\'s formatting failed', error);
+		console.error('Better Markdown Tables: reading a cell\'s formatting failed', error);
 		return NO_FORMATS;
 	}
 }
 
-/** Obsidian's highlight colors, in its order, with their names and swatch icons (see `highlightIcons` in preview.ts). */
+/** Obsidian's highlight colors, in its order, with their names and swatch icons (added as icons in tables.ts). */
 export const HIGHLIGHTS = [
 	{ color: 'red', name: 'Red' },
 	{ color: 'orange', name: 'Orange' },

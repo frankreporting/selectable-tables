@@ -45,8 +45,17 @@ function marksRows(copy: Language): boolean {
 	return found.join(',') === '3,4,5';
 }
 
+/** For the check script: every copy fails to be made, as after an Obsidian update the copy can't follow. */
+let broken = false;
+
+/** For the check script: copies fail to be made from now on, or are made again. Copies made before are kept. */
+export function breakCopy(on: boolean): void {
+	broken = on;
+}
+
 /** The copy of one of Obsidian's languages, made the first time, or null when it can't be made or doesn't work. */
 function copyOf(original: Language): Language | null {
+	if (broken) return null;
 	let copy = copies.get(original);
 	if (copy !== undefined) return copy;
 	copy = null;
@@ -57,7 +66,7 @@ function copyOf(original: Language): Language | null {
 			made.add(candidate);
 			if (marksRows(candidate)) copy = candidate;
 		} catch (error) {
-			console.error('Selectable Tables: the copy of the Markdown language failed', error);
+			console.error('Better Markdown Tables: the copy of the Markdown language failed', error);
 		}
 	}
 	copies.set(original, copy);

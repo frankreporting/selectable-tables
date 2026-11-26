@@ -2,7 +2,8 @@ import type { Extension } from '@codemirror/state';
 import { addIcon, type App, Notice, type Plugin, PluginSettingTab, removeIcon, type SettingDefinitionItem } from 'obsidian';
 import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
-import { cellFormatter, forcePlain, plainForced, stopAnsweringAll } from './own-table/cell-editor';
+import { breakCopy } from './own-table/language';
+import { cellFormatter, stopAnsweringAll } from './own-table/cell-editor';
 import { ownTables } from './own-table';
 import { addAtEnd, clearCells, gripItems, pasteCells, pasteIntoCell, tableCommands, tableItems } from './own-table/table-commands';
 import { startDrag } from './own-table/drag';
@@ -11,14 +12,17 @@ import { setTableControls } from './own-table/grips';
 import { formattingOnCells, giveBackAll, HIGHLIGHTS, swatchIcon } from './own-table/formatting';
 import { rangeItems } from './own-table/range-menu';
 
-/** Set on the body by the preview's stylesheet, src/own-table/styles.css. */
+/** Set on the body by the plugin's stylesheet, styles.css. */
 const STYLED = '--selectable-tables-styled';
 
+/** What the plugin says, once, when an Obsidian update keeps it from drawing tables. */
+export const CANT_DRAW = "Better Markdown Tables can't draw tables in this version of Obsidian. Tables are Obsidian's own until the plugin is updated.";
+
 /**
- * Calls `ready` once the preview's stylesheet is in the page. Obsidian adds a plugin's styles.css after its start-up,
- * so on a reload, with the switch on, the plugin's table would be drawn for a moment without it. Its hidden parts
- * then take room beside the note, the note narrows, and the tables are laid out again; Obsidian's own editor code
- * measures in each update, so that never ends, and the stylesheet never gets its turn.
+ * Calls `ready` once the plugin's stylesheet is in the page. Obsidian adds a plugin's styles.css after its start-up,
+ * so on a reload the plugin's table would be drawn for a moment without it. Its hidden parts then take room beside the
+ * note, the note narrows, and the tables are laid out again; Obsidian's own editor code measures in each update, so
+ * that never ends, and the stylesheet never gets its turn.
  */
 function whenStyled(plugin: Plugin, ready: () => void): void {
 	const styled = () => getComputedStyle(activeDocument.body).getPropertyValue(STYLED) !== '';
@@ -35,7 +39,10 @@ function whenStyled(plugin: Plugin, ready: () => void): void {
 	plugin.register(() => watch.disconnect());
 }
 
-/** What the plugin saves for the preview: whether it draws tables itself, and whether a click on a cell selects it. */
+/**
+ * What the plugin saves: whether a click on a cell selects it. Builds before the relaunch also saved whether their
+ * preview switch was on, as `ownTables`, which is kept as it was and no longer read.
+ */
 interface Saved {
 	ownTables?: boolean;
 	clickSelects?: boolean;
@@ -45,10 +52,10 @@ interface Saved {
 const CLICK_SELECTS = 'clickSelects';
 
 /**
- * The plugin's settings tab, in a preview build: how a click on a cell of the plugin's table works. Obsidian draws it
- * from its declarative settings (1.13 on), which settings search finds.
+ * The plugin's settings tab: how a click on a cell works. Obsidian draws it from its declarative settings (1.13 on),
+ * which settings search finds.
  */
-class PreviewSettings extends PluginSettingTab {
+class Settings extends PluginSettingTab {
 	constructor(
 		app: App,
 		plugin: Plugin,
@@ -84,19 +91,21 @@ class PreviewSettings extends PluginSettingTab {
 }
 
 /**
- * The preview switch: a command that has the plugin draw Live Preview tables itself, for the whole vault, with no
- * restart. Only a preview build has it (esbuild.config.mjs); a release build puts preview-off.ts here. With the
- * switch on, the plugin's own table takes the place of Obsidian's, and the keys run on it. Its frozen rows and columns
- * pin on a computer (pins.ts), and the freeze commands and the freeze items in the right-click menu act on it too, as
- * do Obsidian's Row, Column and Sort items and its table commands, rebuilt for it (table-commands.ts), its drag
- * handles and + buttons (grips.ts, drag.ts), its range of cells, dragged across (cell-drag.ts), Backspace, Delete,
- * Cut and Paste on a selected cell or a range (table-commands.ts), and formatting on them (formatting.ts). A click on
- * a cell selects it, and a double-click opens it, unless the settings tab's one setting says otherwise. The switch and
- * the setting are saved with the plugin's data, which Sync can carry to other devices.
+ * The plugin draws Live Preview tables itself, in every note's tab, in place of Obsidian's table, and the keys run on
+ * them. Its frozen rows and columns pin on a computer (pins.ts), and the freeze commands and the freeze items in the
+ * right-click menu act on it, as do Obsidian's Row, Column and Sort items and its table commands, rebuilt for it
+ * (table-commands.ts), its drag handles and + buttons (grips.ts, drag.ts), its range of cells, dragged across
+ * (cell-drag.ts), Backspace, Delete, Cut and Paste on a selected cell or a range (table-commands.ts), and formatting on
+ * them (formatting.ts). A click on a cell selects it, and a double-click opens it, unless the settings tab's one
+ * setting says otherwise; the setting is saved with the plugin's data, which Sync can carry to other devices.
+ *
+ * Where the plugin's table doesn't draw, Obsidian draws its own, as it does without the plugin: in canvas cards,
+ * hover previews and other editors outside a note's tab, and in every note when the copy of Obsidian's Markdown
+ * language can't be made, after an Obsidian update say. Then the plugin says so once, and adds nothing to any editor.
+ * `extensions` is the array the plugin registered, which Obsidian keeps, so what's in it can change.
  */
-export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Promise<void> {
+export async function drawTables(plugin: Plugin, extensions: Extension[]): Promise<void> {
 	const { app } = plugin;
-	const usual = [...extensions];
 	const saved: Saved = ((await plugin.loadData()) as Saved | null) ?? {};
 	let on = false;
 	let given = false;
@@ -108,7 +117,7 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 			// The copy of Obsidian's language can't be made, after an Obsidian update say: tables stay Obsidian's.
 			if (given) return;
 			given = true;
-			new Notice("Selectable Tables can't draw tables in this version of Obsidian, so it leaves them to Obsidian.");
+			new Notice(CANT_DRAW);
 			queueMicrotask(() => use(false));
 		},
 		// The plain cell editor gets the plugin's keys, as Obsidian gives its own editor every plugin's extensions.
@@ -139,7 +148,7 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	// A click on a cell selects it, and a double-click opens it, unless the setting says otherwise: on by default.
 	setClickSelects(saved.clickSelects ?? true);
 	plugin.register(() => setClickSelects(true));
-	plugin.addSettingTab(new PreviewSettings(app, plugin, saved, () => plugin.saveData(saved)));
+	plugin.addSettingTab(new Settings(app, plugin, saved, () => plugin.saveData(saved)));
 	plugin.register(() => setTableControls(null));
 	for (const command of tableCommands()) plugin.addCommand(command);
 	// The note's editors answer for an open cell while it's open; their own answers come back as the plugin unloads.
@@ -147,11 +156,12 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	// Formatting on the plugin's table: each note's editor hands it to the selected cells or the open cell's own editor
 	// while the plugin draws its tables, and has its own back as the plugin unloads.
 	plugin.register(giveBackAll);
+	/** Draws the plugin's tables, or leaves every table to Obsidian, adding nothing to any editor. */
 	const use = (drawing: boolean) => {
 		on = drawing;
 		extensions.length = 0;
 		// The freeze items in a table's right-click menu stay, on the plugin's table's cells and its pinned copies.
-		extensions.push(...(drawing ? [own.extension, keys, tableMenus, formattingOnCells] : usual));
+		if (drawing) extensions.push(own.extension, keys, tableMenus, formattingOnCells);
 		app.workspace.updateOptions();
 	};
 
@@ -161,28 +171,10 @@ export async function previewSwitch(plugin: Plugin, extensions: Extension[]): Pr
 	const fontsLoaded = () => own.themeChanged();
 	activeDocument.fonts.addEventListener('loadingdone', fontsLoaded);
 	plugin.register(() => activeDocument.fonts.removeEventListener('loadingdone', fontsLoaded));
-	plugin.addCommand({
-		id: 'draw-tables-preview',
-		name: 'Draw tables with the plugin (preview)',
-		callback: async () => {
-			const drawing = !on;
-			given = false;
-			use(drawing);
-			saved.ownTables = drawing;
-			await plugin.saveData(saved);
-			new Notice(drawing ? 'Selectable Tables now draws tables itself (preview).' : 'Obsidian draws tables again.');
-		},
-	});
-	plugin.addCommand({
-		id: 'plain-cells-preview',
-		name: 'Open cells in the plain editor (preview)',
-		callback: () => {
-			const plain = !plainForced();
-			forcePlain(plain);
-			new Notice(plain ? 'Selectable Tables: cells open in a simpler editor, for the preview.' : "Selectable Tables: cells open in Obsidian's editor again.");
-		},
-	});
-	// For the check script and timing runs, on the plugin: whether the switch is on, and the tables' insides.
-	Object.assign(plugin, { preview: { isOn: () => on, use, cellFormatter, clickSelects: clickSelectsCells, setClickSelects, ...own.debug } });
-	if (saved.ownTables) whenStyled(plugin, () => use(true));
+	// For the check script and timing runs, on the plugin: whether it draws tables, Obsidian's own tables to compare
+	// against (`use(false)`), the copy made to fail as after an Obsidian update, and the tables' insides. The timing
+	// scripts in .dev/measure, which compare against builds from before the relaunch, read it as `preview` too.
+	const debug = { isOn: () => on, use, breakCopy, cellFormatter, clickSelects: clickSelectsCells, setClickSelects, ...own.debug };
+	Object.assign(plugin, { debug, preview: debug });
+	whenStyled(plugin, () => use(true));
 }

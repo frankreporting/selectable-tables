@@ -136,7 +136,8 @@ const SETUP = `(async () => {
 	const plugin = app.plugins.plugins['selectable-tables'];
 	const hook = plugin?.debug ?? plugin?.preview;
 	if (hook) {
-		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn() };
+		const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
+		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn(), addsRows: tab?.getControlValue?.('addsRows') };
 		if (!saved.settings.clickSelects) out.warnings.push('a click opens a cell: an earlier run left it so');
 	}
 	// Obsidian draws its own menus for the run, inside the window: a Mac's own menus show on the screen even with the
@@ -204,20 +205,25 @@ const RESTORE = `(async () => {
 		done.push('panes');
 	}
 	// The plugin as it was: a click selecting a cell, which the checks turn off to check a click opening one, and whether
-	// the plugin draws tables, which the checks leave to Obsidian as they end. A build from before BMT-137 also has a
-	// settings tab for the click, put back through it, so its saved file agrees.
+	// the plugin draws tables, which the checks leave to Obsidian as they end. A build from before BMT-137 has a settings tab
+	// for the click, put back through it, so its saved file agrees. And Tab and Enter add a row (BMT-138) through its tab.
 	const plugin = app.plugins.plugins['selectable-tables'];
 	const hook = plugin?.debug ?? plugin?.preview;
 	if (saved?.settings && hook) {
 		const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
 		const want = saved.settings.clickSelects;
 		const differed = hook.clickSelects() !== want;
-		if (tab?.setControlValue) await tab.setControlValue('clickSelects', want);
+		const keys = (tab?.getSettingDefinitions?.() ?? []).map((each) => each.control?.key);
+		if (keys.includes('clickSelects')) await tab.setControlValue('clickSelects', want);
 		else if (differed) {
 			hook.setClickSelects(want);
 			app.workspace.updateOptions();
 		}
 		if (differed) done.push('the click setting');
+		if (keys.includes('addsRows') && saved.settings.addsRows !== undefined && tab.getControlValue('addsRows') !== saved.settings.addsRows) {
+			await tab.setControlValue('addsRows', saved.settings.addsRows);
+			done.push('Tab and Enter add a row');
+		}
 		if (hook.isOn() !== saved.settings.drawing) {
 			hook.use(saved.settings.drawing);
 			done.push('the plugin drawing tables');

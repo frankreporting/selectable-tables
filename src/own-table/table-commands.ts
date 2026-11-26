@@ -372,6 +372,14 @@ function htmlText(html: string): string {
 	return htmlToMarkdown(page.body);
 }
 
+/**
+ * A fresh press of Tab in a table's last cell, or of Enter on its last row, in an open cell: a row is added below the
+ * cell's, and its cell opens, the first one for Tab, as Obsidian has it. A held key's repeats never come here.
+ */
+export function addRowFrom(open: OwnCell, firstColumn: boolean): void {
+	runEdit(open.note, 'row-after', { open: true, ...(firstColumn ? { column: 0 } : {}) });
+}
+
 /** The + buttons: a row at the table's end, or a column, as Obsidian's buttons add them, its first cell open. */
 export function addAtEnd(view: EditorView, table: Span, what: 'row' | 'column'): void {
 	runEditAt(view, table, { row: 0, column: 0 }, what === 'row' ? 'row-end' : 'col-end', { open: true });

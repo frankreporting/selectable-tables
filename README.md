@@ -75,7 +75,7 @@ Only the rows near the screen are drawn, and the rest stand in at their size, so
 | Option+Enter | Opens the cell's link. Cmd+Enter opens it in a new tab, Cmd+Option+Enter to the right, and Cmd+Option+Shift+Enter in a new window, or whatever keys you've set for those commands. With several links in the cell, a menu below it lists them. A picture doesn't count as a link. |
 | Escape | Back to the selected table. |
 
-**In an open cell,** you edit with Obsidian's own editor, links, suggestions and all. The arrow keys stay in the cell's text: ← and → stop at its ends, and ↑ and ↓ go to its start or end from its first or last line. Tab and Shift+Tab go to the next and previous cell, and Enter to the cell below, each with its text selected. At the table's ends they do nothing, so no key adds a row. Shift+Enter is a line break. Option+Enter and the other link keys open the link at the caret. Escape closes the cell and selects it.
+**In an open cell,** you edit with Obsidian's own editor, links, suggestions and all. The arrow keys stay in the cell's text: ← and → stop at its ends, and ↑ and ↓ go to its start or end from its first or last line. Tab and Shift+Tab go to the next and previous cell, and Enter to the cell below, each with its text selected. In the last cell, Tab adds a row, and so does Enter on the last row, as in Obsidian: turn off **Tab and Enter add a row** in the plugin's settings to stop that. Shift+Enter is a line break. Option+Enter and the other link keys open the link at the caret. Escape closes the cell and selects it.
 
 With Vim mode on, Vim's own keys come first in normal mode.
 

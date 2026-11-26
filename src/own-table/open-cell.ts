@@ -39,6 +39,11 @@ export interface CellSetup {
 	 * Obsidian's own cell. Says whether it was cells; anything else is the editor's own paste.
 	 */
 	pasteCells?: (cell: OwnCell, json: string) => boolean;
+	/**
+	 * A fresh press of Tab in the table's last cell, or of Enter on its last row: a row is added below, and its cell opens,
+	 * the first one for Tab, the same column for Enter. Says whether it added one, which the settings decide.
+	 */
+	addRow?: (cell: OwnCell, firstColumn: boolean) => boolean;
 }
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
@@ -76,6 +81,8 @@ export class OpenCell implements OwnCell {
 	private padding: Padding;
 	private syncing = false;
 	private closed = false;
+	/** Whether the key being handled is a held key's repeat, read as each key comes in, before its bindings run. */
+	private repeat = false;
 	/** A change from elsewhere waits while a composition runs in the cell. */
 	private waiting = false;
 	/**
@@ -282,8 +289,10 @@ export class OpenCell implements OwnCell {
 	/**
 	 * An open cell keeps the arrows and the jump keys in its text: they stop at its ends, and never leave the cell. Moving
 	 * around the table is the selected cell's, after Escape. Enter goes to the cell below, and Tab and Shift+Tab to the next
-	 * and previous cell, each with its text selected, as Obsidian's cell has them (read from 1.15.1), and at the table's ends
-	 * they do nothing: no key adds a row (Brian, 11/24). Suggestions, while they show, take the keys first.
+	 * and previous cell, each with its text selected, as Obsidian's cell has them (read from 1.15.1). At the table's end, a
+	 * fresh press of Tab or Enter adds a row, as in Obsidian, while the setting *Tab and Enter add a row* is on, its
+	 * default (Brian, 11/26); a held key's repeat stays, so holding Tab to run through the cells never adds one. Shift+Tab in
+	 * the first cell does nothing. Suggestions, while they show, take the keys first.
 	 */
 	private keys(): KeyBinding[] {
 		const live = (run: (view: EditorView) => boolean) => (view: EditorView) => !this.closed && !suggesting(this.setup.app) && run(view);
@@ -292,6 +301,12 @@ export class OpenCell implements OwnCell {
 		const toStart = { run: live(cursorDocStart), shift: live(selectDocStart) };
 		const toEnd = { run: live(cursorDocEnd), shift: live(selectDocEnd) };
 		return [
+			{
+				any: (_, event) => {
+					this.repeat = event.repeat;
+					return false;
+				},
+			},
 			{ key: 'PageUp', ...toStart },
 			{ key: 'Mod-Home', ...toStart },
 			{ mac: 'Cmd-ArrowUp', ...toStart },
@@ -310,7 +325,10 @@ export class OpenCell implements OwnCell {
 		];
 	}
 
-	/** To the next or previous cell, or the one below, with its text selected. At the table's ends the cell stays open. */
+	/**
+	 * To the next or previous cell, or the one below, with its text selected. At the table's end, Tab and Enter add a row
+	 * (`addRow`); otherwise, and at its start, the cell stays open.
+	 */
 	private step(way: 'next' | 'previous' | 'down'): boolean {
 		let { row, column } = this.cell;
 		const rows = this.model.count;
@@ -318,14 +336,20 @@ export class OpenCell implements OwnCell {
 		if (way === 'next') {
 			if (column + 1 < columns) column++;
 			else if (row < rows) [row, column] = [row + 1, 0];
-			else return true;
+			else return this.addRow(true);
 		} else if (way === 'previous') {
 			if (column > 0) column--;
 			else if (row > 0) [row, column] = [row - 1, columns - 1];
 			else return true;
 		} else if (row < rows) row++;
-		else return true;
+		else return this.addRow(false);
 		OpenCell.open(this.setup, this.model, { row, column }, 'all');
+		return true;
+	}
+
+	/** A row added below the last, on a fresh press only: Tab's opens at its first cell, Enter's in the same column. */
+	private addRow(firstColumn: boolean): boolean {
+		if (!this.repeat) this.setup.addRow?.(this, firstColumn);
 		return true;
 	}
 

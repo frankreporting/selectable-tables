@@ -14,7 +14,8 @@
 //                     each note it opens. A check script from before progress reports only meets the deadline.
 //   --script <file>   another copy of obsidian-check.js, such as another worktree's.
 //
-// Before the run it fixes what it can and says so: the window's throttling and focus emulation, leftover
+// Before the run it fixes what it can and says so: the window's throttling and focus emulation, Obsidian's own menus in
+// place of the Mac's, which show on the screen even with the window minimized, leftover
 // window.__check* flags, custom hotkeys (all set aside in memory, unsaved, since the checks press keys as Obsidian
 // binds them by default), extra panes, and the build, reloaded from disk. It stops before starting when the window
 // isn't minimized, and warns about a theme, snippets, changed sample notes, or a click setting running other than
@@ -138,6 +139,14 @@ const SETUP = `(async () => {
 		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn() };
 		if (((await plugin.loadData())?.clickSelects ?? true) !== saved.settings.clickSelects) out.warnings.push('Click to select a cell is ' + (saved.settings.clickSelects ? 'on' : 'off') + ' but saved the other way');
 	}
+	// Obsidian draws its own menus for the run, inside the window: a Mac's own menus show on the screen even with the
+	// window minimized, where Brian can click them by accident (11/25). Unsaved, and put back afterwards.
+	const config = app.vault.config;
+	saved.menus = { had: Object.hasOwn(config, 'nativeMenus'), value: config.nativeMenus };
+	if (config.nativeMenus !== false) {
+		config.nativeMenus = false;
+		out.fixed.push('Obsidian draws its own menus, inside the window, for the run, unsaved');
+	}
 	win.webContents.setBackgroundThrottling(false);
 	const debug = win.webContents.debugger;
 	if (!debug.isAttached()) {
@@ -211,6 +220,11 @@ const RESTORE = `(async () => {
 	if (saved?.attached && win.webContents.debugger.isAttached()) {
 		win.webContents.debugger.detach();
 		done.push('debugger');
+	}
+	if (saved?.menus) {
+		if (saved.menus.had) app.vault.config.nativeMenus = saved.menus.value;
+		else delete app.vault.config.nativeMenus;
+		done.push('menus');
 	}
 	win.webContents.setBackgroundThrottling(true);
 	delete window.__runCheckSaved;

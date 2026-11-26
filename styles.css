@@ -469,7 +469,8 @@ body {
 /*
  * The blocks inside don't scroll, are as wide as their table, and drop the box's sizes. Obsidian sets a table box's side
  * margins with !important, as a reach of `--size-4-4` into the note's margins, so a block sets that size to nothing for
- * itself and passes the box's own on to what it holds. A theme that sets them with !important too has to leave the
+ * itself and passes the box's own on to what it holds. Minimal sets them with !important from a size of its own, which
+ * the blocks set to nothing too (Brian, 11/25). Any other theme that sets them with !important has to leave the
  * plugin's blocks out.
  */
 .markdown-source-view.mod-cm6 .cm-table-widget.selectable-tables-blocks {
@@ -482,6 +483,9 @@ body {
 
 .markdown-source-view.mod-cm6.mod-cm6 .cm-content .cm-table-widget.selectable-tables-blocks > .cm-table-widget.selectable-tables-own.selectable-tables-own.selectable-tables-own {
 	--size-4-4: 0px;
+
+	/* Minimal sets the margins with !important from this, for its line width: the same way round it. */
+	--container-table-margin: 0;
 
 	display: flow-root;
 	overflow: visible;

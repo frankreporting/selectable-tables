@@ -2636,8 +2636,8 @@
 		// The note texts are put back as they were, and so is the plugin's table.
 		const preview = app.plugins.plugins['selectable-tables']?.debug;
 		if (preview) {
-			// Every section but the clicks', which tests the setting Click to select a cell, runs with it off: they test a click
-			// opening a cell, as it did before the setting (STA-112). It's put back as it was at the end.
+			// Every section but the clicks' has a click open a cell, through the plugin's own switch, which users no longer see
+			// (BMT-137): they test a click opening a cell, as it did before STA-112. It's put back as it was at the end.
 			const clicksWere = preview.clickSelects();
 			preview.setClickSelects(false);
 			const frames = async (n = 2) => {
@@ -9171,10 +9171,10 @@
 					}
 				}
 				if ((!window.__checkCellsOnly || window.__checkClicksOnly) && !window.__checkEditsOnly && !window.__checkDragsOnly && !window.__checkShadesOnly && !window.__checkRangesOnly && !window.__checkCellDragsOnly && !window.__checkCellEditsOnly && !window.__checkFormattingOnly) {
-					// --- Clicks on the plugin's table (STA-112): with the setting Click to select a cell on, its default, a click
-					// selects a cell and a double-click opens it, a click on the cell already selected opens it, and a drag in an open
-					// cell selects only its text. Off, a click opens a cell, as before. Real presses, releases and keys through the
-					// window's debugger, and taps under a phone's layout. The sections before this one run with the setting off. Run
+					// --- Clicks on the plugin's table (STA-112): a click selects a cell and a double-click opens it, a click on the
+					// cell already selected opens it, and a drag in an open cell selects only its text. With the plugin's own switch
+					// off, which only the checks use (BMT-137), a click opens a cell, as before. Real presses, releases and keys through
+					// the window's debugger, and taps under a phone's layout. The sections before this one run with the switch off. Run
 					// alone with window.__checkOwnOnly, __checkCellsOnly and __checkClicksOnly all true.
 					preview.use(true);
 					preview.setClickSelects(true);
@@ -9183,7 +9183,6 @@
 					const onDiskBefore = {};
 					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
 					const plugin = app.plugins.plugins['selectable-tables'];
-					const savedBefore = await plugin.loadData();
 					const config = app.vault.config;
 					const hadNative = Object.hasOwn(config, 'nativeMenus');
 					const nativeBefore = config.nativeMenus;
@@ -9462,21 +9461,18 @@
 						check('Own 162: a double-click on it opens it where it\'s pinned, with the note where it was', !!headerAt && pinned.opened?.open === `0,${pinned.cell?.column}` && pinned.opened.there && Math.abs(pinned.opened.moved) < 2, pinned);
 						check('Own 162: in Plants slid sideways, a double-click on Plant 4 in the frozen Name column opens it where it shows', strip.cell?.row === 4 && strip.cell.column === 0 && strip.open === '4,0' && strip.there, strip);
 
-						// Own 163 (step 7): the settings tab holds one switch, on, with its description; turned off by a click, a click on
-						// Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before.
-						// Obsidian 1.15 opens Settings in a popout window, which would show on the screen: the tab's own definitions and
-						// its control are read and set instead, as its toggle sets them. How it's drawn is the hand check's (step 7).
+						// Own 163: the plugin has no settings tab, and a click selects a cell, always (BMT-137, Brian 11/26). The check
+						// script still has a click open a cell, through the plugin's own switch, for every section but this one: then a
+						// click on Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before.
 						const tab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
-						const definitions = tab?.getSettingDefinitions?.() ?? [];
-						const control = definitions[0]?.control;
-						const setting = { count: definitions.length, name: definitions[0]?.name, desc: definitions[0]?.desc, type: control?.type, on: control ? tab.getControlValue(control.key) : null };
-						if (control) await tab.setControlValue(control.key, false);
-						await sleep(200);
-						setting.after = { on: control ? tab.getControlValue(control.key) : null, setting: preview.clickSelects(), saved: (await plugin.loadData())?.clickSelects };
 						view = await open('Two report tables');
 						await sleep(300);
 						model = tableAt(view, null);
 						await leaveAll(view);
+						const setting = { tab: !!tab, selects: preview.clickSelects(), cursor: getComputedStyle(model.cellElement({ row: 1, column: 0 })).cursor };
+						preview.setClickSelects(false);
+						app.workspace.updateOptions();
+						await sleep(200);
 						const fernAgain = await cellMiddle(model, 1, 0);
 						const offPointer = getComputedStyle(model.cellElement({ row: 1, column: 0 })).cursor;
 						await click(fernAgain);
@@ -9492,12 +9488,9 @@
 						}
 						off.drag = { at: where(view), open: opened(view), ranged: ranged(model) };
 						await leaveAll(view);
-						// Back on through the tab, as its toggle does, so the plugin's own copy of its settings is on again too: put
-						// back only in the file and the flag, it stayed off there, the plugin's next save wrote it off, and the vault
-						// was left opening cells with a click (Brian's recheck, 11/25).
-						if (control) await tab.setControlValue(control.key, true);
-						else preview.setClickSelects(true);
-						check('Own 163: the settings tab holds one switch, Click to select a cell, a toggle, on, with its description, and turned off it\'s off and saved', setting.count === 1 && setting.name === 'Click to select a cell' && setting.desc === 'A click selects a cell, and a double-click opens it. Turn it off to open a cell with one click, as in Obsidian.' && setting.type === 'toggle' && setting.on === true && setting.after.on === false && setting.after.setting === false && setting.after.saved === false, setting);
+						preview.setClickSelects(true);
+						app.workspace.updateOptions();
+						check('Own 163: the plugin has no settings tab, and a click selects a cell, with the arrow pointer', !setting.tab && setting.selects && setting.cursor === 'default', setting);
 						check('Own 163: with it off, a click on Fern opens it at once, and a drag from its text onto Kitchen makes a range, as before', off.click === '1,0' && off.drag.at === '1,1 from 1,0' && !off.drag.open && off.drag.ranged === 2, off);
 						check('Own 163: with it off, the pointer over a cell is Obsidian\'s text cursor again', off.pointer === 'text', off.pointer);
 
@@ -9593,8 +9586,6 @@
 							const file = app.vault.getAbstractFileByPath(`${name}.md`);
 							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
 						}
-						const settingsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
-						if (((await plugin.loadData())?.clickSelects ?? true) !== (savedBefore?.clickSelects ?? true)) await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
 						preview.setClickSelects(false);
 						preview.use(false);
 						await sleep(300);
@@ -9614,7 +9605,6 @@
 					const onDiskBefore = {};
 					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
 					const plugin = app.plugins.plugins['selectable-tables'];
-					const savedBefore = await plugin.loadData();
 					const config = app.vault.config;
 					const hadNative = Object.hasOwn(config, 'nativeMenus');
 					const nativeBefore = config.nativeMenus;
@@ -10089,10 +10079,6 @@
 							const file = app.vault.getAbstractFileByPath(`${name}.md`);
 							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
 						}
-						if (((await plugin.loadData())?.clickSelects ?? true) !== (savedBefore?.clickSelects ?? true)) {
-							const settingsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
-							await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
-						}
 						preview.setClickSelects(false);
 						preview.use(false);
 						await sleep(300);
@@ -10111,7 +10097,6 @@
 					const onDiskBefore = {};
 					for (const name of touched) onDiskBefore[name] = await app.vault.read(app.vault.getAbstractFileByPath(`${name}.md`));
 					const plugin = app.plugins.plugins['selectable-tables'];
-					const savedBefore = await plugin.loadData();
 					const round = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
 					const mouse = (type, p, o = {}) => cdp.sendCommand('Input.dispatchMouseEvent', { type, ...round(p), button: type === 'mouseMoved' && !o.held ? 'none' : 'left', buttons: type === 'mouseReleased' || (type === 'mouseMoved' && !o.held) ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1, modifiers: 0 });
 					const press = async (p) => {
@@ -10195,7 +10180,6 @@
 						await sleep(300);
 					};
 					const lineOf = (view, start) => view.state.doc.toString().split('\n').find((line) => line.startsWith(start)) ?? null;
-					const settingsTab = app.setting.pluginTabs.find((each) => each.id === 'selectable-tables');
 					let view;
 					try {
 						// Own 175 (step 1): a click on Basil and Mint typed: the cell opens reading Mint, the caret after it. Escape
@@ -10295,7 +10279,7 @@
 						check('Own 181: typing Z on a range from Fern to Office replaces Office, the cell moved to last, and ends the range', range.dragged === '3,1 from 1,0' && range.open === '3,1' && range.cell === 'Z' && range.note === 'Z' && range.ranged === 0 && range.fern, range);
 
 						// Own 182 (step 8): the second table selected whole by a press beside its cells: x starts a paragraph below it.
-						// With Click to select a cell off, Mon opened by a click, then Escape, then Wed typed: Mon reads Wed.
+						// With a click opening a cell, Mon opened by a click, then Escape, then Wed typed: Mon reads Wed.
 						const days = tableAt(view, null, 1);
 						const daysTable = days.boxes[0].querySelector('table').getBoundingClientRect();
 						const beside = { x: daysTable.right + 30, y: daysTable.top + daysTable.height / 2 };
@@ -10308,7 +10292,8 @@
 						whole.open = opened(view);
 						await putBack(view, text);
 						check('Own 182: on the second table selected whole, x starts a paragraph below it, as before', whole.selected && whole.at === '-' && whole.below && !whole.open, whole);
-						await settingsTab?.setControlValue('clickSelects', false);
+						preview.setClickSelects(false);
+						app.workspace.updateOptions();
 						await sleep(200);
 						model = tableAt(view, null, 1);
 						await click(await cellMiddle(model, 1, 0));
@@ -10319,11 +10304,12 @@
 						await sleep(200);
 						Object.assign(off, state(view));
 						await putBack(view, text);
-						await settingsTab?.setControlValue('clickSelects', true);
+						preview.setClickSelects(true);
+						app.workspace.updateOptions();
 						await sleep(200);
-						off.back = { setting: preview.clickSelects(), saved: (await plugin.loadData())?.clickSelects ?? true };
-						check('Own 182: with Click to select a cell off, Mon opened by a click, Escape, then Wed typed: Mon reads Wed', off.clicked === '1,0' && off.escaped.at === '1,0' && !off.escaped.open && off.open === '1,0' && off.cell === 'Wed' && off.note === 'Wed', off);
-						check('Own 182: the setting is back on, and saved so', off.back.setting === true && off.back.saved === true, off.back);
+						off.back = { setting: preview.clickSelects() };
+						check('Own 182: with a click opening a cell, Mon opened by a click, Escape, then Wed typed: Mon reads Wed', off.clicked === '1,0' && off.escaped.at === '1,0' && !off.escaped.open && off.open === '1,0' && off.cell === 'Wed' && off.note === 'Wed', off);
+						check('Own 182: a click selects a cell again', off.back.setting === true, off.back);
 
 						// Own 180 (step 6): in Plants, Kind typed on the header cell Name keeps the freeze mark, and the rows still pin.
 						view = await open('Frozen tables');
@@ -10490,7 +10476,6 @@
 							const file = app.vault.getAbstractFileByPath(`${name}.md`);
 							if ((await app.vault.read(file)) !== onDiskBefore[name]) await app.vault.modify(file, onDiskBefore[name]);
 						}
-						if (((await plugin.loadData())?.clickSelects ?? true) !== (savedBefore?.clickSelects ?? true)) await settingsTab?.setControlValue('clickSelects', savedBefore?.clickSelects ?? true);
 						preview.setClickSelects(false);
 						preview.use(false);
 						await sleep(300);

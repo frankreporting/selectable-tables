@@ -1,5 +1,5 @@
 import type { Extension } from '@codemirror/state';
-import { addIcon, type App, Notice, type Plugin, PluginSettingTab, removeIcon, type SettingDefinitionItem } from 'obsidian';
+import { addIcon, Notice, type Plugin, removeIcon } from 'obsidian';
 import { escapeCell, selectableTables, setCellEdits } from './editor/extension';
 import { setTableItems, tableMenus } from './editor/freeze-commands';
 import { breakCopy } from './own-table/language';
@@ -41,73 +41,22 @@ function whenStyled(plugin: Plugin, ready: () => void): void {
 }
 
 /**
- * What the plugin saves: whether a click on a cell selects it. Builds before the relaunch also saved whether their
- * preview switch was on, as `ownTables`, which is kept as it was and no longer read.
- */
-interface Saved {
-	ownTables?: boolean;
-	clickSelects?: boolean;
-}
-
-/** The one setting: whether a click on a cell of the plugin's table selects it, the default, or opens it. */
-const CLICK_SELECTS = 'clickSelects';
-
-/**
- * The plugin's settings tab: how a click on a cell works. Obsidian draws it from its declarative settings (1.13 on),
- * which settings search finds.
- */
-class Settings extends PluginSettingTab {
-	constructor(
-		app: App,
-		plugin: Plugin,
-		private readonly saved: Saved,
-		private readonly save: () => Promise<void>,
-	) {
-		super(app, plugin);
-	}
-
-	getSettingDefinitions(): SettingDefinitionItem[] {
-		return [
-			{
-				name: 'Click to select a cell',
-				desc: 'A click selects a cell, and a double-click opens it. Turn it off to open a cell with one click, as in Obsidian.',
-				control: { type: 'toggle', key: CLICK_SELECTS, defaultValue: true },
-			},
-		];
-	}
-
-	getControlValue(key: string): unknown {
-		return key === CLICK_SELECTS ? clickSelectsCells() : undefined;
-	}
-
-	async setControlValue(key: string, value: unknown): Promise<void> {
-		if (key !== CLICK_SELECTS) return;
-		const on = value === true;
-		setClickSelects(on);
-		// Every editor draws again, with the pointer the setting gives its cells.
-		this.app.workspace.updateOptions();
-		this.saved.clickSelects = on;
-		await this.save();
-	}
-}
-
-/**
  * The plugin draws Live Preview tables itself, in every note's tab, in place of Obsidian's table, and the keys run on
  * them. Its frozen rows and columns pin on a computer (pins.ts), and the freeze commands and the freeze items in the
  * right-click menu act on it, as do Obsidian's Row, Column and Sort items and its table commands, rebuilt for it
  * (table-commands.ts), its drag handles and + buttons (grips.ts, drag.ts), its range of cells, dragged across
  * (cell-drag.ts), Backspace, Delete, Cut and Paste on a selected cell or a range (table-commands.ts), and formatting on
- * them (formatting.ts). A click on a cell selects it, and a double-click opens it, unless the settings tab's one
- * setting says otherwise; the setting is saved with the plugin's data, which Sync can carry to other devices.
+ * them (formatting.ts). A click on a cell selects it, and a double-click opens it. The plugin has no settings: Brian
+ * chose on 11/26 to commit to that click rather than offer Obsidian's one-click opening as a setting (BMT-137). Builds
+ * before then saved a setting and a preview switch in the plugin's data, which is left as it was and not read.
  *
  * Where the plugin's table doesn't draw, Obsidian draws its own, as it does without the plugin: in canvas cards,
  * hover previews and other editors outside a note's tab, and in every note when the copy of Obsidian's Markdown
  * language can't be made, after an Obsidian update say. Then the plugin says so once, and adds nothing to any editor.
  * `extensions` is the array the plugin registered, which Obsidian keeps, so what's in it can change.
  */
-export async function drawTables(plugin: Plugin, extensions: Extension[]): Promise<void> {
+export function drawTables(plugin: Plugin, extensions: Extension[]): void {
 	const { app } = plugin;
-	const saved: Saved = ((await plugin.loadData()) as Saved | null) ?? {};
 	let on = false;
 	let given = false;
 
@@ -148,10 +97,10 @@ export async function drawTables(plugin: Plugin, extensions: Extension[]): Promi
 		clickCell,
 		selectEvery,
 	});
-	// A click on a cell selects it, and a double-click opens it, unless the setting says otherwise: on by default.
-	setClickSelects(saved.clickSelects ?? true);
+	// A click on a cell selects it, and a double-click opens it. Only the check script turns that off, through `debug`, to
+	// check a click opening a cell.
+	setClickSelects(true);
 	plugin.register(() => setClickSelects(true));
-	plugin.addSettingTab(new Settings(app, plugin, saved, () => plugin.saveData(saved)));
 	plugin.register(() => setTableControls(null));
 	for (const command of tableCommands()) plugin.addCommand(command);
 	// The note's editors answer for an open cell while it's open; their own answers come back as the plugin unloads.

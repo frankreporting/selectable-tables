@@ -44,7 +44,7 @@ Only the rows near the screen are drawn, and the rest stand in at their size, so
 | Any other key move that would land in the table, such as Option with an arrow | Selects the whole table. No cell opens. Page Up and Page Down pass it. |
 | Shift with an arrow | The selection takes the whole table at once. |
 
-**With the mouse:** a click on a cell selects it, and a double-click opens it, with the caret where you clicked. A click on the cell already selected opens it too. A click beside the cells selects the whole table. Drag across cells to select a range, and four quick clicks select every cell. To open a cell with one click, as in Obsidian, turn off **Click to select a cell** in the plugin's settings.
+**With the mouse:** a click on a cell selects it, and a double-click opens it, with the caret where you clicked. A click on the cell already selected opens it too. A click beside the cells selects the whole table. Drag across cells to select a range, and four quick clicks select every cell.
 
 **With a table selected:**
 
@@ -183,3 +183,7 @@ Open the folder as a vault in Obsidian (**Open another vault → Open folder as 
 ## License
 
 [MIT](LICENSE)
+
+## Credits
+
+Built with Claude Code.

@@ -247,12 +247,12 @@ When `eslint-plugin-obsidianmd` or `stylelint-config-obsidianmd` publishes a new
 
 ## Releases
 
-Every release gets one set of release notes, written when we're ready to release. `CHANGELOG.md` holds only released versions, so there's no Unreleased section, and PRs don't add to it: this replaces the usual changelog entry in each PR. The README still changes in the PR.
+Every release gets one set of release notes, written when we're ready to release. They're drafted and edited on the release in Linear, and published on the GitHub release, whose page is the plugin's history of releases. There's no `CHANGELOG.md`, and PRs don't add notes. The README still changes in the PR.
 
 The notes read like Obsidian's own, for an average user:
 
-- **One opening sentence** on what the release brings.
-- **Three headings, in this order: New, Improved, Fixed.** Leave out any that's empty.
+- **A headline**, an H2 alone, on what the release brings: short like a news headline, not a sentence, and without the plugin's name or version, which the release already shows.
+- **Three sections under it, each an H3, in this order: New, Improved, Fixed.** Leave out any that's empty.
 - **Short, plain bullets:** one line each, on what the user will notice, in their words. Name keys and buttons, not internals: no issue numbers, function names or Obsidian's internals, and no reasons they don't need.
 
 Linear's release pipeline *Better Markdown Tables*, the plugin's name from the relaunch on, holds the release being built: each push to `master` that changes what ships in the plugin adds its issues to the open release (`.github/workflows/linear-release.yml`, whose paths say what counts). Its access key is the repository's `LINEAR_ACCESS_KEY` secret, and lives nowhere else. Run that workflow by hand, with a tag or commit to sync from, when the open release has to be filled again from scratch; it's a dry run unless that box is unticked.
@@ -260,9 +260,9 @@ Linear's release pipeline *Better Markdown Tables*, the plugin's name from the r
 To release:
 
 1. Draft the notes on the open release in Linear. List its issues with `list_issues` by `release`, read each and its PR, and write the notes with `save_release_note` (`pipeline`, `releases: [<release>]`), not the pipeline's generated ones. Send Brian the link. He edits them there, and his words are the notes. Wait for his OK.
-2. Read them back with `get_release_note`, add them unchanged to `CHANGELOG.md` as `## <version> (<date>)`, bump the version, and merge that.
-3. Tag the release. The release workflow takes the version's section of `CHANGELOG.md` (`scripts/release-notes.mjs`) and builds a draft on GitHub with those notes. A version with no section makes no draft, and the run says why.
-4. Publish the draft with `gh release edit <version> --draft=false`. Obsidian's plugin page links to it, and update checkers show it. Publishing runs the Linear workflow: it names the Linear release by its version, links it to the GitHub release and marks it complete, and the next merge that changes the plugin starts a new one. That needs a person's token, as `gh` has: a release published by a workflow's own token starts no workflow. If the run fails, complete the Linear release with `save_release` (stage completed, the version, the link).
+2. Bump the version, and merge that.
+3. Tag the release. The release workflow builds a draft on GitHub with the plugin's files, and no notes.
+4. Read the notes back with `get_release_note`, write them as they are to a file, and publish the draft with them in one command, so it never goes out without them: `gh release edit <version> --notes-file <file> --draft=false`. Read its body back with `gh release view <version> --json body`, in Node rather than `--jq`, which adds a newline, and compare it with the file. Obsidian's plugin page links to it, and update checkers show it. Publishing runs the Linear workflow: it names the Linear release by its version, links it to the GitHub release and marks it complete, and the next merge that changes the plugin starts a new one. That needs a person's token, as `gh` has: a release published by a workflow's own token starts no workflow. If the run fails, complete the Linear release with `save_release` (stage completed, the version, the link).
 
 ## Working in Obsidian
 

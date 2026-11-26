@@ -24,11 +24,6 @@ jobs:
             - name: Check the tag matches the version
               run: node scripts/check-version.mjs "$GITHUB_REF_NAME"
 
-            # The notes Brian approved, from the version's section of CHANGELOG.md. A version with
-            # no section stops here, so no draft goes out without its notes.
-            - name: Take the version's notes from CHANGELOG.md
-              run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
-
             - name: Build plugin
               run: |
                   npm ci
@@ -46,6 +41,8 @@ jobs:
                       main.js
                       ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
 
+            # A draft with no notes. The notes Brian approved come from the Linear release, and go on
+            # in the same command that publishes the draft (CLAUDE.md's Releases section).
             - name: Create release
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -55,5 +52,5 @@ jobs:
                   gh release create "$tag" \
                     --title="$tag" \
                     --draft \
-                    --notes-file="$RUNNER_TEMP/release-notes.md" \
+                    --notes="" \
                     main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}

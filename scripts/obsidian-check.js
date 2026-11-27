@@ -22,7 +22,10 @@
 		return count;
 	};
 	progress('started');
-	const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+	// scripts/run-check.mjs stops a section that hangs by setting window.__checkStop: every wait then throws, so the run
+	// unwinds to its end, which puts the notes back and writes the results. Waits after that, in the put-back, go on.
+	let unwinding = false;
+	const sleep = (ms) => new Promise((resolve, reject) => setTimeout(() => (window.__checkStop && !unwinding ? reject(new Error(`stopped by the runner: ${window.__checkStop}`)) : resolve()), ms));
 	const settle = () => sleep(120);
 	const check = (name, ok, detail) => results.push({ name, ok: !!ok, detail: ok ? undefined : detail });
 
@@ -3473,6 +3476,8 @@
 					while (sel(view).line < view.state.doc.lines && presses < 2000) {
 						await press(view, 'ArrowDown', { repeat: true });
 						presses++;
+						// Over 10 minutes with no result, so the runner is told it's still going.
+						if (presses % 50 === 0) progress(`Own 35: holding ↓, ${presses} presses`);
 						if (sel(view).anchor !== sel(view).head) selectedOnce = true;
 					}
 					const downMs = performance.now() - heldStart;
@@ -3481,6 +3486,7 @@
 					while (sel(view).line > 1 && upPresses < 2000) {
 						await press(view, 'ArrowUp', { repeat: true });
 						upPresses++;
+						if (upPresses % 50 === 0) progress(`Own 35: holding ↑, ${upPresses} presses`);
 						if (sel(view).anchor !== sel(view).head) upSelected = true;
 					}
 					check('Own 35: a held ↓ and ↑ go through Long note past every table without selecting one', !selectedOnce && !upSelected && sel(view).line === 1 && steadyOk(steady(view)), { presses, upPresses, selectedOnce, upSelected, downMs: Math.round(downMs) });
@@ -10976,7 +10982,8 @@
 			// Obsidian draws them without the plugin: its widget, with none of the plugin's keys or freezing. Last, since
 			// it turns the plugin off and on, and the plugin's table has to come back after. Alone with
 			// window.__checkOwnOnly, __checkCellsOnly and __checkFallbackOnly all true.
-			if (!window.__checkCellsOnly || window.__checkFallbackOnly) {
+			// Not in the earlier sections' run (window.__checkEarlierOnly), which ends before the cells'.
+			if ((!window.__checkCellsOnly && !window.__checkEarlierOnly) || window.__checkFallbackOnly) {
 				const CANT_DRAW = "Better Markdown Tables can't draw tables in this version of Obsidian. Tables are Obsidian's own until the plugin is updated.";
 				const ownIn = (root) => root.querySelectorAll('.selectable-tables-own').length;
 				const obsidianIn = (root) => root.querySelectorAll('.cm-table-widget:not(.selectable-tables-own)').length;
@@ -11112,6 +11119,7 @@
 	} catch (error) {
 		results.push({ name: 'the check script itself', ok: false, detail: String(error && error.stack || error) });
 	}
+	unwinding = true;
 	// Notes put back as they were, with no editor holding a change that would save over them.
 	try {
 		const leaf = app.workspace.getLeaf(false);

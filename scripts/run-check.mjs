@@ -5,8 +5,8 @@
 //
 //   node scripts/run-check.mjs [--only <sections>] [--install] [--minimize] [--minutes <n>] [--stall 10]
 //
-//   --only <sections> one section, or several split by commas, by name: earlier (the own table's sections before the
-//                     cells'), cells, frozenCells, corners (part of frozenCells), edits, drags, shades, ranges, cellDrags,
+//   --only <sections> one section, or several split by commas, by name: tables (the plugin's table before its cells:
+//                     drawing, edits, panes, sideways scrolling), cells, frozenCells, corners (part of frozenCells), edits, drags, shades, ranges, cellDrags,
 //                     cellEdits, formatting, clicks, rangeMenus, typing, links, defaultFreeze, fallback (Obsidian's own
 //                     tables where the plugin's doesn't draw). own is every section. Without it, every section.
 //   --install         builds the plugin and copies it into the vault's plugin folder first.
@@ -50,7 +50,7 @@ const say = (line) => console.log(`[${minutes()} min] ${line}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Every section of the check script, in its order. Each runs alone, with the flags `flagsFor` gives it. */
-const SECTIONS = ['earlier', 'cells', 'frozenCells', 'edits', 'drags', 'shades', 'ranges', 'cellDrags', 'cellEdits', 'formatting', 'clicks', 'rangeMenus', 'typing', 'links', 'defaultFreeze', 'fallback'];
+const SECTIONS = ['tables', 'cells', 'frozenCells', 'edits', 'drags', 'shades', 'ranges', 'cellDrags', 'cellEdits', 'formatting', 'clicks', 'rangeMenus', 'typing', 'links', 'defaultFreeze', 'fallback'];
 const KNOWN = [...SECTIONS, 'corners'];
 
 function sectionsFor(choice) {
@@ -60,7 +60,7 @@ function sectionsFor(choice) {
 
 /** The flags a section runs with. */
 function flagsFor(section) {
-	if (section === 'earlier') return ['__checkOwnOnly', '__checkEarlierOnly'];
+	if (section === 'tables') return ['__checkOwnOnly', '__checkEarlierOnly'];
 	if (section === 'cells') return ['__checkOwnOnly', '__checkCellsOnly'];
 	if (section === 'corners') return ['__checkOwnOnly', '__checkCellsOnly', '__checkFrozenCellsOnly', '__checkCornersOnly'];
 	return ['__checkOwnOnly', '__checkCellsOnly', `__check${section[0].toUpperCase()}${section.slice(1)}Only`];

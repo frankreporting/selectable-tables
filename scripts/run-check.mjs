@@ -381,6 +381,12 @@ const restoreCode = (keysOnly) => `(async () => {
 		else delete app.vault.config.nativeMenus;
 		app.updateUseNativeMenu?.();
 		done.push('menus');
+		// A check that sets a theme saves the whole config, the run's menus included: then the file is saved back too.
+		const onDisk = (await app.vault.readConfigJson('appearance')) ?? {};
+		if (onDisk.nativeMenus !== app.vault.config.nativeMenus) {
+			await app.vault.saveConfig();
+			done.push('the saved menus setting');
+		}
 	}
 	win.webContents.setBackgroundThrottling(true);
 	delete window.__runCheckSaved;
@@ -422,7 +428,7 @@ async function runSection(section, file) {
 		setTimeout(() => {
 			try {
 				Promise.resolve(eval(require('fs').readFileSync(${JSON.stringify(script)}, 'utf8'))).catch((error) => {
-					if (window.__checkProgress?.queued) window.__checkProgress = { running: false, count: 0, last: 'failed: ' + String(error), at: Date.now() };
+					window.__checkProgress = { running: false, count: window.__checkProgress?.count ?? 0, last: 'failed: ' + String(error), at: Date.now() };
 				});
 			} catch (error) {
 				window.__checkProgress = { running: false, count: 0, last: 'failed: ' + String(error), at: Date.now() };

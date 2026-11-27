@@ -9717,9 +9717,9 @@
 							await sleep(200);
 						}
 						results.push({ name: 'Own 165 a click\'s own work, the median of 8 (ms)', ok: true, detail: timedClick });
-						// Within a fifth of opening's, or 3 ms, whichever is more: two medians of 8 clicks on the same build differ by that
-						// much from run to run (28.9 against 26.3 ms on 11/27), and a click that selects doing more work than one that
-						// opens would show as far more.
+						// Within a fifth of opening's, or 3 ms, whichever is more. On Table 50 by 8, selecting ran about 2.3 ms above
+						// opening in each of four runs on 11/27 (about 28 against 26 ms), well inside a command's budget; a click that
+						// selects doing much more work than one that opens would show as far more.
 						check('Own 165: selecting a cell with a click costs no more than opening one did, within timing noise', ['Table 50 by 8', 'Table 2000 by 12'].every((name) => {
 							const opens = timedClick[`${name}, opens`] ?? 0;
 							return timedClick[`${name}, selects`] !== null && timedClick[`${name}, selects`] <= Math.max(opens * 1.2, opens + 3, 5);

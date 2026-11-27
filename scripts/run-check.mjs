@@ -17,15 +17,17 @@
 //
 // Before the run it fixes what it can and says so: the window's throttling and focus emulation, Obsidian's own menus in
 // place of the Mac's, which show on the screen even with the window minimized, leftover window.__check* flags, custom
-// hotkeys (set aside in memory, never saved, since the checks press keys as Obsidian binds them by default), extra panes,
-// and the build, reloaded from disk. It stops before starting when the window isn't minimized, or when a check script is
-// still running there and won't stop. It warns about a theme, snippets or changed sample notes, which it leaves alone.
-// Between sections it puts back the panes, the theme, light or dark, snippets, hotkeys and the plugin's settings as the
-// run found them, reloads the plugin, and names what the section before had left. It takes the timing lock
-// (/tmp/obsidian-timing.lock) for the whole run, waiting within the deadline while another chat holds it. Afterwards it
-// puts back the hotkeys from hotkeys.json, the panes, the throttling, the debugger and the menus, writes every section's
-// results to check-results.json, and releases the lock, whatever happened. Exit codes: 0 all passed, 1 some failed, 2 a
-// section gave no results and the run couldn't go on (the window stopped answering, or a section wouldn't stop), or the
+// hotkeys (set aside in memory, never saved, since the checks press keys as Obsidian binds them by default), the
+// plugin's settings (at their defaults for the run, saved, as its tab saves them), the window's zoom (100% for the
+// run), extra panes, and the build, reloaded from disk. It stops before starting when the window isn't minimized, or
+// when a check script is still running there and won't stop. It warns about a theme, snippets or changed sample notes,
+// which it leaves alone. Between sections it puts back the panes, the theme, light or dark, snippets and hotkeys as the
+// run found them, and the plugin's settings and the zoom as the run set them, reloads the plugin, and names what the
+// section before had left. It takes the timing lock (/tmp/obsidian-timing.lock) for the whole run, waiting within the
+// deadline while another chat holds it. Afterwards it puts back the hotkeys from hotkeys.json, the plugin's settings
+// and the zoom as it found them, the panes, the throttling, the debugger and the menus, writes every section's results
+// to check-results.json, and releases the lock, whatever happened. Exit codes: 0 all passed, 1 some failed, 2 a section
+// gave no results and the run couldn't go on (the window stopped answering, or a section wouldn't stop), or the
 // deadline cut it short, 3 the setup stopped it.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -214,6 +216,15 @@ const HELPERS = `
 	}
 	const win = require('electron').remote.getCurrentWindow();
 	const debug = win.webContents.debugger;
+	// The window's zoom, which Obsidian keeps for each vault's window: the checks measure at 100% (11/27, 120% left them
+	// missing rows, ink and drags). Set as Obsidian's zoom commands set it, in this window alone.
+	const frame = require('electron').webFrame;
+	async function zoomTo(level) {
+		if (frame.getZoomLevel() === level) return false;
+		frame.setZoomLevel(level);
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		return true;
+	}
 	async function emulateFocus() {
 		win.webContents.setBackgroundThrottling(false);
 		if (!debug.isAttached()) {
@@ -244,11 +255,20 @@ const SETUP = `(async () => {
 	if (left) out.warnings.push('an earlier run never put its setup back: putting back what it saved, at the end');
 	const saved = (window.__runCheckSaved = left ?? { keys: false, layout: null, attached: false, settings: null });
 	const hook = hookOf();
+	const tab = pluginTab();
+	const definitions = (tab?.getSettingDefinitions?.() ?? []).filter((each) => each.control?.key);
 	if (hook && !left) {
-		const tab = pluginTab();
-		const tabKeys = (tab?.getSettingDefinitions?.() ?? []).map((each) => each.control?.key).filter(Boolean);
-		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn(), tab: tabKeys.map((key) => [key, tab.getControlValue(key)]) };
+		saved.settings = { clickSelects: hook.clickSelects(), drawing: hook.isOn(), tab: definitions.map((each) => [each.control.key, tab.getControlValue(each.control.key)]) };
 		if (!saved.settings.clickSelects) out.warnings.push('a click opens a cell: an earlier run left it so');
+	}
+	// The checks expect the plugin's settings at their defaults: Freeze tables on freezes every table they draw (11/27).
+	// So the tab's settings go to their defaults for the run, saved, as the tab saves them, and the settings as the run
+	// found them come back at the end, or in the next run if this one is cut off.
+	if (hook && saved.settings && !saved.run) saved.run = { ...saved.settings, tab: definitions.map((each) => [each.control.key, each.control.defaultValue]) };
+	if (hook && saved.run) {
+		const changed = [];
+		await settingsBack(saved.run, changed);
+		if (changed.length) out.fixed.push("the plugin's settings at their defaults for the run, put back at the end: " + changed.map((each) => each.replace(/^the setting /, '')).join(', '));
 	}
 	// Obsidian draws its own menus for the run, inside the window: a Mac's own menus show on the screen even with the
 	// window minimized, where Brian can click them by accident (11/25). Unsaved, and put back afterwards.
@@ -275,6 +295,8 @@ const SETUP = `(async () => {
 	if (ids.length) {
 		out.fixed.push('set aside custom hotkeys, unsaved: ' + ids.join(', '));
 	}
+	if (saved.zoom === undefined) saved.zoom = frame.getZoomLevel();
+	if (await zoomTo(0)) out.fixed.push('zoom at 100% for the run, from ' + Math.round(Math.pow(1.2, saved.zoom) * 100) + '%, put back at the end');
 	const extra = extraPanes();
 	if (extra.length) {
 		if (!saved.layout) saved.layout = app.workspace.getLayout();
@@ -333,6 +355,7 @@ const BETWEEN = `(async () => {
 		win.minimize();
 		fixed.push('minimized the window again');
 	}
+	if (await zoomTo(0)) fixed.push('zoom, back to 100%');
 	// The plugin reloaded from disk, so nothing a section changed in it reaches the next one.
 	await app.plugins.disablePlugin('selectable-tables');
 	await app.plugins.loadManifests();
@@ -340,7 +363,7 @@ const BETWEEN = `(async () => {
 	for (let i = 0; i < 50 && !hookOf(); i++) await new Promise((resolve) => setTimeout(resolve, 100));
 	await new Promise((resolve) => setTimeout(resolve, 500));
 	const settings = [];
-	await settingsBack(saved.settings, settings);
+	await settingsBack(saved.run ?? saved.settings, settings);
 	if (settings.length) fixed.push(...settings);
 	await emulateFocus();
 	return JSON.stringify({ fixed, loaded: !!hookOf() });
@@ -372,6 +395,7 @@ const restoreCode = (keysOnly) => `(async () => {
 		done.push('panes');
 	}
 	await settingsBack(saved?.settings, done);
+	if (typeof saved?.zoom === 'number' && (await zoomTo(saved.zoom))) done.push('zoom');
 	if (saved?.attached && debug.isAttached()) {
 		debug.detach();
 		done.push('debugger');

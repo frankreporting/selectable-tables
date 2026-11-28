@@ -10911,6 +10911,12 @@
 							const hadEditor = Object.hasOwn(options(), 'editor');
 							const wasEditor = options().editor;
 							const previewsShown = () => Array.from(document.querySelectorAll('.popover.hover-popover')).filter((p) => p.isConnected);
+							// The middle of a link's first line: a link that wraps, as Cell moves does in an open cell, has a box whose middle is
+							// off it.
+							const onLink = (el) => {
+								const r = el.getClientRects()[0] ?? el.getBoundingClientRect();
+								return { x: r.left + Math.min(r.width / 2, 20), y: r.top + r.height / 2 };
+							};
 							const moveTo = async ({ x, y }, meta = false) => {
 								await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(x), y: Math.round(y), modifiers: meta ? 4 : 0 });
 								await sleep(30);
@@ -10943,7 +10949,7 @@
 								await leave();
 								heard.length = 0;
 								if (!link) return { link: false };
-								const at = middle(link);
+								const at = onLink(link);
 								const hit = document.elementFromPoint(at.x, at.y)?.closest('a') === link;
 								await moveTo(at, meta);
 								if (thenMeta) {
@@ -10960,6 +10966,15 @@
 								// Step 1 to 3: no key, Cmd held, and Cmd pressed while resting.
 								const plain = await hover(fernLink());
 								check('Own 210: resting the pointer on Fern with no key held opens no preview, and Page preview hears the link as the editor\'s, Watering schedule from Links in cells', plain.hit && !plain.shown && plain.sources.length >= 1 && plain.sources.every((s) => s === 'editor') && plain.first?.linktext === 'Watering schedule' && plain.first?.sourcePath === 'Links in cells.md', plain);
+								// What the block's listener costs a pointer moving inside a link, where it stops the event and sends nothing:
+								// 500 mouseovers on Fern from Fern itself, for the speed budget.
+								{
+									const link = fernLink();
+									const start = performance.now();
+									for (let i = 0; i < 500; i++) link?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: link }));
+									const each = (performance.now() - start) / 500;
+									results.push({ name: 'Own 219 a mouseover inside a link of the plugin\'s table, the block\'s listener stopping it (ms each, of 500)', ok: true, detail: Math.round(each * 10000) / 10000 });
+								}
 								const held = await hover(fernLink(), { meta: true });
 								check('Own 211: resting on Fern with Cmd held opens its preview', held.hit && held.shown && held.sources.every((s) => s === 'editor'), held);
 								const pressed = await hover(fernLink(), { thenMeta: true });
@@ -10981,7 +10996,7 @@
 								// Step 6: a click and a right-click on the link work as before.
 								await leave();
 								opened.length = 0;
-								const fernAt = middle(fernLink());
+								const fernAt = onLink(fernLink());
 								await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(fernAt.x), y: Math.round(fernAt.y), button: 'left', clickCount: 1 });
 								await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: Math.round(fernAt.x), y: Math.round(fernAt.y), button: 'left', clickCount: 1 });
 								await sleep(300);
@@ -11003,7 +11018,8 @@
 								await frames(4);
 								const pinnedHeader = () => beds().drawnCell({ row: 0, column: 0 });
 								const pinnedLink = () => pinnedHeader()?.querySelectorAll('a.internal-link')[1] ?? null;
-								const pinnedNow = pinnedHeader() !== beds().cellElement({ row: 0, column: 0 });
+								// A short table pins its own header row: then the cell drawn is its own, at the pane's top.
+								const pinnedNow = !!pinnedHeader() && (pinnedHeader() !== beds().cellElement({ row: 0, column: 0 }) || Math.abs(pinnedHeader().getBoundingClientRect().top - (view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientTop)) < 60);
 								const leaveBeds = async () => {
 									const water = beds().drawnCell({ row: 0, column: 1 });
 									if (water) await moveTo(middle(water));
@@ -11013,7 +11029,7 @@
 								};
 								await leaveBeds();
 								heard.length = 0;
-								const pinAt = pinnedLink() && middle(pinnedLink());
+								const pinAt = pinnedLink() && onLink(pinnedLink());
 								const pinHit = !!pinAt && document.elementFromPoint(pinAt.x, pinAt.y)?.closest('a') === pinnedLink();
 								if (pinAt) await moveTo(pinAt);
 								const pinPlain = { hit: pinHit, shown: await shownWithin(1500), sources: heard.map((h) => h.source), linktext: heard[0]?.linktext };
@@ -11034,12 +11050,14 @@
 								const inCell = cellView ? Array.from(cellView.dom.querySelectorAll('.cm-hmd-internal-link')).find((span) => span.textContent.includes('Cell moves')) : null;
 								await leave();
 								heard.length = 0;
-								if (inCell) await moveTo(middle(inCell), true);
-								const cellHeld = { open: !!cellView, span: !!inCell, shown: await shownWithin(1500), sources: heard.map((h) => h.source) };
+								const cellAt = inCell && onLink(inCell);
+								const cellHit = !!cellAt && document.elementFromPoint(cellAt.x, cellAt.y)?.closest('.cm-hmd-internal-link') === inCell;
+								if (cellAt) await moveTo(cellAt, true);
+								const cellHeld = { open: !!cellView, span: !!inCell, hit: cellHit, shown: await shownWithin(1500), sources: heard.map((h) => h.source) };
 								await leave();
 								await key('Escape');
 								await key('Escape');
-								check('Own 217: in Balcony\'s open link cell, resting on Cell moves with Cmd held opens its preview, as before', cellHeld.open && cellHeld.span && cellHeld.shown, cellHeld);
+								check('Own 217: in Balcony\'s open link cell, resting on Cell moves with Cmd held opens its preview, as before', cellHeld.open && cellHeld.span && cellHeld.hit && cellHeld.shown && cellHeld.sources.includes('editor'), cellHeld);
 
 								// For reference, not a pass: Obsidian's own table, which reports its links as Reading view's.
 								preview.use(false);
@@ -11051,12 +11069,27 @@
 								if (stockKitchen) await moveTo(middle(stockKitchen));
 								await sleep(300);
 								heard.length = 0;
-								if (stockFern) await moveTo(middle(stockFern));
+								if (stockFern) await moveTo(onLink(stockFern));
 								const stock = { link: !!stockFern, shown: await shownWithin(1500), sources: heard.map((h) => h.source) };
 								if (stockKitchen) await moveTo(middle(stockKitchen));
 								for (let i = 0; i < 30 && previewsShown().length; i++) await sleep(100);
 								for (const leaf of app.workspace.getLeavesOfType('markdown')) leaf.view.hoverPopover?.hide();
-								results.push({ name: 'Own 218 Obsidian\'s own table, resting on Fern with no key: preview opened, and the sources Page preview heard (reference)', ok: true, detail: stock });
+								// And in Obsidian's own open cell, Cell moves in Balcony's link cell with Cmd held: a press at the cell's end opens it.
+								const stockBalcony = view.contentDOM.querySelector(':scope > .cm-table-widget')?.querySelector('table')?.rows[3]?.cells[0];
+								if (stockBalcony) await pointAt(middle(stockBalcony, -6));
+								await sleep(300);
+								const stockSpan = Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget .cm-editor .cm-hmd-internal-link')).find((span) => span.textContent.includes('Cell moves')) ?? null;
+								if (stockKitchen) await moveTo(middle(stockKitchen));
+								await sleep(300);
+								heard.length = 0;
+								if (stockSpan) await moveTo(onLink(stockSpan), true);
+								stock.openCell = { span: !!stockSpan, shown: await shownWithin(1500), sources: heard.map((h) => h.source) };
+								if (stockKitchen) await moveTo(middle(stockKitchen));
+								for (let i = 0; i < 30 && previewsShown().length; i++) await sleep(100);
+								for (const leaf of app.workspace.getLeavesOfType('markdown')) leaf.view.hoverPopover?.hide();
+								await key('Escape');
+								await key('Escape');
+								results.push({ name: 'Own 218 Obsidian\'s own table, for reference: resting on Fern with no key, and on Cell moves in its open cell with Cmd held, whether a preview opened and the sources Page preview heard', ok: true, detail: stock });
 								preview.use(true);
 								await sleep(400);
 							} finally {

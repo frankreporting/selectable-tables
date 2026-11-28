@@ -3077,9 +3077,9 @@
 				};
 				// A point on a row's own text, off its links: the pointer resting on a link opens its preview over the table, which
 				// then takes the wheel events, as it did for 2 of 7 swipes on 11/27. Previews there should need Cmd, as in
-				// Obsidian's table (BMT-143), and that gets a check of its own. Each swipe and wheel first moves the pointer there
-				// and waits, up to 3 s, for any preview left open to close.
-				const previews = { open: 0, left: 0 };
+				// Obsidian's table (BMT-143), and that gets a check of its own. Each swipe and wheel first moves the pointer there,
+				// and counts a preview open at that moment, so a miss shows whether one took the swipe.
+				const previews = { open: 0 };
 				const plainPoint = (tr) => {
 					const box = shownBoxes(big)[0]?.parentElement?.getBoundingClientRect();
 					const r = tr.getBoundingClientRect();
@@ -3093,8 +3093,6 @@
 				const pointAt = async (point) => {
 					await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
 					if (document.querySelector('.popover.hover-popover')) previews.open++;
-					for (let i = 0; i < 60 && document.querySelector('.popover.hover-popover'); i++) await sleep(50);
-					if (document.querySelector('.popover.hover-popover')) previews.left++;
 				};
 				const swipe = async (dx, dy = 0, at = null) => {
 					const point = at ? { x: Math.round(at.left + Math.min(300, at.width / 2)), y: Math.round(at.top + at.height / 2) } : plainPoint(midRow());

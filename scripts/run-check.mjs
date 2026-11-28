@@ -41,6 +41,16 @@ const option = (name, fallback) => {
 	const at = args.indexOf(name);
 	return at >= 0 && args[at + 1] ? args[at + 1] : fallback;
 };
+// --help, or any flag it doesn't know, prints the flags above and starts nothing: on 11/27 --help, then unknown, started
+// a whole run, the timing lock and all, while another chat was about to time the same vault.
+const VALUED = ['--vault', '--only', '--minutes', '--stall', '--script'];
+const unknown = args.filter((arg, i) => !VALUED.includes(arg) && !['--install', '--minimize'].includes(arg) && !VALUED.includes(args[i - 1]));
+if (unknown.length) {
+	const usage = readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(5, 16).map((line) => line.replace(/^\/\/ ?/, '')).join('\n');
+	const help = unknown.every((arg) => arg === '--help' || arg === '-h');
+	console.log(`${help ? '' : `Not a flag it knows: ${unknown.join(' ')}. Nothing was run.\n\n`}${usage}`);
+	process.exit(help ? 0 : 3);
+}
 const vault = option('--vault', 'Selectable Tables Test');
 const only = option('--only', null);
 const deadline = Date.now() + Number(option('--minutes', only && only !== 'own' ? '90' : '180')) * 60_000;

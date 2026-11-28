@@ -3075,15 +3075,38 @@
 					const middle = pane().top + view.scrollDOM.clientHeight / 2;
 					return big.drawnRows().map((entry) => entry.tr).filter((tr) => tr.isConnected).sort((a, b) => Math.abs(a.getBoundingClientRect().top - middle) - Math.abs(b.getBoundingClientRect().top - middle))[0];
 				};
+				// A point on a row's own text, off its links: the pointer resting on a link opens its preview over the table, which
+				// then takes the wheel events, as it did for 2 of 7 swipes on 11/27. Previews there should need Cmd, as in
+				// Obsidian's table (BMT-143), and that gets a check of its own. Each swipe and wheel first moves the pointer there
+				// and waits, up to 3 s, for any preview left open to close.
+				const previews = { open: 0, left: 0 };
+				const plainPoint = (tr) => {
+					const box = shownBoxes(big)[0]?.parentElement?.getBoundingClientRect();
+					const r = tr.getBoundingClientRect();
+					const y = r.top + r.height / 2;
+					for (let x = Math.max(r.left, box?.left ?? r.left) + 8; x < Math.min(r.right, box?.right ?? r.right) - 8; x += 12) {
+						const hit = document.elementFromPoint(x, y);
+						if (hit?.closest('[data-selectable-tables-table]') && !hit.closest('a, .internal-link, .external-link, .tag')) return { x: Math.round(x), y: Math.round(y) };
+					}
+					return { x: Math.round(r.left + Math.min(300, r.width / 2)), y: Math.round(y) };
+				};
+				const pointAt = async (point) => {
+					await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
+					if (document.querySelector('.popover.hover-popover')) previews.open++;
+					for (let i = 0; i < 60 && document.querySelector('.popover.hover-popover'); i++) await sleep(50);
+					if (document.querySelector('.popover.hover-popover')) previews.left++;
+				};
 				const swipe = async (dx, dy = 0, at = null) => {
-					const r = at ?? midRow().getBoundingClientRect();
-					await cdp.sendCommand('Input.synthesizeScrollGesture', { x: Math.round(r.left + Math.min(300, r.width / 2)), y: Math.round(r.top + r.height / 2), xDistance: -dx, yDistance: -dy, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
+					const point = at ? { x: Math.round(at.left + Math.min(300, at.width / 2)), y: Math.round(at.top + at.height / 2) } : plainPoint(midRow());
+					await pointAt(point);
+					await cdp.sendCommand('Input.synthesizeScrollGesture', { x: point.x, y: point.y, xDistance: -dx, yDistance: -dy, speed: 1200, gestureSourceType: 'mouse', preventFling: true });
 					await sleep(250);
 					await frames(3);
 				};
 				const wheelAt = async (el, deltaX, deltaY, modifiers = 0) => {
-					const r = el.getBoundingClientRect();
-					await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(r.left + Math.min(300, r.width / 2)), y: Math.round(r.top + r.height / 2), deltaX, deltaY, modifiers });
+					const point = plainPoint(el);
+					await pointAt(point);
+					await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX, deltaY, modifiers });
 					await sleep(200);
 					await frames(3);
 				};
@@ -3101,8 +3124,7 @@
 				const atBottom = bar0.getBoundingClientRect().bottom;
 				check('Own 18: while the table crosses the pane\'s bottom, the bar sits there, clear of the status bar', Math.abs(atBottom - (paneBottom - inset)) <= 1, { bar: atBottom, paneBottom, inset });
 
-				// A swipe passed on: the table moves as far as the bar, every block together, and the note doesn't move. It missed
-				// once in six section runs on 11/27, stopping at 80 px, with Shift and the wheel then moving nothing; so the wheel
+				// A swipe passed on: the table moves as far as the bar, every block together, and the note doesn't move. The wheel
 				// events are counted as they arrive, by where they land: in a box of this table, which the plugin knows, or not.
 				const wheels = { events: 0, inBox: 0, known: 0, other: [] };
 				const countWheel = (event) => {
@@ -3116,7 +3138,7 @@
 				const topBefore = view.scrollDOM.scrollTop;
 				await swipe(300, 12);
 				window.removeEventListener('wheel', countWheel, true);
-				const after = { scroll: bar0.scrollLeft, moved: moved(), seam: Math.abs(drawnRow(99).cells[0].getBoundingClientRect().left - drawnRow(100).cells[0].getBoundingClientRect().left), top: view.scrollDOM.scrollTop - topBefore, wheels, same: models(view)[0] === big && barOf() === bar0 };
+				const after = { scroll: bar0.scrollLeft, moved: moved(), seam: Math.abs(drawnRow(99).cells[0].getBoundingClientRect().left - drawnRow(100).cells[0].getBoundingClientRect().left), top: view.scrollDOM.scrollTop - topBefore, wheels, previews: { ...previews }, same: models(view)[0] === big && barOf() === bar0 };
 				check('Own 19: a mostly sideways swipe over the table moves it as far as its bar, every block together, and the note not at all', after.scroll > 150 && Math.abs(after.moved - after.scroll) <= 1 && after.seam <= 0.5 && Math.abs(after.top) <= 1, after);
 				// A mostly vertical scroll moves the note, and leaves the table where it is sideways.
 				await swipe(10, 300);
@@ -3132,7 +3154,7 @@
 				await wheelAt(drawnRow(100), 0, 120, 8);
 				window.removeEventListener('wheel', countWheel, true);
 				Object.assign(shiftWheels, wheels);
-				const shifted = { by: bar0.scrollLeft - shiftFrom.scroll, top: view.scrollDOM.scrollTop - shiftFrom.top, wheels: shiftWheels, same: models(view)[0] === big && barOf() === bar0 };
+				const shifted = { by: bar0.scrollLeft - shiftFrom.scroll, top: view.scrollDOM.scrollTop - shiftFrom.top, wheels: shiftWheels, previews: { ...previews }, same: models(view)[0] === big && barOf() === bar0 };
 				check('Own 19: Shift with a mouse wheel moves the table sideways, and the note not at all', shifted.by > 50 && Math.abs(shifted.top) <= 1, shifted);
 				await sleep(150);
 				const zoom = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 80, ctrlKey: true });
@@ -7081,10 +7103,22 @@
 						// Sheds frozen 2 by 2 and moved sideways: a cell open in a pinned row and a frozen column keeps both shadows
 						// at their edges, with the strip under the pinned rows.
 						view.dispatch({ selection: { anchor: 0 } });
-						const shedsAt = view.state.doc.lineAt(named(view, 'Sheds').from);
+						// Sheds' header line is found in the text: after the swipes above, its table can lie outside what CodeMirror
+						// draws, with no table of the plugin's yet, which threw here in 1 of 4 full runs on 11/27. So it's scrolled
+						// to, and waited for, up to 3 s.
+						const text = view.state.doc.toString();
+						const shedsAt = view.state.doc.lineAt(text.indexOf('\n|', text.indexOf('## Sheds')) + 1);
 						view.dispatch({ changes: { from: shedsAt.from + shedsAt.text.indexOf('Name'), insert: '%%freeze 2 2%% ' } });
-						await sleep(500);
-						const sheds = named(view, 'Sheds');
+						view.dispatch({ effects: view.constructor.scrollIntoView(shedsAt.from, { y: 'center' }) });
+						let sheds = null;
+						for (let i = 0; i < 30; i++) {
+							await sleep(100);
+							sheds = named(view, 'Sheds');
+							if (sheds && view.state.doc.lineAt(sheds.from).number === shedsAt.number) break;
+							sheds = null;
+						}
+						if (!sheds) throw new Error(`Own 106: Sheds' table wasn't drawn 3 s after scrolling to it (${models(view).length} tables drawn)`);
+						await sleep(400);
 						view.dispatch({ effects: view.constructor.scrollIntoView(sheds.from, { y: 'center' }) });
 						await sleep(300);
 						await aimTop(view, sheds, 100);

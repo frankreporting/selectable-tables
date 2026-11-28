@@ -20,6 +20,7 @@ import { barPlace, type BarPlace, clampSlide, maxSlide, revealDelta } from './si
 import { type PinHost, Pins, ROW_ATTRIBUTE } from './pins';
 import { showDown } from './pin-sums';
 import { cellPlace } from './cell-write';
+import { hoverLinksAsEditor } from './hover-links';
 import { ACTIVE_COLUMN_CLASS, ACTIVE_ROW_CLASS, addButtons, addGrips, BUTTONS, gripOf, GRIPS, tableControls } from './grips';
 import type { DragTable } from './drag';
 import { columnExtents, type DragArea, type Extent } from './drag-sums';
@@ -1414,6 +1415,8 @@ export class Model implements Span, DrawnTable, DragTable {
 		};
 		dom.addEventListener('load', loaded, true);
 		dom.addEventListener('loadedmetadata', loaded, true);
+		// A link's preview needs Cmd, as in the note's text.
+		hoverLinksAsEditor(dom, this.app, () => this.view);
 		// The + buttons, below the table and at its side, as Obsidian's table has them.
 		addButtons(wrapper, (what) => tableControls()?.add(this, what));
 		dom.toggleClass('is-selected', this.selected);

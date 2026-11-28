@@ -3075,10 +3075,10 @@
 					const middle = pane().top + view.scrollDOM.clientHeight / 2;
 					return big.drawnRows().map((entry) => entry.tr).filter((tr) => tr.isConnected).sort((a, b) => Math.abs(a.getBoundingClientRect().top - middle) - Math.abs(b.getBoundingClientRect().top - middle))[0];
 				};
-				// A point on a row's own text, off its links: the pointer resting on a link opens its preview over the table, which
-				// then takes the wheel events, as it did for 2 of 7 swipes on 11/27. Previews there should need Cmd, as in
-				// Obsidian's table (BMT-143), and that gets a check of its own. Each swipe and wheel first moves the pointer there,
-				// and counts a preview open at that moment, so a miss shows whether one took the swipe.
+				// A point on a row's own text, off its links: a preview open over the table takes the wheel events, as one did for 2
+				// of 7 swipes on 11/27, when a link's preview opened with no key held. Since BMT-143 one needs Cmd, as in the note's
+				// text (Own 210 to Own 219). Each swipe and wheel first moves the pointer there, and counts a preview open at that
+				// moment, so a miss shows whether one took the swipe.
 				const previews = { open: 0 };
 				const plainPoint = (tr) => {
 					const box = shownBoxes(big)[0]?.parentElement?.getBoundingClientRect();
@@ -10893,6 +10893,213 @@
 						await closeMenus();
 						await key('Escape');
 						await key('Escape');
+
+						// --- Hovering a link (BMT-143): the pointer resting on a link in a cell of the plugin's table shows its preview only
+						// with Cmd held, as a link in the note's text does, or as Page preview's Editing view switch says, and never with
+						// Page preview off in Core plugins. Real pointer moves and keys through the window's debugger, in Links in cells.
+						// The switch is set in memory, and the core plugin turned off and on through app.internalPlugins, not Settings,
+						// which opens a window of its own; both are put back.
+						{
+							view = await open('Links in cells');
+							await sleep(400);
+							await key('Escape');
+							await key('Escape');
+							const heard = [];
+							const hoverRef = app.workspace.on('hover-link', (info) => heard.push({ source: info.source, linktext: info.linktext, sourcePath: info.sourcePath }));
+							const pagePreview = app.internalPlugins.getPluginById('page-preview');
+							const options = () => pagePreview?.instance?.options ?? {};
+							const hadEditor = Object.hasOwn(options(), 'editor');
+							const wasEditor = options().editor;
+							const previewsShown = () => Array.from(document.querySelectorAll('.popover.hover-popover')).filter((p) => p.isConnected);
+							// The middle of a link's first line: a link that wraps, as Cell moves does in an open cell, has a box whose middle is
+							// off it.
+							const onLink = (el) => {
+								const r = el.getClientRects()[0] ?? el.getBoundingClientRect();
+								return { x: r.left + Math.min(r.width / 2, 20), y: r.top + r.height / 2 };
+							};
+							const moveTo = async ({ x, y }, meta = false) => {
+								await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(x), y: Math.round(y), modifiers: meta ? 4 : 0 });
+								await sleep(30);
+							};
+							const pressMeta = async () => {
+								const event = { key: 'Meta', code: 'MetaLeft', windowsVirtualKeyCode: 91 };
+								await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'rawKeyDown', modifiers: 4 });
+								await cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp', modifiers: 0 });
+							};
+							const shownWithin = async (ms) => {
+								const end = performance.now() + ms;
+								while (performance.now() < end) {
+									if (previewsShown().length) return true;
+									await sleep(100);
+								}
+								return previewsShown().length > 0;
+							};
+							const fernLink = () => garden()?.drawnCell({ row: 1, column: 0 })?.querySelector('a.internal-link') ?? null;
+							// Off every link: Kitchen, the cell beside Fern.
+							const leave = async () => {
+								const kitchen = garden()?.drawnCell({ row: 1, column: 1 });
+								if (kitchen) await moveTo(middle(kitchen));
+								for (let i = 0; i < 30 && previewsShown().length; i++) await sleep(100);
+								// A preview the pointer left closes after a moment; one still open is closed here.
+								for (const leaf of app.workspace.getLeavesOfType('markdown')) leaf.view.hoverPopover?.hide();
+								await sleep(100);
+							};
+							// Rests the pointer on a link, from off it, and says whether a preview opened and what Page preview heard.
+							const hover = async (link, { meta = false, thenMeta = false, wait = 1500 } = {}) => {
+								await leave();
+								heard.length = 0;
+								if (!link) return { link: false };
+								const at = onLink(link);
+								const hit = document.elementFromPoint(at.x, at.y)?.closest('a') === link;
+								await moveTo(at, meta);
+								if (thenMeta) {
+									await sleep(300);
+									await pressMeta();
+								}
+								const shown = await shownWithin(wait);
+								return { hit, shown, sources: heard.map((h) => h.source), first: heard[0] ?? null };
+							};
+							try {
+								garden().showCell({ row: 1, column: 0 });
+								await sleep(300);
+								await frames(2);
+								// Step 1 to 3: no key, Cmd held, and Cmd pressed while resting.
+								const plain = await hover(fernLink());
+								check('Own 210: resting the pointer on Fern with no key held opens no preview, and Page preview hears the link as the editor\'s, Watering schedule from Links in cells', plain.hit && !plain.shown && plain.sources.length >= 1 && plain.sources.every((s) => s === 'editor') && plain.first?.linktext === 'Watering schedule' && plain.first?.sourcePath === 'Links in cells.md', plain);
+								// What the block's listener costs a pointer moving inside a link, where it stops the event and sends nothing:
+								// 500 mouseovers on Fern from Fern itself, for the speed budget.
+								{
+									const link = fernLink();
+									const start = performance.now();
+									for (let i = 0; i < 500; i++) link?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: link }));
+									const each = (performance.now() - start) / 500;
+									results.push({ name: 'Own 219 a mouseover inside a link of the plugin\'s table, the block\'s listener stopping it (ms each, of 500)', ok: true, detail: Math.round(each * 10000) / 10000 });
+								}
+								const held = await hover(fernLink(), { meta: true });
+								check('Own 211: resting on Fern with Cmd held opens its preview', held.hit && held.shown && held.sources.every((s) => s === 'editor'), held);
+								const pressed = await hover(fernLink(), { thenMeta: true });
+								check('Own 212: resting on Fern with no key, then pressing Cmd, opens its preview', pressed.hit && pressed.shown, pressed);
+
+								// Step 4: the Editing view switch off, then Page preview off in Core plugins.
+								options().editor = false;
+								const switchOff = await hover(fernLink());
+								if (hadEditor) options().editor = wasEditor;
+								else delete options().editor;
+								check('Own 213: with Page preview\'s Editing view switch off, resting on Fern with no key opens its preview', switchOff.hit && switchOff.shown, switchOff);
+								pagePreview.disable();
+								await sleep(200);
+								const pluginOff = await hover(fernLink(), { meta: true });
+								await pagePreview.enable();
+								await sleep(200);
+								check('Own 214: with Page preview off in Core plugins, resting on Fern with Cmd held opens no preview; it\'s back on after', pluginOff.hit && !pluginOff.shown && pagePreview.enabled, { ...pluginOff, enabled: pagePreview.enabled });
+
+								// Step 6: a click and a right-click on the link work as before.
+								await leave();
+								opened.length = 0;
+								const fernAt = onLink(fernLink());
+								await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(fernAt.x), y: Math.round(fernAt.y), button: 'left', clickCount: 1 });
+								await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: Math.round(fernAt.x), y: Math.round(fernAt.y), button: 'left', clickCount: 1 });
+								await sleep(300);
+								const clicked = opened.splice(0);
+								await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(fernAt.x), y: Math.round(fernAt.y), button: 'right', clickCount: 1 });
+								await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: Math.round(fernAt.x), y: Math.round(fernAt.y), button: 'right', clickCount: 1 });
+								await sleep(300);
+								const rightTitles = menusShown().flatMap(titlesOf);
+								await closeMenus();
+								check('Own 215: a click on Fern still opens Watering schedule, and a right-click still shows the link\'s items', JSON.stringify(clicked) === JSON.stringify([['note', 'Watering schedule', 'Links in cells.md', false]]) && rightTitles.includes('Open in new tab'), { clicked, rightTitles });
+								await key('Escape');
+								await key('Escape');
+
+								// Step 5: a link in Beds' pinned header.
+								const beds = () => tableAt(view, 'Beds');
+								const bedsLine = view.state.doc.lineAt(beds().from).number;
+								view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.line(bedsLine + 20).from, { y: 'start' }) });
+								await sleep(600);
+								await frames(4);
+								const pinnedHeader = () => beds().drawnCell({ row: 0, column: 0 });
+								const pinnedLink = () => pinnedHeader()?.querySelectorAll('a.internal-link')[1] ?? null;
+								// A short table pins its own header row: then the cell drawn is its own, at the pane's top.
+								const pinnedNow = !!pinnedHeader() && (pinnedHeader() !== beds().cellElement({ row: 0, column: 0 }) || Math.abs(pinnedHeader().getBoundingClientRect().top - (view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.clientTop)) < 60);
+								const leaveBeds = async () => {
+									const water = beds().drawnCell({ row: 0, column: 1 });
+									if (water) await moveTo(middle(water));
+									for (let i = 0; i < 30 && previewsShown().length; i++) await sleep(100);
+									for (const leaf of app.workspace.getLeavesOfType('markdown')) leaf.view.hoverPopover?.hide();
+									await sleep(100);
+								};
+								await leaveBeds();
+								heard.length = 0;
+								const pinAt = pinnedLink() && onLink(pinnedLink());
+								const pinHit = !!pinAt && document.elementFromPoint(pinAt.x, pinAt.y)?.closest('a') === pinnedLink();
+								if (pinAt) await moveTo(pinAt);
+								const pinPlain = { hit: pinHit, shown: await shownWithin(1500), sources: heard.map((h) => h.source), linktext: heard[0]?.linktext };
+								await leaveBeds();
+								heard.length = 0;
+								if (pinAt) await moveTo(pinAt, true);
+								const pinHeld = { shown: await shownWithin(1500), sources: heard.map((h) => h.source) };
+								await leaveBeds();
+								check('Own 216: on Cell moves in Beds\' pinned header, no preview opens with no key, and its preview opens with Cmd held', pinnedNow && pinPlain.hit && !pinPlain.shown && pinPlain.linktext === 'Cell moves' && pinHeld.shown && [...pinPlain.sources, ...pinHeld.sources].every((s) => s === 'editor'), { pinnedNow, pinPlain, pinHeld });
+
+								// Step 7: an open cell's links, the editor's already.
+								view.dispatch({ selection: { anchor: 0 }, effects: view.constructor.scrollIntoView(0, { y: 'start' }) });
+								await sleep(400);
+								await selectPlant(3);
+								await key('Enter');
+								await sleep(300);
+								const cellView = preview.openCell(view)?.view;
+								const inCell = cellView ? Array.from(cellView.dom.querySelectorAll('.cm-hmd-internal-link')).find((span) => span.textContent.includes('Cell moves')) : null;
+								await leave();
+								heard.length = 0;
+								const cellAt = inCell && onLink(inCell);
+								const cellHit = !!cellAt && document.elementFromPoint(cellAt.x, cellAt.y)?.closest('.cm-hmd-internal-link') === inCell;
+								if (cellAt) await moveTo(cellAt, true);
+								const cellHeld = { open: !!cellView, span: !!inCell, hit: cellHit, shown: await shownWithin(1500), sources: heard.map((h) => h.source) };
+								await leave();
+								await key('Escape');
+								await key('Escape');
+								check('Own 217: in Balcony\'s open link cell, resting on Cell moves with Cmd held opens its preview, as before', cellHeld.open && cellHeld.span && cellHeld.hit && cellHeld.shown && cellHeld.sources.includes('editor'), cellHeld);
+
+								// For reference, not a pass: Obsidian's own table, which reports its links as Reading view's.
+								preview.use(false);
+								await sleep(500);
+								view = await open('Links in cells');
+								await sleep(500);
+								const stockFern = view.contentDOM.querySelector(':scope > .cm-table-widget')?.querySelector('table')?.rows[1]?.cells[0]?.querySelector('a.internal-link') ?? null;
+								const stockKitchen = view.contentDOM.querySelector(':scope > .cm-table-widget')?.querySelector('table')?.rows[1]?.cells[1];
+								if (stockKitchen) await moveTo(middle(stockKitchen));
+								await sleep(300);
+								heard.length = 0;
+								if (stockFern) await moveTo(onLink(stockFern));
+								const stock = { link: !!stockFern, shown: await shownWithin(1500), sources: heard.map((h) => h.source) };
+								if (stockKitchen) await moveTo(middle(stockKitchen));
+								for (let i = 0; i < 30 && previewsShown().length; i++) await sleep(100);
+								for (const leaf of app.workspace.getLeavesOfType('markdown')) leaf.view.hoverPopover?.hide();
+								// And in Obsidian's own open cell, Cell moves in Balcony's link cell with Cmd held: a press at the cell's end opens it.
+								const stockBalcony = view.contentDOM.querySelector(':scope > .cm-table-widget')?.querySelector('table')?.rows[3]?.cells[0];
+								if (stockBalcony) await pointAt(middle(stockBalcony, -6));
+								await sleep(300);
+								const stockSpan = Array.from(view.contentDOM.querySelectorAll(':scope > .cm-table-widget .cm-editor .cm-hmd-internal-link')).find((span) => span.textContent.includes('Cell moves')) ?? null;
+								if (stockKitchen) await moveTo(middle(stockKitchen));
+								await sleep(300);
+								heard.length = 0;
+								if (stockSpan) await moveTo(onLink(stockSpan), true);
+								stock.openCell = { span: !!stockSpan, shown: await shownWithin(1500), sources: heard.map((h) => h.source) };
+								if (stockKitchen) await moveTo(middle(stockKitchen));
+								for (let i = 0; i < 30 && previewsShown().length; i++) await sleep(100);
+								for (const leaf of app.workspace.getLeavesOfType('markdown')) leaf.view.hoverPopover?.hide();
+								await key('Escape');
+								await key('Escape');
+								results.push({ name: 'Own 218 Obsidian\'s own table, for reference: resting on Fern with no key, and on Cell moves in its open cell with Cmd held, whether a preview opened and the sources Page preview heard', ok: true, detail: stock });
+								preview.use(true);
+								await sleep(400);
+							} finally {
+								app.workspace.offref(hoverRef);
+								if (hadEditor) options().editor = wasEditor;
+								else delete options().editor;
+								if (pagePreview && !pagePreview.enabled) await pagePreview.enable();
+								for (const leaf of app.workspace.getLeavesOfType('markdown')) leaf.view.hoverPopover?.hide();
+							}
+						}
 
 						// Step 8: Obsidian's own table keeps Obsidian's commands: its open cell opens the link at the caret.
 						preview.use(false);

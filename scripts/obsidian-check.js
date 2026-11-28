@@ -3077,7 +3077,7 @@
 				};
 				// A point on a row's own text, off its links: a preview open over the table takes the wheel events, as one did for 2
 				// of 7 swipes on 11/27, when a link's preview opened with no key held. Since BMT-143 one needs Cmd, as in the note's
-				// text (Own 210 to Own 218). Each swipe and wheel first moves the pointer there, and counts a preview open at that
+				// text (Own 210 to Own 219). Each swipe and wheel first moves the pointer there, and counts a preview open at that
 				// moment, so a miss shows whether one took the swipe.
 				const previews = { open: 0 };
 				const plainPoint = (tr) => {

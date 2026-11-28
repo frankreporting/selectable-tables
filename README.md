@@ -73,6 +73,8 @@ With Vim mode on, Vim's own keys come first in normal mode.
 
 Obsidian's own table controls work as before: the right-click menus for a cell and a range of cells, the drag handles, the **+** buttons and the table commands.
 
+A link in a cell shows its preview on hover only with Cmd held, as a link in the note's text does, or as **Settings › Page preview › Editing view** says.
+
 ## Freeze rows and columns
 
 A long or wide table can keep its first rows and columns in view as you scroll, as in a spreadsheet. Any number of tables in a note can freeze. While cells pass under them, a soft shadow shows where the frozen rows and columns end. **On phones and tablets, a frozen table scrolls as usual for now: its rows and columns don't pin there.**
